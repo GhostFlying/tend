@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/scheduler"
 	"github.com/GhostFlying/tend/internal/store"
@@ -193,15 +196,20 @@ func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx, end f
 			if m.State != "assigned" {
 				continue
 			}
-			pending, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
-			if err != nil {
-				return err
-			}
 			var nativeUnknown bool
 			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_requests n JOIN runs r USING(run_id) WHERE r.task_id=? AND n.status IN ('started','unknown') AND n.method NOT IN ('models','find','usage'))`, r.TaskID).Scan(&nativeUnknown); err != nil {
 				return err
 			}
-			pending = pending || nativeUnknown
+			if nativeUnknown {
+				continue
+			}
+			if err := consumePausedManagerDisconnect(ctx, x, tx, r, m); err != nil {
+				return err
+			}
+			pending, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
+			if err != nil {
+				return err
+			}
 			if pending {
 				continue
 			}
@@ -287,4 +295,70 @@ func (a *App) nativePausePredecessor(ctx context.Context, run string) (string, e
 		return nil
 	})
 	return parent, err
+}
+
+// consumePausedManagerDisconnect applies only the connection end of a proved
+// stopped pause predecessor. There is no native thread to deliver this marker
+// to, and there is no business event or receipt to reconstruct.
+func consumePausedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, m store.IssueManagerTask) error {
+	if r.ObservedState != protocol.RunFinished || m.Pin == nil || m.HostID != r.HostID {
+		return nil
+	}
+	closeID, sequence, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), r.RunID)
+	if err != nil || !stopped || closeID == "" || sequence <= 0 {
+		return err
+	}
+	var raw, leaseID string
+	err = tx.Q().QueryRowContext(ctx, `SELECT e.body_json,l.lease_id
+	 FROM manager_native_events e JOIN leases l USING(run_id)
+	 WHERE e.run_id=? AND e.seq=? AND e.applied=0 AND l.status='released' AND l.host_id=?
+	 AND NOT EXISTS(SELECT 1 FROM manager_native_events other WHERE other.run_id=e.run_id
+	     AND (other.seq>e.seq OR (other.seq<e.seq AND other.applied=0)))`, r.RunID, sequence, r.HostID).Scan(&raw, &leaseID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	pin, err := store.GetRunExecution(ctx, tx.Q(), r.RunID)
+	if err != nil || pin == nil || *pin != *m.Pin || pin.Validate(r.HostID) != nil {
+		return err
+	}
+	pending, err := managerBusinessReceiptsPending(ctx, tx.Q(), r.RunID)
+	if err != nil || pending {
+		return err
+	}
+	body, err := store.ResolveJSON(ctx, tx.Q(), raw)
+	if err != nil {
+		// Unavailable evidence leaves this pause pending. Unrelated claims
+		// can still proceed and the normal history reader retains the row.
+		return ctx.Err()
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(body), &fields) != nil || string(fields["disconnected"]) != "true" {
+		return nil
+	}
+	delete(fields, "disconnected")
+	if string(fields["sequence"]) == "0" {
+		delete(fields, "sequence")
+	}
+	if string(fields["thread_id"]) == `""` {
+		delete(fields, "thread_id")
+	}
+	if len(fields) != 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND applied=0`, r.RunID, sequence); err != nil {
+		return err
+	}
+	hash, derived := store.EventOriginalSHA256(raw)
+	if !derived {
+		hash = closedFactHash([]byte(body))
+	}
+	audit, err := json.Marshal(map[string]any{"lease_id": leaseID, "stop_request_id": closeID, "sequence": sequence, "sha256": hash})
+	if err != nil {
+		return err
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "run", ObjectID: r.RunID, Kind: "run.manager_pause_disconnect_applied", BodyJSON: string(audit), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
+	return err
 }
