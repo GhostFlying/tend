@@ -43,7 +43,7 @@
 .tooltip {
   display: none;
   position: absolute;
-  z-index: 2;
+  z-index: var(--z-raised);
   inset: 100% 0 auto auto;
   width: max-content;
   max-width: min(240px, calc(100vw - 32px));
