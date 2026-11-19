@@ -137,10 +137,15 @@ func (r *Runner) recoverPauseStop(ctx, runCtx context.Context, a *active, run jo
 	}
 	// A native result may already be durable even though closure previously
 	// prevented it from entering worker_done. Settle it before yielding.
-	// Stop and takeover can interrupt this check without cancelling the
-	// physical-stop checkpoint above or the eventual terminal receipt.
-	controlCtx, release := r.withResultControl(runCtx, a)
-	defer release()
+	// Stop can interrupt result recovery. Takeover also stops acceptance
+	// uploads. Local implementation recovery may still checkpoint its
+	// result for finalization after handback.
+	controlCtx := runCtx
+	if as.Role == protocol.RoleAccept {
+		var release func()
+		controlCtx, release = r.withResultControl(runCtx, a)
+		defer release()
+	}
 	resultCtx, stopIdle := boundPauseResultIdle(controlCtx, r.cfg.RequestTimeout)
 	defer stopIdle()
 	recovered, err := r.reconcileAcceptanceVerdict(resultCtx, as)
