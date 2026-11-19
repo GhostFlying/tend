@@ -217,7 +217,7 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
         assert rows("select journal_id from runner_journal_runs where run_id=?", (lease(tasks[2])[0][0],)) == [(current["current_journal"],)]
         run(cli, "resume", tasks[3])
         assert not lease(tasks[3])
-        finish = [(tasks[0], first_gate, oldpid), (tasks[1], middle_gate, middle["pid"])]
+        finish = [(original_lease[0], first_gate, oldpid), (middle_lease[0], middle_gate, middle["pid"])]
         if next_window:
             ordinary = subprocess.run([cli, "upgrade", "start", "--socket", root / "server.sock",
                                        "--release", next_window, "--server-only"], env=env, capture_output=True, timeout=120)
@@ -239,10 +239,10 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
             eventually("unrelated queued work obtains the released physical slot", lambda: lease(tasks[3]), [])
             assert rows("select journal_id from runner_journal_runs where run_id=?", (lease(tasks[3])[0][0],)) == [(current["current_journal"],)]
             finish = finish[1:]
-        for task, gate, pid in finish:
+        for run_id, gate, pid in finish:
             with os.fdopen(os.open(gate, os.O_WRONLY | os.O_NONBLOCK), "w") as f:
                 print("complete", file=f)
-            eventually("original report committed", lambda: rows("select count(*) from artifacts where run_id=?", (lease(task)[0][0],)) == [(1,)], [])
+            eventually("original report committed", lambda: rows("select count(*) from artifacts where run_id=?", (run_id,)) == [(1,)], [])
             eventually("exact drained process acknowledged", lambda: rows(
                 "select 1 from runner_retirements where confirmed_at is not null and json_extract(process_json,'$.pid')=?", (pid,)), [])
             assert not any(p["process"]["pid"] == pid for p in read_state().get("draining_processes", {}).values()) or eventually(
