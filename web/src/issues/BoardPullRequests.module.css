@@ -104,3 +104,18 @@
     min-width: 44px;
   }
 }
+
+@media (max-width: 360px) {
+  .list .link {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+
+  .list .icon {
+    grid-row: span 2;
+  }
+
+  .status {
+    grid-column: 2 / -1;
+  }
+}
