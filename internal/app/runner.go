@@ -1261,6 +1261,14 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				return err
 			}
 			res.Control = &c
+			if payload.Runtime.JournalID != "" && c.Mode == protocol.RunnerNormal {
+				work, workErr := retiredJournalWork(ctx, q, host.HostID, payload.Runtime)
+				if workErr != nil {
+					a.log.WarnContext(ctx, "retired journal discovery deferred", "host", host.HostID, "err", workErr)
+				} else {
+					res.RetiredWork = work
+				}
+			}
 			if runtimeSupportsAgentContinuation(payload.Runtime) {
 				res.RetainedExecutions, err = store.RequiredAgentExecutions(ctx, q, host.HostID)
 				if err != nil {

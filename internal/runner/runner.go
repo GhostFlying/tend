@@ -209,6 +209,7 @@ type Runner struct {
 	control                         protocol.RunnerControl
 	controlLoaded                   bool
 	repositoryBindingsSupported     bool
+	retiredWork                     map[string]protocol.RetiredJournalWork
 	bootstrapMaintenance            bool
 	updaterMu                       sync.Mutex
 	cancelledUpdaterID              string
@@ -346,12 +347,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}
+	if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {
+		r.wg.Go(func() { r.maintainRetiredJournals(ctx) })
+	}
 	if len(r.cfg.RolloutRoots) > 0 {
 		r.wg.Go(func() { r.rolloutPreviews(ctx) })
 		r.wg.Go(func() { r.rolloutArchives(ctx) })
-		if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {
-			r.wg.Go(func() { r.retiredRolloutArchives(ctx) })
-		}
 	}
 	if r.cfg.Executions != nil {
 		r.requestReconcile()
@@ -1029,6 +1030,9 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	if err := json.Unmarshal(op.Result, &res); err != nil {
 		return
 	}
+	r.mu.Lock()
+	r.retiredWork = res.RetiredWork
+	r.mu.Unlock()
 	r.acceptHistoryReads(ctx, res.HistoryReads, res.HistoryAcknowledged)
 	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)

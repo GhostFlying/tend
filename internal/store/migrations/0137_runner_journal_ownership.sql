@@ -19,6 +19,7 @@ CREATE TABLE runner_retirements (
  host_id TEXT NOT NULL REFERENCES hosts(host_id),
  instance_id TEXT NOT NULL,
  upgrade_id TEXT NOT NULL REFERENCES upgrades(upgrade_id),
+ journal_id TEXT NOT NULL,
  authorization_id TEXT NOT NULL UNIQUE,
  process_json TEXT NOT NULL,
  confirmed_at INTEGER,

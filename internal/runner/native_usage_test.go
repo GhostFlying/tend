@@ -113,6 +113,49 @@ func TestNativeUsageNegotiationAndUncertainReceiptKeepDurableUpload(t *testing.T
 	}
 }
 
+func TestAcceptingRunnerReplaysRetiredUsageWithOriginalRequest(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.JournalRoot = t.TempDir()
+	original, err := journal.Open(t.Context(), filepath.Join(r.cfg.JournalRoot, "journal.db"), r.cfg.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := protocol.Envelope{RequestID: "old-usage", Operation: protocol.OpRunnerUsageUpload, Target: protocol.Target{Type: "host", ID: "host"}, Payload: json.RawMessage(`{"run_id":"historical"}`)}
+	if err := original.PutRequest(t.Context(), journal.Request{Envelope: env}); err != nil {
+		t.Fatal(err)
+	}
+	if err := original.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var input protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&input); err != nil || input.RequestID != env.RequestID || string(input.Payload) != string(env.Payload) {
+			t.Errorf("unexpected retired upload %+v, err=%v", input, err)
+		}
+		calls++
+		result := protocol.Operation{RequestID: input.RequestID, Status: protocol.OpAccepted}
+		if calls == 2 {
+			result.Status = protocol.OpSucceeded
+		}
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &result})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	r.nativeUsageSupported = true
+	cursor, err := r.serviceRetiredJournal(t.Context(), "", retiredCursor{}, protocol.RetiredJournalWork{})
+	if err == nil || cursor.usageDone {
+		t.Fatal("unconfirmed receipt settled historical usage", cursor, err)
+	}
+	cursor, err = r.serviceRetiredJournal(t.Context(), "", cursor, protocol.RetiredJournalWork{})
+	if err != nil || !cursor.usageDone || calls != 2 {
+		t.Fatal(cursor, err, calls)
+	}
+	if pending, err := r.cfg.Journal.Requests(t.Context()); err != nil || len(pending) != 0 {
+		t.Fatal("historical request escaped into the accepting journal", pending, err)
+	}
+}
+
 func TestSettledUsageHistoryIsNotReadOrRegisteredAgain(t *testing.T) {
 	r := controlRunner(t)
 	r.nativeUsageSupported = true

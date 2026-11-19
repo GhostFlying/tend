@@ -104,7 +104,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
 		result.Allowed = true
 		result.ReadySequence = rt.Sequence
-		_, err = tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,authorization_id,process_json) VALUES(?,?,?,?,?)`, host, process.LaunchID, input.UpgradeID, result.AuthorizationID, string(raw))
+		_, err = tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json) VALUES(?,?,?,?,?,?)`, host, process.LaunchID, input.UpgradeID, rt.JournalID, result.AuthorizationID, string(raw))
 		if err != nil {
 			return Outcome{}, err
 		}

@@ -138,6 +138,11 @@ func TestWorkspaceReconcileRejectsOwnerPrincipal(t *testing.T) {
 }
 
 func TestRollingWorkspaceReleaseKeepsPredecessorProofUntilAcceptanceEnds(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "durable early proof", true: "pre-migration release deferred"}[legacy], func(t *testing.T) { testRollingWorkspaceRelease(t, legacy) })
+	}
+}
+func testRollingWorkspaceRelease(t *testing.T, legacy bool) {
 	h := newDeliverableHarness(t)
 	task := h.createReportTask("accept on successor", temporaryReportSpec())
 	impl, _, _ := h.claimDeliverableRun()
@@ -146,7 +151,7 @@ func TestRollingWorkspaceReleaseKeepsPredecessorProofUntilAcceptanceEnds(t *test
 	if op.Error != nil {
 		t.Fatal(op)
 	}
-	if h.releaseResource(task.TaskID, impl.Workspace.ID) {
+	if !legacy && h.releaseResource(task.TaskID, impl.Workspace.ID) {
 		t.Fatal("released occupied workspace before acceptance")
 	}
 	accept, ok, _ := h.claimDeliverableRun()
@@ -160,6 +165,16 @@ func TestRollingWorkspaceReleaseKeepsPredecessorProofUntilAcceptanceEnds(t *test
 			return err
 		}
 		runtime.Runtime.JournalID = "successor"
+		if legacy {
+			// The released server had no per-journal release proof. Retirement itself
+			// is seeded here; the systemd fixture drives the physical transition.
+			if _, err = tx.Exec(t.Context(), `INSERT INTO upgrades(upgrade_id,release_id,revision,status,phase,state_json,created_at,updated_at) VALUES('install','bundle',1,'completed','completed','{}',1,1)`); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(t.Context(), `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json,confirmed_at) VALUES('linux-1','old','install','','stop','{}',1)`); err != nil {
+				return err
+			}
+		}
 		if err = tx.PutHostRuntime(t.Context(), "linux-1", runtime); err != nil {
 			return err
 		}
@@ -174,6 +189,26 @@ func TestRollingWorkspaceReleaseKeepsPredecessorProofUntilAcceptanceEnds(t *test
 	}
 	proof := protocol.WorkspaceRelease{WorkspaceID: impl.Workspace.ID, TaskID: task.TaskID, JournalID: "successor"}
 	op = h.exec(runner("linux-1"), h.env(protocol.OpWorkspaceRelease, protocol.Target{Type: "workspace", ID: impl.Workspace.ID}, proof, nil), ReleaseWorkspace{})
+	if legacy {
+		if op.Error != nil || h.resourceForTask(task.TaskID).OccupiedBy != task.TaskID {
+			t.Fatal("successor skipped historical proof", op)
+		}
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			work, err := retiredJournalWork(t.Context(), tx.Q(), "linux-1", &protocol.RunnerRuntime{JournalID: "successor"})
+			if err == nil && !work[""].Workspace {
+				t.Error("retained journal not offered reconciliation", work)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if resources := h.reconcileResources("linux-1"); len(resources) != 1 || len(resources[0].RunIDs) != 1 || resources[0].RunIDs[0] != impl.RunID {
+			t.Fatal("original execution not offered to retained journal", resources)
+		}
+		if !h.releaseResource(task.TaskID, impl.Workspace.ID) {
+			t.Fatal("verified original proof failed to release resource")
+		}
+	}
 	if op.Error != nil || h.resourceForTask(task.TaskID).OccupiedBy != "" {
 		t.Fatal("predecessor proof lost while its task was still bound", op)
 	}
