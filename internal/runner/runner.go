@@ -1091,12 +1091,22 @@ func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.R
 func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	refs := make([]protocol.LeaseRef, 0, len(r.active))
+	observePauseControl := false
 	for id, a := range r.active {
-		if !a.retained && !a.pauseOnly {
+		switch {
+		case a.retained:
+		case !a.pauseOnly:
 			refs = append(refs, protocol.LeaseRef{RunID: id, LeaseID: a.as.LeaseID})
+		case a.desired == protocol.DesiredPaused && a.stopCollection != nil:
+			// A progressing acceptance upload may outlast the heartbeat
+			// interval. Get control through Hello without renewing its lease.
+			observePauseControl = true
 		}
 	}
 	r.mu.Unlock()
+	if observePauseControl {
+		r.requestReconcile()
+	}
 	runtime, err := r.runtimeObservation(ctx)
 	if err != nil {
 		return
