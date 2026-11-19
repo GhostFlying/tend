@@ -163,13 +163,32 @@ func TestClaimWriteObservationCountsOnlyDueStoppedExternalWait(t *testing.T) {
 	h, runtime, as, other := externalWaitFixture(t)
 	wait := waitForTask(t, h, as, other, 0)
 	var claim store.WriteObservation
-	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
+	var tick time.Duration
+	store.WithWriteObserver(func() time.Time {
+		tick += time.Millisecond
+		return time.Unix(0, int64(tick))
+	}, 0, func(o store.WriteObservation) {
 		if o.Source.Operation == protocol.OpRunnerClaim {
 			claim = o
 		}
 	})(h.store)
 	checkCount := func(want int) {
 		t.Helper()
+		var refresh, children time.Duration
+		for _, p := range claim.Phases {
+			switch p.Phase {
+			case store.WriteClaimRefresh:
+				refresh = p.Duration
+			case store.WritePauseContinuations, store.WriteExternalWaitRefresh, store.WriteIssueManagerRefresh:
+				if p.Duration != time.Millisecond {
+					t.Fatalf("%s took %s on the diagnostic clock, want one measured invocation", p.Phase, p.Duration)
+				}
+				children += p.Duration
+			}
+		}
+		if children <= 0 || children > refresh {
+			t.Fatalf("claim refresh subphases total %s outside inclusive parent %s", children, refresh)
+		}
 		for _, p := range claim.Phases {
 			if p.Phase != store.WriteExternalWaitRefresh || p.Items == nil {
 				continue

@@ -348,15 +348,16 @@ func settleExternalWaitStopped(ctx context.Context, x *Exec, tx *store.Tx, r sto
 }
 
 func refreshExternalWaits(ctx context.Context, x *Exec, tx *store.Tx) error {
-	_, err := refreshExternalWaitsChanged(ctx, x, tx)
+	_, err := refreshExternalWaitsChanged(ctx, x, tx, nil)
 	return err
 }
 
-func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx) (bool, error) {
+func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end func(int)) (bool, error) {
 	changed := false
-	end := tx.ObserveCountedPhase(store.WriteExternalWaitRefresh)
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM run_external_waits WHERE status='waiting' AND next_check_at<=? ORDER BY next_check_at,run_id LIMIT 100`, x.Now.UnixMilli())
-	defer end(len(ids))
+	if end != nil {
+		defer end(len(ids))
+	}
 	if err != nil {
 		return false, err
 	}
@@ -529,7 +530,7 @@ func (a *App) SweepExternalWaits(ctx context.Context) error {
 		}
 		x := &Exec{Env: &protocol.Envelope{RequestID: a.ids.New(protocol.PrefixRequest)}, Now: now, IDs: a.ids}
 		var err error
-		changed, err = refreshExternalWaitsChanged(ctx, x, tx)
+		changed, err = refreshExternalWaitsChanged(ctx, x, tx, nil)
 		return err
 	})
 	if err == nil && changed {

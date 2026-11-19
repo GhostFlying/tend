@@ -22,7 +22,7 @@ func prepareIssueReopen(ctx context.Context, x *Exec, tx *store.Tx, issue protoc
 			return nil, err
 		}
 	}
-	if err := refreshIssueManagerTasks(ctx, x, tx, issue.IssueID); err != nil {
+	if err := refreshIssueManagerTasks(ctx, x, tx, issue.IssueID, nil); err != nil {
 		return nil, err
 	}
 	var unsettled bool
