@@ -204,7 +204,13 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		}
 		return s.save()
 	}
-	if err := s.validateBoundedRunnerData(p.Journal); err != nil {
+	sourceJournal := s.state.CurrentJournal
+	prior := s.state.Operation
+	recoveringRolling := prior != nil && !done(prior) && prior.Rolling != nil && (validIdentity(p.Source) && prior.CandidateProcess == p.Source || p.SourceOperation != nil && p.SourceOperation.OperationID == prior.ID)
+	if recoveringRolling {
+		sourceJournal = prior.LaunchID
+	}
+	if err := validateBoundedRunnerData(dataConfigForJournal(s.cfg, sourceJournal), p.Journal); err != nil {
 		return err
 	}
 	ownedExit := p.SourceOperation != nil
@@ -312,6 +318,11 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 		}
 		s.state.OperationHistory[original.ID] = *original
 	}
+	if recoveringRolling {
+		if err := s.adoptRollingJournal(prior); err != nil {
+			return err
+		}
+	}
 	s.state.Operation = &Operation{ID: p.Target.UpgradeID, Kind: "upgrade", Binding: p.Target, Previous: previous, PreviousProcess: p.Source, LaunchID: p.Target.ProcessInstanceID, Phase: "bounded_staging", StartedAt: s.opts.Now(), BoundedSourceOwned: sourceSupervised}
 	if ownedExit {
 		s.state.Process = Identity{}
@@ -343,12 +354,12 @@ func (s *Supervisor) AuthorizeBoundedRunnerMaintenance(ctx context.Context, gran
 	return s.boundedEnter("observation_drain", a.Timeouts.DrainMillis)
 }
 
-func (s *Supervisor) validateBoundedRunnerData(data protocol.BoundedDataIdentity) error {
+func validateBoundedRunnerData(cfg Config, data protocol.BoundedDataIdentity) error {
 	if data.Path == "" || !filepath.IsAbs(data.Path) || data.Inode == 0 || data.Incarnation == "" || data.Version <= 0 {
 		return errors.New("updater: complete runner journal identity required")
 	}
 	listed := false
-	for _, path := range s.serviceDataConfig().DataFiles {
+	for _, path := range cfg.DataFiles {
 		if path == data.Path {
 			listed = true
 		}
@@ -499,7 +510,7 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 		if b.SourceExit == nil {
 			return true, errors.New("updater: predecessor exit is not confirmed")
 		}
-		if err := s.validateBoundedRunnerData(s.state.BoundedRunnerGrant.Plan.Journal); err != nil {
+		if err := validateBoundedRunnerData(s.serviceDataConfig(), s.state.BoundedRunnerGrant.Plan.Journal); err != nil {
 			return true, err
 		}
 		op.BackupDir = filepath.Join(s.cfg.StateDir, "backups", op.ID+"-"+b.Authorization.RequestID)

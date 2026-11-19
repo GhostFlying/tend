@@ -1007,19 +1007,28 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 	return nil
 }
 
+// Both ordinary commitment and an explicitly authorized recovery takeover
+// preserve the live predecessor when ownership passes to the new journal.
+func (s *Supervisor) adoptRollingJournal(op *Operation) error {
+	if _, ok := s.opts.Authority.(*HTTPAuthority); ok {
+		authority, err := (journalAuthority{s.cfg}).bridge(op.LaunchID)
+		if err != nil {
+			return err
+		}
+		s.opts.Authority = authority
+	}
+	if s.state.DrainingProcesses == nil {
+		s.state.DrainingProcesses = map[string]DrainingProcess{}
+	}
+	s.state.DrainingProcesses[op.PreviousProcess.LaunchID] = DrainingProcess{Process: op.PreviousProcess, JournalID: s.state.CurrentJournal, UpgradeID: op.ID}
+	s.state.CurrentJournal = op.LaunchID
+	return nil
+}
+
 func (s *Supervisor) commitCandidate(op *Operation) error {
 	if op.Rolling != nil {
-		if s.state.DrainingProcesses == nil {
-			s.state.DrainingProcesses = map[string]DrainingProcess{}
-		}
-		s.state.DrainingProcesses[op.PreviousProcess.LaunchID] = DrainingProcess{Process: op.PreviousProcess, JournalID: s.state.CurrentJournal, UpgradeID: op.ID}
-		s.state.CurrentJournal = op.LaunchID
-		if _, ok := s.opts.Authority.(*HTTPAuthority); ok {
-			authority, err := (journalAuthority{s.cfg}).bridge(op.LaunchID)
-			if err != nil {
-				return err
-			}
-			s.opts.Authority = authority
+		if err := s.adoptRollingJournal(op); err != nil {
+			return err
 		}
 	}
 	s.state.Current, s.state.Process = op.Candidate, op.CandidateProcess
