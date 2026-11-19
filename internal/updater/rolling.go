@@ -162,6 +162,7 @@ func (s *Supervisor) retireDrained(ctx context.Context) error {
 		if !result.Confirmed {
 			continue
 		}
+		s.state.RetiredJournals = append(s.state.RetiredJournals, drain.JournalID)
 		delete(s.state.DrainingProcesses, key)
 		if err := s.save(); err != nil {
 			return err

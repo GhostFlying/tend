@@ -21,19 +21,29 @@ const rolloutArchiveChunkBytes = protocol.MaxNativeRolloutChunkBytes
 // syncRolloutArchive performs one bounded transport attempt, independently of
 // event or business delivery. Only acknowledged bytes advance the saved cursor.
 func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment) error {
+	return r.syncJournalArchive(ctx, r.cfg.Journal, as)
+}
+
+func (r *Runner) syncJournalArchive(ctx context.Context, sourceJournal *journal.Journal, as protocol.Assignment) error {
 	r.controlMu.Lock()
 	deployment, version := r.previewDeployment, r.runnerProtocol
 	r.controlMu.Unlock()
 	if as.Protocol < 3 || version < 3 || deployment == "" || len(r.cfg.RolloutRoots) == 0 {
+		if sourceJournal != r.cfg.Journal {
+			return errors.New("retained archive has no negotiated deployment")
+		}
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
 	defer cancel()
-	sources, err := r.cfg.Journal.RolloutSources(ctx, deployment, as.RunID)
+	sources, err := sourceJournal.RolloutSources(ctx, deployment, as.RunID)
 	if err != nil {
 		return err
 	}
 	if len(sources) == 0 {
+		if sourceJournal != r.cfg.Journal {
+			return errors.New("retained archive does not belong to the connected deployment")
+		}
 		// Executions without a native original have no archival dependency.
 		return nil
 	}
@@ -44,27 +54,27 @@ func (r *Runner) syncRolloutArchive(ctx context.Context, as protocol.Assignment)
 			continue
 		}
 		seen[source.SessionID] = true
-		if err := r.syncRolloutSource(ctx, deployment, as, source); err != nil {
+		if err := r.syncRolloutSource(ctx, sourceJournal, deployment, as, source); err != nil {
 			failures = append(failures, fmt.Errorf("runner: archive source %s: %w", source.SessionID, err))
 		}
 	}
 	return errors.Join(failures...)
 }
 
-func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as protocol.Assignment, source protocol.RolloutPreviewSource) error {
+func (r *Runner) syncRolloutSource(ctx context.Context, sourceJournal *journal.Journal, deployment string, as protocol.Assignment, source protocol.RolloutPreviewSource) error {
 	unlock, err := r.lockArchiveSource(ctx, deployment+"/"+source.SessionID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	saved, err := r.cfg.Journal.RolloutArchive(ctx, deployment, source.SessionID)
+	saved, err := sourceJournal.RolloutArchive(ctx, deployment, source.SessionID)
 	if err != nil {
 		return err
 	}
 	// Reconcile the exact saved bytes even if the native path has since rotated
 	// or disappeared. No new request may replace an uncertain original upload.
 	if saved.Pending != nil {
-		if err := r.sendRolloutArchive(ctx, deployment, source.SessionID, *saved.Pending); err != nil {
+		if err := r.sendRolloutArchive(ctx, sourceJournal, deployment, source.SessionID, *saved.Pending); err != nil {
 			return err
 		}
 		saved.Cursor = saved.Next
@@ -78,7 +88,7 @@ func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as pr
 			// Missing originals stay pending; EOF was not observed.
 			return errors.New("runner: rollout archive original is not yet available")
 		}
-		if err := r.registerRollout(ctx, as.RunID, source); err != nil {
+		if err := sourceJournal.RegisterRollout(ctx, deployment, as.RunID, source); err != nil {
 			return err
 		}
 	}
@@ -136,10 +146,10 @@ func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as pr
 		if err != nil {
 			return err
 		}
-		if err := r.cfg.Journal.QueueRolloutArchive(ctx, deployment, source.SessionID, saved.Cursor, next, *env); err != nil {
+		if err := sourceJournal.QueueRolloutArchive(ctx, deployment, source.SessionID, saved.Cursor, next, *env); err != nil {
 			return err
 		}
-		if err := r.sendRolloutArchive(ctx, deployment, source.SessionID, *env); err != nil {
+		if err := r.sendRolloutArchive(ctx, sourceJournal, deployment, source.SessionID, *env); err != nil {
 			return err
 		}
 		current, saved.Cursor = next, next
@@ -155,10 +165,10 @@ func (r *Runner) syncRolloutSource(ctx context.Context, deployment string, as pr
 		if err != nil {
 			return err
 		}
-		if err := r.cfg.Journal.QueueRolloutArchive(ctx, deployment, source.SessionID, saved.Cursor, next, *env); err != nil {
+		if err := sourceJournal.QueueRolloutArchive(ctx, deployment, source.SessionID, saved.Cursor, next, *env); err != nil {
 			return err
 		}
-		return r.sendRolloutArchive(ctx, deployment, source.SessionID, *env)
+		return r.sendRolloutArchive(ctx, sourceJournal, deployment, source.SessionID, *env)
 	}
 	return nil
 }
@@ -183,7 +193,7 @@ func archiveWindowHash(f *os.File, offset, length int64) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func (r *Runner) sendRolloutArchive(ctx context.Context, deployment, thread string, env protocol.Envelope) error {
+func (r *Runner) sendRolloutArchive(ctx context.Context, sourceJournal *journal.Journal, deployment, thread string, env protocol.Envelope) error {
 	op, err := r.sendOnce(ctx, r.c.host(), &env)
 	if err != nil {
 		return err
@@ -195,5 +205,5 @@ func (r *Runner) sendRolloutArchive(ctx context.Context, deployment, thread stri
 	if err := json.Unmarshal(op.Result, &receipt); err != nil {
 		return fmt.Errorf("runner: decode rollout archive receipt: %w", err)
 	}
-	return r.cfg.Journal.AcknowledgeRolloutArchive(ctx, deployment, thread, env.RequestID, receipt)
+	return sourceJournal.AcknowledgeRolloutArchive(ctx, deployment, thread, env.RequestID, receipt)
 }

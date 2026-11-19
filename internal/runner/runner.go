@@ -91,6 +91,7 @@ func reasonFor(err error, fallback string) string {
 
 // Config assembles a Runner.
 type Config struct {
+	JournalRoot  string // Directory containing the original and generation journals.
 	JournalID    string
 	Extensions   *extensions.Agent
 	RolloutRoots []string
@@ -348,6 +349,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	if len(r.cfg.RolloutRoots) > 0 {
 		r.wg.Go(func() { r.rolloutPreviews(ctx) })
 		r.wg.Go(func() { r.rolloutArchives(ctx) })
+		if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {
+			r.wg.Go(func() { r.retiredRolloutArchives(ctx) })
+		}
 	}
 	if r.cfg.Executions != nil {
 		r.requestReconcile()
