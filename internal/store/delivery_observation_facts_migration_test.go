@@ -1,29 +1,48 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/testkit/dbfixture"
 )
+
+var observationMigrationTemplate dbfixture.Template
 
 func observationMigrationStore(t *testing.T) *Store {
 	t.Helper()
-	db, err := sql.Open("sqlite", dsn(filepath.Join(t.TempDir(), "schema104.db"), true))
+	path := filepath.Join(t.TempDir(), "schema104.db")
+	if err := observationMigrationTemplate.Copy(t.Context(), path, func(ctx context.Context, path string) error {
+		s, err := openObservationMigrationStore(path)
+		if err != nil {
+			return err
+		}
+		return errors.Join(s.migrate(ctx, 104), s.write.Close())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openObservationMigrationStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
-	s := &Store{write: db, read: db, now: testkit.NewClock().Now}
-	if err := s.migrate(t.Context(), 104); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { s.write.Close() })
 	return s
+}
+
+func openObservationMigrationStore(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", dsn(path, true))
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return &Store{write: db, read: db, now: testkit.NewClock().Now}, nil
 }
 
 func TestDeliveryObservationFactsMigrationPreservesLatestAndOriginals(t *testing.T) {
