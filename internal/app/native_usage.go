@@ -130,32 +130,30 @@ func (UploadNativeUsage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if _, err = tx.Exec(ctx, `INSERT INTO token_usage_sources(source_key,host_id,run_id,conversation_id,thread_id,session_id,provider,coverage,updated_at) VALUES(?,?,?,?,?,?,?,'pending',?) ON CONFLICT(source_key) DO UPDATE SET session_id=CASE WHEN token_usage_sources.session_id='' THEN excluded.session_id ELSE token_usage_sources.session_id END`, r.RunID+"/"+p.RootThreadID, r.HostID, r.RunID, conversation, p.RootThreadID, session, "native", now); err != nil {
 		return Outcome{}, err
 	}
+	var provider, boundSession, sourcePurpose, sourceParent string
+	if len(p.Samples) > 0 {
+		// The source row is stable within the upload transaction, except for
+		// the first accepted sample binding a placeholder provider below.
+		err = tx.Q().QueryRowContext(ctx, `SELECT provider,session_id,purpose,parent_session_id FROM token_usage_sources WHERE run_id=? AND thread_id=?`, p.RunID, p.RootThreadID).Scan(&provider, &boundSession, &sourcePurpose, &sourceParent)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 	for _, sample := range p.Samples {
 		if sample.RecordID == "" || sample.SessionID == "" || (sample.Provider != "codex" && sample.Provider != "traex") || !strings.HasPrefix(sample.Source, "native-ledger/"+sample.Provider+"/") {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid native measurement identity")
-		}
-		var provider string
-		if err = tx.Q().QueryRowContext(ctx, `SELECT provider FROM token_usage_sources WHERE run_id=? AND thread_id=?`, p.RunID, p.RootThreadID).Scan(&provider); err != nil {
-			return Outcome{}, err
-		}
-		if provider != "native" && provider != "" && provider != sample.Provider {
-			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "native provider differs from its registered source")
 		}
 		if provider == "native" || provider == "" {
 			if _, err = tx.Exec(ctx, `UPDATE token_usage_sources SET provider=? WHERE run_id=? AND thread_id=?`, sample.Provider, p.RunID, p.RootThreadID); err != nil {
 				return Outcome{}, err
 			}
+			provider = sample.Provider
 		}
-		if sample.ThreadID != p.RootThreadID {
-			var session string
-			err = tx.Q().QueryRowContext(ctx, `SELECT session_id FROM token_usage_sources WHERE run_id=? AND thread_id=?`, p.RunID, p.RootThreadID).Scan(&session)
-			if err != nil || session == "" || sample.SessionID != session {
-				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "child measurement requires an established session binding")
-			}
+		if provider != sample.Provider {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "native provider differs from its registered source")
 		}
-		var sourcePurpose, sourceParent string
-		if err = tx.Q().QueryRowContext(ctx, `SELECT purpose,parent_session_id FROM token_usage_sources WHERE run_id=? AND thread_id=?`, p.RunID, p.RootThreadID).Scan(&sourcePurpose, &sourceParent); err != nil {
-			return Outcome{}, err
+		if sample.ThreadID != p.RootThreadID && (boundSession == "" || sample.SessionID != boundSession) {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "child measurement requires an established session binding")
 		}
 		if sample.Purpose == "" {
 			sample.Purpose = sourcePurpose
