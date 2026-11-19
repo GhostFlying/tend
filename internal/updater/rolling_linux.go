@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -55,4 +56,18 @@ func (a journalAuthority) AuthorizeLaunch(ctx context.Context, v Version, b Bind
 	}
 	err = json.Unmarshal(output, &grant)
 	return grant, err
+}
+
+// RunnerHostToken reads only the credential used by the fixed runner service.
+func RunnerHostToken(cfg Config) (string, error) {
+	env, err := readEnvFiles(cfg.EnvFiles)
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range env {
+		if token, ok := strings.CutPrefix(entry, "TEND_HOST_TOKEN="); ok && token != "" {
+			return token, nil
+		}
+	}
+	return "", errors.New("updater: runner host credential unavailable")
 }

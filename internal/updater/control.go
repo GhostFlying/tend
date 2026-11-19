@@ -76,6 +76,11 @@ func (s *Supervisor) Serve(ctx context.Context) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
+	if s.opts.WindowAuthority != nil {
+		done := make(chan struct{})
+		go func() { defer close(done); s.watchEmergency(ctx) }()
+		defer func() { cancel(); <-done }()
+	}
 	wake := make(chan struct{}, 1)
 	requestStep := func() {
 		select {

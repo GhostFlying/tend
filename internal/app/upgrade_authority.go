@@ -171,6 +171,13 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
 	for _, h := range r.Hosts {
+		cutoff, err = drainingRestartCutoff(ctx, tx.Q(), r, h.HostID, x.Now, cutoff)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if h.PrimaryOffline {
+			continue
+		}
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
 		if err != nil {
 			return Outcome{}, err
@@ -184,10 +191,6 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 			return Outcome{}, err
 		}
 		cutoff = min(cutoff, covered)
-		cutoff, err = drainingRestartCutoff(ctx, tx.Q(), r, h.HostID, x.Now, cutoff)
-		if err != nil {
-			return Outcome{}, err
-		}
 	}
 	if cutoff <= x.Now.UnixMilli() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")
@@ -364,8 +367,14 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 
 		for _, h := range r.Hosts {
+			if h.PrimaryOffline {
+				if err := cancelPrimaryFence(ctx, x, tx, r, h); err != nil {
+					return Outcome{}, err
+				}
+				continue
+			}
 			if r.View.Phase == windowMaintenance {
-				break
+				continue
 			} // No installation was prepared on these hosts.
 			rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 			if err != nil {

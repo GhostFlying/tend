@@ -45,7 +45,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "upgrade "+action)
 	dry := fs.Bool("dry-run", false, "print the local control request without executing it")
 	configPlan := fs.String("runner-configurations", "", "private JSON metadata for a single runner configuration maintenance")
-	forceMaintenance := fs.Bool("force-maintenance", false, "drain incompatible runner instances until their fixed deadline, then stop those exact processes")
+	forceMaintenance := fs.Bool("force-maintenance", false, "immediately stop every incompatible runner, including busy or sole accepting instances")
 	serverOnly := fs.Bool("server-only", false, "install the server while keeping compatible runners on their current binaries")
 	park := fs.Bool("park-idle-managers", false, "park idle managers through confirmed native close; preserve logical responsibility for a new run after this window")
 	bundle := fs.String("release", "", "local format 2 complete release directory (default: latest official main fleet)")
@@ -179,7 +179,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if view.ForceMaintenance {
 		fmt.Fprintln(e.Stdout, "Forced maintenance of incompatible runners")
 		for _, stop := range view.WindowStops {
-			fmt.Fprintf(e.Stdout, "  %s/%s: protocol %d, pid %d, %s, drain until %s\n", stop.HostID, stop.Process.LaunchID, stop.Protocol, stop.Process.PID, stop.State, time.UnixMilli(stop.DrainUntil).UTC().Format(time.RFC3339))
+			fmt.Fprintf(e.Stdout, "  %s/%s: protocol %d, pid %d, %s\n", stop.HostID, stop.Process.LaunchID, stop.Protocol, stop.Process.PID, stop.State)
 			for _, run := range stop.Runs {
 				fmt.Fprintf(e.Stdout, "    run %s lease %s\n", run.RunID, run.LeaseID)
 			}

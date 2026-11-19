@@ -215,7 +215,17 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 				return err
 			}
 		}
-		s, err := updater.Open(cfg, updater.Options{ConfigFile: *config, Authority: authority})
+		opts := updater.Options{ConfigFile: *config, Authority: authority}
+		if cfg.Role == "runner" {
+			client, err := runnerWindowClient(cfg)
+			if err != nil {
+				slog.WarnContext(ctx, "independent emergency maintenance channel unavailable", "err", err)
+			} else {
+				opts.WindowAuthority = client
+				defer client.client.CloseIdleConnections()
+			}
+		}
+		s, err := updater.Open(cfg, opts)
 		if err != nil {
 			return err
 		}

@@ -219,10 +219,21 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if err != nil {
 			return Outcome{}, err
 		}
-		if !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) {
-			if c.ForceMaintenance {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s accepting runner %s requires a compatible handoff before forced retirement", h.HostID, rt.Runtime.InstanceID)
+		retired, err := store.HostInstanceRetired(ctx, tx.Q(), h.HostID, rt.Runtime.InstanceID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if retired || (c.ForceMaintenance && !c.Manifest.Protocol.Contains(rt.Runtime.Protocol)) {
+			if !retired {
+				if err := capturePrimaryStop(ctx, tx, &r, h.HostID, rt.Runtime, control); err != nil {
+					return Outcome{}, err
+				}
 			}
+			r.Hosts = append(r.Hosts, store.UpgradeHost{HostID: h.HostID, PrimaryOffline: true, PreviousHash: rt.Runtime.Build.BinarySHA256, MaintenanceHandoff: control.Mode == protocol.RunnerMaintenance})
+			r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "skipped", Phase: "offline_maintenance", CurrentVersion: rt.Runtime.Build.Version, ProtocolVersion: rt.Runtime.Protocol})
+			continue
+		}
+		if !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "host %s runner %s uses protocol %d outside the target range [%d,%d]", h.HostID, rt.Runtime.InstanceID, rt.Runtime.Protocol, c.Manifest.Protocol.Min, c.Manifest.Protocol.Max)
 		}
 		if !c.ServerOnly && (rt.Runtime.JournalVersion <= 0 || !c.Manifest.Storage.RunnerJournal.Contains(rt.Runtime.JournalVersion) || !slices.Contains(rt.Runtime.Capabilities, capabilityUpdater)) {
@@ -554,6 +565,12 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 					r.ServerPreviousHash = c.Observation.BinarySHA256
 					for i := range r.Hosts {
 						h := &r.Hosts[i]
+						if h.PrimaryOffline {
+							if err := coverDrainingJournals(ctx, x, tx, &r, h.HostID); err != nil {
+								return Outcome{}, err
+							}
+							continue
+						}
 						ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 						if err != nil {
 							return Outcome{}, err
@@ -828,6 +845,12 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 	if r.View.ServerOnly {
 		message = fmt.Sprintf("server 升级至 `%s` 已完成，runner 保留原版本。", r.View.ReleaseID)
 	}
+	for _, h := range r.Hosts {
+		if h.PrimaryOffline {
+			message = fmt.Sprintf("升级 %s 已完成。被紧急停止的接单实例保持离线。", r.View.ReleaseID)
+			break
+		}
+	}
 	return upgradeNotice(ctx, x, tx, *r, "upgrade_completed", "", message)
 }
 
@@ -900,7 +923,7 @@ func restoreUnchangedHosts(ctx context.Context, x *Exec, tx *store.Tx, r store.U
 		return nil
 	}
 	for _, h := range r.Hosts {
-		if h.CandidateInstance != "" {
+		if h.PrimaryOffline || h.CandidateInstance != "" {
 			continue
 		}
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())

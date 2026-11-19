@@ -409,14 +409,12 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 
 整机紧急恢复会停止服务单元内的全部进程。存在收尾实例或归属尚未确认的交接时，`upgrade recover --force` 会在停机前返回冲突。收尾完成后，恢复沿用接单代的 journal 和已退役目录。各代的备份可通过检查点的 journal ID 核对。
 
-### 目标协议窗口之外的收尾实例
+### 紧急停止协议窗口之外的实例
 
-先用普通 `tend upgrade start` 检查目标窗口。明确需要结束旧 runner 的本机操作员可以用同一完整包执行
-`tend upgrade start --release <完整包目录> --force-maintenance --server-only`；
-省略 `--server-only` 时执行完整 fleet 升级。已有兼容接单实例的主机会继续工作。接受新任务的实例本身越窗时，应先在当前 server 支持的窗口内完成该主机的 runner 交接。
+普通升级会报告阻塞的主机、实例和协议。紧急维护时，操作员可执行 `tend upgrade start --release <完整包目录> --force-maintenance --server-only`。省略 `--server-only` 时按完整 fleet 范围处理可用主机。接单代、收尾代都按目标协议窗口筛选，即使持有活跃 Run 或是该主机唯一进程也会被停止。兼容代继续执行原任务。
 
-`tend upgrade status --json` 的 `window_stops` 列出受影响的 host、journal、进程、原 Run/lease 和固定截止时间。批次在 `window_maintenance` 阶段等待。每个实例从 `draining` 进入 `stop_authorized`，本机监督器确认该进程退出并提交回执后显示 `stopped`。此时 `unknown_runs` 列出需要查询原工作目录和外部操作的 Run。
+固定 updater 必须具备紧急停止能力。在没有接班 runner 的主机上，它使用服务配置的 server URL 和 host 凭据独立取得授权、提交退出回执。内嵌 tsnet 主机需要配置已授权的 tailscaled 旁路。只装有历史 updater 的设备须先更新监督器。旁路离线或进程身份无法核对时，批次保留在 `window_maintenance` 并等待原监督器。
 
-收到超时或响应中断时，用原升级 ID 和 request ID 核对状态。原停止授权尚待确认时先恢复与对应 updater 的通信。已过整体期限的批次可以接收停止回执；确认后取消原批次，需要继续发布时再显式发起新批次。
+`tend upgrade status --json` 的 `window_stops` 列出每个目标、原 Run 与 lease。`stop_authorized` 表示已发出精确停止授权。监督器发出 TERM，给进程最多两秒退出；仍在运行且授权有效时，对同一进程发送 KILL。实际退出后显示 `stopped`。未确认的 Run 进入 `unknown_runs`，已完成的结果保留。所有退出回执到齐后 server 才进入安装阶段。唯一接单实例被停止的主机显示 `offline_maintenance`，监督器重启后继续保持停机。需要恢复该主机时，在退出已确认、其他收尾实例已退役后，沿用本机 `upgrade recover --force` 入口安装兼容的完整包，核对新实例注册后再恢复接单。
 
-截止后的强制授权需要支持期限的 updater 和接单 runner。旧版本仍可以自然退役。升级主机上的这两个组件后可使用强制维护。监督器在发信号前按本机启动标识和单调时钟再验期限。若授权已过期且它确认尚未发信号，状态记为 `not_stopped`，可以取消批次。已发信号的进程仍须提交退出回执。
+收到超时或响应中断时，用原升级 ID 和 request ID 核对状态。原停止授权尚待确认时先恢复对应 updater 的通信。已过整体期限的批次可以接收退出回执。若原授权确定没有发送信号，状态记为 `not_stopped`。取消原批次后，需要继续发布时再显式发起新批次。

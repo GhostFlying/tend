@@ -3114,11 +3114,11 @@ export interface UpgradeManagerParkView {
  * via the `definition` "UpgradeWindowStop".
  */
 export interface UpgradeWindowStop {
-  drain_until_ms: number;
   forced?: boolean;
   generation: number;
   host_id: string;
   journal_id: string;
+  primary?: boolean;
   process: RecoveryIdentity;
   protocol: number;
   runs: LeaseRef[] | null;

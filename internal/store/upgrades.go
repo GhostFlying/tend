@@ -58,10 +58,17 @@ func (r UpgradeRow) InstallationHosts() []UpgradeHost {
 	if r.View.ServerOnly {
 		return nil
 	}
-	return r.Hosts
+	var hosts []UpgradeHost
+	for _, h := range r.Hosts {
+		if !h.PrimaryOffline {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 type UpgradeHost struct {
+	PrimaryOffline bool                      `json:"primary_offline,omitempty"`
 	RollingProcess protocol.RecoveryIdentity `json:"rolling_process,omitzero"`
 	// RollingFrom is the exact process allowed to finish its already-owned runs.
 	RollingFrom           string                        `json:"rolling_from,omitempty"`

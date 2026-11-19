@@ -56,7 +56,7 @@ func externalRecoverySource(cfg Config, path string, target Version) (State, err
 		if markerErr != nil && !os.IsNotExist(markerErr) {
 			return State{}, markerErr
 		}
-		if markerErr == nil && (err != nil || old.Format != rollingStateFormat || old.InstanceID != cfg.InstanceID) {
+		if markerErr == nil && (err != nil || (old.Format < rollingStateFormat || old.Format > emergencyStateFormat) || old.InstanceID != cfg.InstanceID) {
 			return State{}, errors.New("updater: rolling journal ownership unavailable for external recovery")
 		}
 	}
@@ -64,8 +64,11 @@ func externalRecoverySource(cfg Config, path string, target Version) (State, err
 		return State{}, nil // Legacy recovery snapshots unknown installed data.
 	}
 	if cfg.Role == "runner" && old.Format >= rollingStateFormat {
-		if old.Format != rollingStateFormat || old.CurrentJournal != "" && !release.ValidID(old.CurrentJournal) || old.UpdaterEpoch == "" || old.Generation == 0 {
+		if (old.Format < rollingStateFormat || old.Format > emergencyStateFormat) || old.CurrentJournal != "" && !release.ValidID(old.CurrentJournal) || old.UpdaterEpoch == "" || old.Generation == 0 {
 			return State{}, errors.New("updater: invalid rolling journal ownership")
+		}
+		if stop := old.EmergencyPrimary; stop != nil && (!stop.Confirmed || target.Artifact.SHA256 == stop.Process.SHA256) {
+			return State{}, errors.New("updater: emergency source needs a confirmed exit and replacement binary")
 		}
 		if target.Protocol < 6 {
 			return State{}, errors.New("updater: recovery target cannot use an independent runner journal")
@@ -266,7 +269,7 @@ func externalRecovery(ctx context.Context, cfg Config, request ExternalRecoveryR
 		// The ordinary supervisor launch, process discovery, readiness and durable
 		// commit path owns the candidate from this point onward.
 		state := State{Format: 1, InstanceID: cfg.InstanceID, Current: record.Target, Operation: op}
-		if cfg.Role == "runner" && old.Format == rollingStateFormat {
+		if cfg.Role == "runner" && (old.Format >= rollingStateFormat && old.Format <= emergencyStateFormat) {
 			state.Format, state.Generation, state.UpdaterEpoch, state.UpdaterBootID = old.Format, old.Generation, old.UpdaterEpoch, old.UpdaterBootID
 			state.CurrentJournal, state.RetiredJournals = old.CurrentJournal, old.RetiredJournals
 		}

@@ -89,3 +89,7 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed" "$scratch/next-window"
+
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed" "$scratch/next-window" --sole
