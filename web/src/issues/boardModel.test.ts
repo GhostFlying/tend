@@ -84,6 +84,23 @@ test("terminal and reopened projections preserve historical next steps without m
   expect(responsibilityLabel(item)).toBe("执行结果待核对");
 });
 
+test("terminal Issues keep live or unresolved execution visible until settlement", () => {
+  const item = issue({ state: "closed" });
+  const counts = item.board!.execution;
+  counts.starting = 1;
+  counts.running = 1;
+  expect(responsibilityLabel(item)).toBe("Issue 已完成 · 2 项执行收尾中");
+  counts.starting = 0;
+  counts.running = 0;
+  expect(responsibilityLabel(item)).toBe("Issue 已完成");
+
+  item.state = "cancelled";
+  counts.unknown = 1;
+  expect(responsibilityLabel(item)).toBe("Issue 已取消 · 执行结果待核对");
+  counts.unknown = 0;
+  expect(responsibilityLabel(item)).toBe("Issue 已取消");
+});
+
 test("running and external waiting come from execution even when review is queued", () => {
   const item = issue({ work_status: "in_review" });
   const board = item.board!;
