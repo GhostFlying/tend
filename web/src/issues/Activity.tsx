@@ -574,7 +574,7 @@ interface ProcessLayoutProps {
 }
 
 class ProcessLayout extends Component<ProcessLayoutProps> {
-  getSnapshotBeforeUpdate(previous: Readonly<ProcessLayoutProps>) {
+  override getSnapshotBeforeUpdate(previous: Readonly<ProcessLayoutProps>) {
     const { change, scroll, snapshot } = this.props;
     // Read before the DOM changes, even if the browser has yet to emit scroll.
     return previous.change && change && change !== previous.change && scroll.current
@@ -582,7 +582,7 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
       : null;
   }
 
-  componentDidUpdate(
+  override componentDidUpdate(
     _previous: Readonly<ProcessLayoutProps>,
     _state: unknown,
     anchor: ScrollAnchor | null,
@@ -591,7 +591,7 @@ class ProcessLayout extends Component<ProcessLayoutProps> {
     if (node && anchor) this.props.restore(node, anchor);
   }
 
-  render() {
+  override render() {
     return this.props.children;
   }
 }
