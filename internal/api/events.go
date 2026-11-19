@@ -122,9 +122,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		var refreshThrough int64
 		for _, ev := range batch {
 			after = ev.EventSeq
-			if store.RefreshKind(ev.Kind) {
-				refreshThrough = ev.EventSeq
-			}
 			var payload any = ev
 			if strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
 				kind := ev.Kind
@@ -154,6 +151,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 			if writeEvent(w, "ledger", ev.EventSeq, payload) != nil {
 				return
+			}
+			if store.RefreshKind(ev.Kind) {
+				refreshThrough = ev.EventSeq
 			}
 		}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,6 +60,59 @@ func TestMessagingEventsProjectInputsAndExplicitRead(t *testing.T) {
 	}
 	if len(events) != 2 || events[0].Kind != "messaging.input" || events[1].Kind != "messaging.read" || events[0].ObjectID != id || events[1].EventSeq <= events[0].EventSeq {
 		t.Fatal(events, scan.Err())
+	}
+}
+
+func TestMessagingEventsKeepFilteredRefreshPending(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	var seq int64
+	if err := e.store.Write(t.Context(), func(tx *store.Tx) (err error) {
+		seq, err = tx.InsertEvent(t.Context(), store.EventRow{
+			Kind: "token_usage.changed", ObjectType: "token_usage", ObjectID: "all",
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/messaging/events?after=0", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := &cancelOnMessagingBatchFlush{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	e.server.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.flushes != 2 || w.Body.String() != "event: start\ndata: {\"event_seq\":0}\n\n" {
+		t.Fatalf("expected start and an empty batch, got status=%d flushes=%d body=%q", w.Code, w.flushes, w.Body.String())
+	}
+	e.server.EndStreams()
+	if through := e.server.refreshAck.through; through >= seq {
+		t.Errorf("offered acknowledgement through %d for refresh %d filtered out of the stream", through, seq)
+	}
+	if err := e.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var pending int
+		if err := tx.Q().QueryRowContext(t.Context(), `SELECT pending FROM refresh_notifications WHERE event_seq=?`, seq).Scan(&pending); err != nil {
+			return err
+		}
+		if pending != 1 {
+			t.Errorf("filtered refresh %d: pending=%d, want 1", seq, pending)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type cancelOnMessagingBatchFlush struct {
+	*httptest.ResponseRecorder
+	cancel  context.CancelFunc
+	flushes int
+}
+
+func (w *cancelOnMessagingBatchFlush) Flush() {
+	w.ResponseRecorder.Flush()
+	w.flushes++
+	if w.flushes == 2 {
+		w.cancel()
 	}
 }
 
