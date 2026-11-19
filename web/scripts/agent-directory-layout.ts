@@ -185,7 +185,7 @@ function catalog(host: string): RunnerAgentCatalog {
             ? { constructor: 1, toString: 1 }
             : {}
           : activityRunning && host === "host-a"
-            ? { maple: 1 }
+            ? { cedar: 1, maple: 1 }
             : {},
     },
     host_id: host,
@@ -693,10 +693,10 @@ try {
       assert.equal(await directory.getByRole("button", { name: /Elm.*1 个任务运行中/ }).count(), 1);
       const busyRow = directory.getByRole("button", { name: /Cedar.*2 个任务运行中/ });
       await busyRow.waitFor();
-      assert.equal(
-        await directory.getByText("运行状态待确认 · 1 个待确认", { exact: true }).count(),
-        1,
-      );
+      await busyRow.getByText("2 个任务运行中", { exact: true }).waitFor();
+      const waitingRow = directory.getByRole("button", { name: /Maple.*等待执行确认/ });
+      await waitingRow.getByText("等待执行确认", { exact: true }).waitFor();
+      assert.equal(await directory.getByText(/\d+ 个待确认/).count(), 0);
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
         false,
@@ -742,6 +742,8 @@ try {
         "Iris",
       ]);
       await directory.getByRole("button", { name: /Cedar.*0 个任务 · 空闲/ }).waitFor();
+      await directory.getByRole("button", { name: /Maple.*0 个任务 · 空闲/ }).waitFor();
+      await waitingRow.waitFor({ state: "hidden" });
       // Legal IDs can shadow Object.prototype after JSON decoding. Exercise
       // current and retired identities through the actual rendered directory.
       prototypeActivity = "idle";
@@ -772,8 +774,8 @@ try {
       });
       prototypeActivity = "uncertain";
       activityChanged();
-      await directory.getByRole("button", { name: /Cedar.*运行状态待确认 · 1 个待确认/ }).waitFor();
-      await directory.getByRole("button", { name: /Elm.*运行状态待确认 · 1 个待确认/ }).waitFor();
+      await directory.getByRole("button", { name: /Cedar.*等待执行确认/ }).waitFor();
+      await directory.getByRole("button", { name: /Elm.*等待执行确认/ }).waitFor();
       assert.equal(await directory.getByRole("button", { name: /Cedar.*任务运行中/ }).count(), 0);
       prototypeActivity = "normal";
       activityChanged();
@@ -848,6 +850,7 @@ try {
       await associations.getByRole("button", { name: "当前冻结关联", exact: true }).waitFor();
       await associations.getByText("实际执行（2）", { exact: true }).click();
       await associations.getByText("实施 · 结果未知，待对账", { exact: true }).waitFor();
+      await associations.getByText(/Run run_00000000000000000000000002/).waitFor();
       await associations.getByText("原执行仍有未结问题", { exact: true }).waitFor();
       assert.equal(await associations.getByText(/original-model/).count(), 2);
       const scope = associations.getByRole("combobox", { name: "Issue 关联范围" });

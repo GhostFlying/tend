@@ -378,8 +378,8 @@ export function AgentCatalogView() {
               <div className={styles.list}>
                 {toolbar}
                 <p className={styles.activityNote}>
-                  运行任务优先，组内保留目录顺序。计入启动、运行及执行中等待的去重任务，
-                  不含主对话和咨询轮次；待确认单列。忙碌 Agent 仍可并发。
+                  运行任务优先，组内保留目录顺序。启动、运行及执行中等待的任务去重计数，
+                  不含主对话和咨询轮次。未结清的执行等待 runner 确认。忙碌 Agent 仍可并发。
                 </p>
                 <div className={styles.head}>
                   <span>Agent</span>
@@ -522,12 +522,11 @@ function AgentRow({
               ? activity.running
                 ? `${activity.running} 个任务运行中`
                 : activity.uncertain
-                  ? "运行状态待确认"
+                  ? "等待执行确认"
                   : !group.catalog
                     ? "0 个运行任务"
                     : "0 个任务 · 空闲"
               : "任务数未提供"}
-            {!!activity?.uncertain && ` · ${activity.uncertain} 个待确认`}
           </span>
         )}
         <small className={entry.history ? styles.historicalIdentity : undefined}>
