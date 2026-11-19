@@ -7207,7 +7207,9 @@ export interface HostView {
   arch: string;
   build_version?: string;
   control_revision?: number;
+  draining_runners?: DrainingRunnerView[];
   host_id: string;
+  instance_id?: string;
   labels: string[] | null;
   last_heartbeat_at?: string;
   maintenance?: HostMaintenanceView;
@@ -7218,6 +7220,18 @@ export interface HostView {
   slots: number;
   worker: WorkerKind;
   workspace_protocol?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DrainingRunnerView".
+ */
+export interface DrainingRunnerView {
+  instance_id: string;
+  last_heartbeat_at: string;
+  open_runs: number;
+  protocol: number;
+  upgrade_id: string;
+  version?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

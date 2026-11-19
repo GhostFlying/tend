@@ -636,10 +636,6 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 			if _, err := s.observeCurrent(ctx, op.PreviousProcess); err != nil {
 				return err
 			}
-			if s.state.DrainingProcesses == nil {
-				s.state.DrainingProcesses = map[string]DrainingProcess{}
-			}
-			s.state.DrainingProcesses[op.PreviousProcess.LaunchID] = DrainingProcess{Process: op.PreviousProcess, JournalID: s.state.CurrentJournal, UpgradeID: op.ID}
 			op.Phase = "starting"
 			if err := s.save(); err != nil {
 				return err
@@ -1010,6 +1006,10 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 
 func (s *Supervisor) commitCandidate(op *Operation) error {
 	if op.Rolling != nil {
+		if s.state.DrainingProcesses == nil {
+			s.state.DrainingProcesses = map[string]DrainingProcess{}
+		}
+		s.state.DrainingProcesses[op.PreviousProcess.LaunchID] = DrainingProcess{Process: op.PreviousProcess, JournalID: s.state.CurrentJournal, UpgradeID: op.ID}
 		s.state.CurrentJournal = op.LaunchID
 		if _, ok := s.opts.Authority.(*HTTPAuthority); ok {
 			authority, err := (journalAuthority{s.cfg}).bridge(op.LaunchID)

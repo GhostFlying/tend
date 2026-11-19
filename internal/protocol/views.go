@@ -175,8 +175,20 @@ type HostMaintenanceView struct {
 	RemainingRuns int64  `json:"remaining_runs,omitempty"`
 }
 
+// DrainingRunnerView is a predecessor that still owns its journal.
+type DrainingRunnerView struct {
+	InstanceID      string    `json:"instance_id"`
+	Protocol        int64     `json:"protocol"`
+	Version         string    `json:"version,omitempty"`
+	OpenRuns        int64     `json:"open_runs"`
+	LastHeartbeatAt time.Time `json:"last_heartbeat_at"`
+	UpgradeID       string    `json:"upgrade_id"`
+}
+
 // HostView is an active execution host.
 type HostView struct {
+	InstanceID        string               `json:"instance_id,omitempty"`
+	DrainingRunners   []DrainingRunnerView `json:"draining_runners,omitempty"`
 	ControlRevision   int64                `json:"control_revision,omitempty"`
 	Online            *bool                `json:"online,omitempty"`
 	LastHeartbeatAt   *time.Time           `json:"last_heartbeat_at,omitempty"`

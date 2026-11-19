@@ -44,15 +44,13 @@ func (ReleaseWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
-	if rolling {
-		_, err := tx.Exec(ctx, `INSERT INTO workspace_journal_releases(workspace_id,task_id,journal_id,run_count)
+	_, err = tx.Exec(ctx, `INSERT INTO workspace_journal_releases(workspace_id,task_id,journal_id,run_count)
         SELECT ?,?,?,COUNT(*) FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
         WHERE wr.workspace_id=? AND r.task_id=? AND COALESCE(j.journal_id,'')=?
         HAVING COUNT(*)>0 AND COUNT(*) FILTER(WHERE r.observed_state IN ('starting','running','waiting','interrupted','unknown'))=0
         ON CONFLICT(workspace_id,task_id,journal_id) DO UPDATE SET run_count=excluded.run_count`, p.WorkspaceID, p.TaskID, p.JournalID, p.WorkspaceID, p.TaskID, p.JournalID)
-		if err != nil {
-			return Outcome{}, err
-		}
+	if err != nil {
+		return Outcome{}, err
 	}
 	var blocked bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT
@@ -88,6 +86,13 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	var p protocol.WorkspaceCleanupRequest
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
+	}
+	primary, err := store.GetHostRuntime(ctx, tx.Q(), x.Principal.Subject)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Outcome{}, err
+	}
+	if primary.Runtime.JournalID != p.JournalID {
+		return Outcome{NoEffect: true, Result: protocol.WorkspaceCleanupResult{Workspaces: []protocol.WorkspaceCleanup{}}}, nil
 	}
 	if p.Limit == 0 {
 		p.Limit = 8

@@ -168,6 +168,9 @@ var ErrWorkspaceMoved = runner.ErrWorkspaceMoved
 // gives up when ctx ends, so a fenced run does not wait for another run's
 // slow fetch.
 func (w *Workspaces) lock(ctx context.Context, key string) (func(), error) {
+	if w.cfg.Home != "" && hostFileLocks {
+		return lockHostResource(ctx, w.cfg.Home, key)
+	}
 	w.owner().mu.Lock()
 	l, ok := w.owner().locks[key]
 	if !ok {

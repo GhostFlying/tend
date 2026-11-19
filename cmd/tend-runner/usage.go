@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
+	"github.com/GhostFlying/tend/internal/updater"
 	"github.com/GhostFlying/tend/internal/usagemaint"
 )
 
@@ -35,6 +36,8 @@ func runUsageCommand(args []string, out, errout io.Writer) int {
 		return 2
 	}
 	c := usagemaint.Config{NativeHome: *home, Provider: *provider, Apply: *apply}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	var err error
 	if *owner {
 		dir := os.Getenv("TEND_CONFIG_DIR")
@@ -75,18 +78,25 @@ func runUsageCommand(args []string, out, errout io.Writer) int {
 				h = "~/.tend"
 			}
 			h, err = cfgfile.Path(h)
-			c.Journal = filepath.Join(h, "runner", "journal.db")
+			var state string
+			if err == nil {
+				state, err = currentRunnerDirectory(ctx, h, cfg)
+			}
+			c.Journal = filepath.Join(state, "journal.db")
 			if err == nil {
 				socket := cfg.UpdaterSocket
 				if socket == "" {
-					socket = filepath.Join(h, "runner", "usage-control", "usage.sock")
+					socket = filepath.Join(state, "usage-control", "usage.sock")
 				}
 				socket, err = cfgfile.Path(socket)
 				if err == nil {
+					if cfg.UpdaterSocket != "" && state != filepath.Join(h, "runner") {
+						socket = updater.JournalSocket(socket, filepath.Base(state))
+					}
 					_, socketErr := os.Lstat(socket)
 					if socketErr != nil && !os.IsNotExist(socketErr) {
 						err = socketErr
-					} else if cfg.Tailnet != nil || socketErr == nil {
+					} else if cfg.Tailnet != nil || cfg.SideChannel != nil || socketErr == nil {
 						c.Server = "http://localhost"
 						c.LiveJournal = true
 						c.HTTP = &http.Client{Timeout: time.Minute, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -100,8 +110,7 @@ func runUsageCommand(args []string, out, errout io.Writer) int {
 	if err == nil && (c.Server == "" || c.Token == "") {
 		err = errors.New("usage reconciliation credentials are unavailable")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+
 	if err == nil {
 		err = usagemaint.Run(ctx, c, out)
 	}

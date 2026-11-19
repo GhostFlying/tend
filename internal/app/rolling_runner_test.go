@@ -22,6 +22,7 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	old := upgradeAck(h, host, protocol.RunnerNormal)
 	old.Sequence++
 	old.Build.PID = 91
+	old.Capabilities = append(old.Capabilities, protocol.CapabilityUsageCollection)
 	old.Protocol, old.ProtocolMin, old.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
 	if op := h.versionedHello(host, &old); op.Error != nil {
 		t.Fatal(op)
@@ -53,6 +54,13 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *selfUpgradeObservation(batch, host, old.InstanceID, old.Build.BinarySHA256)}
 	op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
 	var grant protocol.UpgradeGrant
+	if op.Error != nil || json.Unmarshal(op.Result, &grant) != nil || grant.Allowed {
+		t.Fatal("legacy workspace preparation was not protected", op)
+	}
+	if started := h.runAs(original, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); started.Error != nil {
+		t.Fatal(started)
+	}
+	op = h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
 	if op.Error != nil || json.Unmarshal(op.Result, &grant) != nil || !grant.Allowed {
 		t.Fatalf("rolling grant refused at %s/%s: %+v", batch.View.Phase, batch.View.Hosts[0].Phase, op)
 	}
@@ -78,6 +86,31 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	hb, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &old, Runs: []protocol.LeaseRef{ref}})
 	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || hb.Control.Mode != protocol.RunnerMaintenance {
 		t.Fatalf("old lease did not survive handoff: %+v %v", hb, err)
+	}
+	// Owner commands for an existing source follow its Run across handoff.
+	reg := protocol.NativeUsageRegistration{RunID: original.RunID, ThreadID: "old-thread", SessionID: "old-thread", Provider: "codex"}
+	if op := h.exec(runner(host), h.env(protocol.OpRunnerUsageRegister, target, reg, nil), RegisterNativeUsage{}); op.Error != nil {
+		t.Fatal(op)
+	}
+	collection := protocol.NewUsageCollection(false, true)
+	observation := protocol.UsageCollectionObservation{LocalSourceID: "local-old", RunID: original.RunID, ThreadID: reg.ThreadID, SessionID: reg.SessionID, Collection: collection, Sequence: 1}
+	if op := h.exec(runner(host), h.env(protocol.OpRunnerUsageCollection, target, observation, nil), ObserveUsageCollection{}); op.Error != nil {
+		t.Fatal(op)
+	}
+	command := h.env(protocol.OpResumeUsageCollection, protocol.Target{Type: "usage_source", ID: original.RunID + "/old-thread"}, protocol.UsageCollectionControl{}, rev(1))
+	if op := h.exec(owner, command, ControlUsageCollection{Resume: true}); op.Error != nil {
+		t.Fatal(op)
+	}
+	candidate.Capabilities = append(candidate.Capabilities, protocol.CapabilityUsageCollection)
+	candidate.Sequence++
+	nextHeartbeat, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: candidate})
+	if err != nil || nextHeartbeat.Control == nil || len(nextHeartbeat.Control.UsageCollectionCommands) != 0 {
+		t.Fatal("foreign source sent to new journal", nextHeartbeat, err)
+	}
+	old.Sequence++
+	hb, err = h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &old, Runs: []protocol.LeaseRef{ref}})
+	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || len(hb.Control.UsageCollectionCommands) != 1 || hb.Control.UsageCollectionCommands[0].RequestID != command.RequestID {
+		t.Fatal("draining journal did not receive the original command and renewal", hb, err)
 	}
 	candidate.Sequence++
 	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: candidate, Runs: []protocol.LeaseRef{ref}}); err == nil {

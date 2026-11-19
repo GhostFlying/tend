@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -60,6 +61,17 @@ func (AuthorizeRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			x.Env.ExpectedControlRevision == nil || *x.Env.ExpectedControlRevision != control.Revision || rt.Runtime.AppliedControlRevision != control.Revision ||
 			rt.Runtime.UpgradeID != b.UpgradeID || rt.Runtime.Mode == protocol.RunnerNormal || rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || batch.View.Hosts[i].Phase != "draining" {
 			return Outcome{NoEffect: true, Result: protocol.UpgradeGrant{Binding: b}}, nil
+		}
+		// The original runner predates host file locks. Wait for initial workspace
+		// preparation (report_started) before allowing another process to claim.
+		if rt.Runtime.JournalID == "" {
+			var preparing bool
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE host_id=? AND observed_state='starting')`, h.HostID).Scan(&preparing); err != nil {
+				return Outcome{}, err
+			}
+			if preparing || slices.Contains(rt.Runtime.Blockers, "workspace_operation_active") {
+				return Outcome{NoEffect: true, Result: protocol.UpgradeGrant{Binding: b}}, nil
+			}
 		}
 		h.RollingFrom, h.RollingProcess, h.CandidateInstance = rt.Runtime.InstanceID, proof, b.ProcessInstanceID
 		h.GrantDeadline = capUpgradeDeadline(&batch, now+batch.GrantMillis)

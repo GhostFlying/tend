@@ -69,7 +69,10 @@ ExecStartPost=/usr/bin/python3 {Path(__file__).with_name('controlled.py').resolv
     def systemctl(*args, check=True):
         subprocess.run(["systemctl", "--user", *args], timeout=40, check=check)
     systemctl("link", str(unit))
-    stack.callback(lambda: systemctl("stop", unit.name, check=False))
+    def cleanup():
+        subprocess.run(["journalctl", "--user", "-u", unit.name, "-n", "14", "--no-pager"], check=False)
+        systemctl("stop", unit.name, check=False)
+    stack.callback(cleanup)
     systemctl("start", unit.name)
     initial = int((root / "initial.pid").read_text())
     eventually("old supervisor listening", lambda: (state / "control.sock").is_socket(), [])
@@ -206,4 +209,9 @@ if __name__ == "__main__":
         except BaseException:
             for path in [*root.glob("*.log"), *root.glob("host/*.log"), *root.glob("host/supervisor/state.json")]:
                 print(path.name, path.read_text()[-3500:], flush=True)
+            db = root / "data/tend.db"
+            if db.is_file():
+                with contextlib.closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as c:
+                    for row in c.execute("select status,phase,json_extract(state_json,'$.view.hosts') from upgrades"):
+                        print("upgrade", row, flush=True)
             raise

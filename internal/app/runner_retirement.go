@@ -85,7 +85,11 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if err != nil {
 			return Outcome{}, err
 		}
-		if n != 0 {
+		pending, err := usageCollectionCommands(ctx, tx.Q(), host, &rt)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if n != 0 || len(pending) > 0 {
 			break
 		}
 		result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
