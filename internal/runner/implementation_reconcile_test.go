@@ -455,7 +455,9 @@ func TestRecoveredPauseReportObservesHandbackAndStop(t *testing.T) {
 			close(proceed)
 			r.wg.Wait()
 			saved, err := r.cfg.Journal.Run(ctx, as.RunID)
-			if <-observed != protocol.RunUnknown || <-observed != protocol.RunUnknown ||
+			firstObservation := <-observed
+			secondObservation := <-observed
+			if firstObservation != protocol.RunUnknown || secondObservation != protocol.RunUnknown ||
 				err != nil || !saved.Held || !saved.StoppedConfirmed || saved.Phase != journal.PhaseWorkerDone ||
 				len(saved.WorkerResult) == 0 || len(finals) != 0 {
 				t.Fatal("pause recovery lost the result or bypassed human control", saved, err)
