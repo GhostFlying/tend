@@ -62,6 +62,30 @@ func selectIssueOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, p pr
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "select ownership only for an active or paused Issue")
 	}
 	selection := &protocol.IssueOwnerSelection{CategoryID: p.CategoryID, AgentID: p.AgentID, OwnershipPolicy: policy}
+	if issue.Assignee.Kind == protocol.IssueAssigneeAgent && !migration {
+		target := issue.Assignee.Ref
+		if previous := issue.OwnerSelection; previous != nil && !p.Replace {
+			if previous.CategoryID != selection.CategoryID {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace=true is required to change an existing responsibility")
+			}
+			target, err = store.IssueOwnerAgentID(ctx, tx.Q(), issue.IssueControl, previous.AgentID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if target != issue.Assignee.Ref {
+				// Keep the authorized handoff, including a backed-up
+				// migration whose runner is still selected by category.
+				selection = previous
+			}
+		}
+		if !p.Replace && p.AgentID != "" && p.AgentID != target {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace=true is required to change an existing responsibility")
+		}
+		if selection.AgentID == "" && target == issue.Assignee.Ref {
+			selection.AgentID = target
+			p.AgentID = target
+		}
+	}
 	if err := validateIssueOwnerSelection(ctx, tx.Q(), selection); err != nil {
 		return Outcome{}, err
 	}
@@ -81,7 +105,11 @@ func selectIssueOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, p pr
 		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 			return Outcome{}, err
 		}
-		if spec.CategoryID != selection.CategoryID || spec.AgentID != selection.AgentID || spec.OwnershipPolicy != selection.OwnershipPolicy {
+		agentID := spec.AgentID
+		if manager.Pin != nil {
+			agentID = manager.Pin.Identity.ExecutionEnvironmentID + "/" + manager.Pin.Identity.LocalID
+		}
+		if spec.CategoryID != selection.CategoryID || agentID != selection.AgentID || spec.OwnershipPolicy != selection.OwnershipPolicy {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "replace=true is required to change an existing responsibility")
 		}
 	}

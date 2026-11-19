@@ -40,14 +40,19 @@ func initialIssueOwnerCandidates(ctx context.Context, q store.Querier) ([]schedu
 		if choice == nil {
 			continue
 		}
-		c := scheduler.Candidate{InitialIssue: true, IssueID: id, ActionID: "issue:" + id, Kind: protocol.ActionCoordinate, Status: protocol.ActionPending, Generation: 1, SpecVersion: 1, TargetSpecVersion: 1, CreatedAt: todo, Lifecycle: protocol.TaskQueued, Control: protocol.ControlManaged, Block: protocol.BlockNone, Weight: weight, DependenciesDone: true, Manager: &protocol.IssueManagerSpec{IssueID: id, CategoryID: choice.CategoryID, AgentID: choice.AgentID, OwnershipPolicy: choice.OwnershipPolicy, ExpectedAssignmentEpoch: epoch}}
+		control := protocol.IssueControl{IssueID: id, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeKind(kind), Ref: ref}, AssignmentEpoch: epoch}
+		agentID, err := store.IssueOwnerAgentID(ctx, q, control, choice.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		c := scheduler.Candidate{InitialIssue: true, IssueID: id, ActionID: "issue:" + id, Kind: protocol.ActionCoordinate, Status: protocol.ActionPending, Generation: 1, SpecVersion: 1, TargetSpecVersion: 1, CreatedAt: todo, Lifecycle: protocol.TaskQueued, Control: protocol.ControlManaged, Block: protocol.BlockNone, Weight: weight, DependenciesDone: true, Manager: &protocol.IssueManagerSpec{IssueID: id, CategoryID: choice.CategoryID, AgentID: agentID, OwnershipPolicy: choice.OwnershipPolicy, ExpectedAssignmentEpoch: epoch}}
 		if category != "active" {
 			c.AdmissionMessage = "Selected owner capability category is inactive: " + choice.CategoryID
 		}
 		// Historical hosted adoption retains its full original/migration checks.
 		// Ordinary unclaimed definitions need no historical aggregate decoding.
 		if kind == string(protocol.IssueAssigneeAgent) {
-			legacy[id] = protocol.Issue{IssueControl: protocol.IssueControl{IssueID: id, Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: ref}, AssignmentEpoch: epoch}}
+			legacy[id] = protocol.Issue{IssueControl: control}
 		}
 
 		out = append(out, c)

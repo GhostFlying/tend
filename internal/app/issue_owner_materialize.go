@@ -25,7 +25,11 @@ func materializeIssueOwner(ctx context.Context, x *Exec, tx *store.Tx, c *schedu
 		return nil, err
 	}
 	selection := issue.OwnerSelection
-	if selection.CategoryID != c.Manager.CategoryID || selection.AgentID != c.Manager.AgentID || selection.OwnershipPolicy != c.Manager.OwnershipPolicy || issue.AssignmentEpoch != c.Manager.ExpectedAssignmentEpoch {
+	agentID, err := store.IssueOwnerAgentID(ctx, tx.Q(), issue.IssueControl, selection.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if selection.CategoryID != c.Manager.CategoryID || agentID != c.Manager.AgentID || selection.OwnershipPolicy != c.Manager.OwnershipPolicy || issue.AssignmentEpoch != c.Manager.ExpectedAssignmentEpoch {
 		return nil, protocol.Errorf(protocol.CodeStaleRevision, "Issue execution selection changed")
 	}
 	if _, err := store.CurrentIssueManagerTask(ctx, tx.Q(), issue.IssueID); !errors.Is(err, store.ErrNotFound) {
@@ -39,7 +43,7 @@ func materializeIssueOwner(ctx context.Context, x *Exec, tx *store.Tx, c *schedu
 		return nil, err
 	}
 	id := x.IDs.New(protocol.PrefixTask)
-	spec := protocol.IssueManagerSpec{AdmissionRevision: issue.Revision, IssueID: issue.IssueID, CategoryID: selection.CategoryID, AgentID: selection.AgentID, OwnershipPolicy: selection.OwnershipPolicy, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Execute the explicitly admitted Issue under its current definition"}
+	spec := protocol.IssueManagerSpec{AdmissionRevision: issue.Revision, IssueID: issue.IssueID, CategoryID: selection.CategoryID, AgentID: agentID, OwnershipPolicy: selection.OwnershipPolicy, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Execute the explicitly admitted Issue under its current definition"}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return nil, err

@@ -75,6 +75,9 @@ func TestManagerMigrationPreservesHostedConversationAndWaitsForUnknownReceipts(t
 	if err != nil || changed.Status != protocol.OpSucceeded {
 		t.Fatal(changed, err)
 	}
+	pending := admissionCurrent(t, h, issue.IssueID)
+	routine := protocol.RequestIssueManagerPayload{CategoryID: protocol.DefaultIssueManagerCategory, ExpectedAssignmentEpoch: pending.AssignmentEpoch, Reason: "Reaffirm the existing ownership choice"}
+	reaffirmed := canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestOwner, env.Target, routine, rev(pending.Revision)), RequestIssueOwner{}))
 	claim := func() *protocol.Assignment {
 		op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: r, WorkspaceProtocol: 1}, nil), Claim{})
 		var result struct {
@@ -117,6 +120,9 @@ func TestManagerMigrationPreservesHostedConversationAndWaitsForUnknownReceipts(t
 	got := claim()
 	if got == nil || got.Manager == nil || got.Manager.ConversationID != "issue:"+issue.IssueID {
 		t.Fatal("migration lost the original conversation", got)
+	}
+	if reaffirmed.Revision != pending.Revision || *reaffirmed.OwnerSelection != *pending.OwnerSelection {
+		t.Fatal("routine selection edited the pending migration", reaffirmed.IssueControl)
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		history, err := store.GetHostedExecution(t.Context(), tx.Q(), old.RequestID)

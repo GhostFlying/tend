@@ -43,6 +43,10 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 	if err != nil {
 		return Outcome{}, err
 	}
+	agentID := pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID
+	if !c.Manager.ReceiptOnly && m.State == "assigned" && (i.AssignmentEpoch != m.AssignmentEpoch || i.Assignee != (protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: agentID})) {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "manager responsibility changed")
+	}
 	var events []Event
 	if m.State == "pending" {
 		if i.State != protocol.IssueActive {
@@ -50,6 +54,21 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 		}
 		if i.AssignmentEpoch != m.ExpectedEpoch || i.AssignmentState != "active" || (i.Assignee.Kind != protocol.IssueAssigneeOwner && m.HandoffID == "" && c.Manager.AdmissionRevision == 0) {
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "manager responsibility changed")
+		}
+		target := c.Manager.AgentID
+		if c.Manager.AdmissionRevision > 0 {
+			if i.OwnerSelection == nil {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue owner selection changed")
+			}
+			target, err = store.IssueOwnerAgentID(ctx, tx.Q(), i.IssueControl, i.OwnerSelection.AgentID)
+			if err != nil {
+				return Outcome{}, err
+			}
+		} else if m.HandoffID == "" && i.Assignee.Kind == protocol.IssueAssigneeAgent {
+			target = i.Assignee.Ref
+		}
+		if target != "" && target != agentID {
+			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "runner does not match the assigned Issue owner")
 		}
 		if m.HandoffID != "" {
 			blockers, err := hostedHandoffBlockers(ctx, tx.Q(), i.IssueID, i.AssignmentEpoch)
@@ -67,7 +86,12 @@ func claimIssueManager(ctx context.Context, x *Exec, tx *store.Tx, c scheduler.C
 			}
 		}
 		next := i
-		next.Assignee = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: pin.Identity.ExecutionEnvironmentID + "/" + pin.Identity.LocalID}
+		next.Assignee = protocol.IssueAssignee{Kind: protocol.IssueAssigneeAgent, Ref: agentID}
+		if next.OwnerSelection != nil {
+			selection := *next.OwnerSelection
+			selection.AgentID = agentID
+			next.OwnerSelection = &selection
+		}
 		next.AssignmentEpoch++
 		next.Revision++
 		if !c.Manager.ReceiptOnly && next.BoardStatus() == protocol.IssueTodo {
