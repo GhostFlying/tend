@@ -342,6 +342,13 @@ func TestEmergencyWindowStopsSoleAcceptingRunner(t *testing.T) {
 			if len(batch.View.WindowStops) != 1 || !batch.View.WindowStops[0].Primary || upgradeCtl(h, host).Mode != protocol.RunnerMaintenance {
 				t.Fatal(batch.View)
 			}
+			if !busy {
+				// Reopen the original pending-state spelling on the same batch.
+				batch.View.WindowStops[0].State = "draining"
+				if err := h.store.Write(ctx, func(tx *store.Tx) error { return tx.PutUpgrade(ctx, batch) }); err != nil {
+					t.Fatal(err)
+				}
+			}
 			process := protocol.RecoveryIdentity{PID: 84, StartTicks: 100, SHA256: rt.Build.BinarySHA256, LaunchID: rt.InstanceID}
 			id, err := h.app.PrimaryWindowTarget(ctx, runner(host), process)
 			if err != nil || id != "emergency" {
@@ -361,7 +368,7 @@ func TestEmergencyWindowStopsSoleAcceptingRunner(t *testing.T) {
 				return out
 			}
 			grant := retire(req)
-			if !grant.Allowed || grant.RemainingMillis <= 0 {
+			if !grant.Allowed || grant.RemainingMillis <= 0 || grant.ReadySequence <= 0 || retire(req).ReadySequence != grant.ReadySequence {
 				t.Fatal(grant)
 			}
 			if v := upgradeTick(h, ServerObservation{MainDrained: true}); v.Phase != windowMaintenance {
