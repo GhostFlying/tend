@@ -365,3 +365,33 @@ test("readable refresh merges deltas without rereading retained pages", async ()
   expect(read.state.get().value?.event_seq).toBe(22);
   read.close();
 });
+
+test("a pending history page does not delay live activity or lose earlier changes", async () => {
+  const initial = { ...page([entry("current", 10)], true, 10), event_seq: 20, readable: true };
+  let releaseHistory!: (value: IssueActivityPage) => void;
+  const historyPage = new Promise<IssueActivityPage>((resolve) => {
+    releaseHistory = resolve;
+  });
+  const read = new IssueActivityRead({
+    get: async <T>(path: string) => {
+      const query = new URL(path, "https://example.test").searchParams;
+      if (query.has("before")) return (await historyPage) as T;
+      if (!query.has("since")) return initial as T;
+      const updated = [entry("current", 10, "live reply")];
+      if (query.get("from") === "0") updated.unshift(entry("old", 4, "changed earlier reply"));
+      return { ...initial, items: updated, more: false, event_seq: 21 } as T;
+    },
+  });
+  await read.open("issue");
+  const earlier = read.earlier();
+  await read.refresh();
+  expect(read.state.get().value?.items?.map((row) => row.title)).toEqual(["live reply"]);
+  releaseHistory({ ...initial, items: [entry("old", 4)], more: false });
+  await earlier;
+  expect(read.state.get().value?.items?.map((row) => row.title)).toEqual([
+    "changed earlier reply",
+    "live reply",
+  ]);
+  expect(read.state.get().value?.more).toBe(false);
+  read.close();
+});
