@@ -258,3 +258,53 @@ func TestEmergencyDrainerUsesIndependentHostConnection(t *testing.T) {
 		t.Fatal(h.s.Status())
 	}
 }
+
+type crashWindowAuthority struct {
+	primaryWindowAuthority
+	target string
+	err    error
+}
+
+func (a *crashWindowAuthority) Target(context.Context, Identity) (string, error) {
+	return a.target, a.err
+}
+
+func TestEmergencyPrimaryExitBeforeDiscovery(t *testing.T) {
+	for _, point := range []string{"before_monitor", "before_launch", "unavailable", "ordinary"} {
+		t.Run(point, func(t *testing.T) {
+			h := newHarness(t)
+			old := h.s.Status().Process
+			a := &retirementAuthority{fakeAuthority: h.a, sequence: 10, ready: map[string]bool{old.LaunchID: true}, confirmed: map[string]int{}}
+			control := &crashWindowAuthority{primaryWindowAuthority: primaryWindowAuthority{&windowStopAuthority{retirementAuthority: a}}}
+			h.s.opts.WindowAuthority = control
+			delete(h.p.live, old.PID)
+			if point == "ordinary" {
+				h.step(t)
+				h.step(t)
+				if h.s.Status().Process == old || h.s.Status().Operation.Phase != "committed" {
+					t.Fatal(h.s.Status())
+				}
+				return
+			}
+			if point == "before_launch" {
+				h.step(t)
+				if h.s.Status().Operation.Phase != "backed_up" {
+					t.Fatal(h.s.Status())
+				}
+			}
+			if point == "unavailable" {
+				control.err = errors.New("test channel offline")
+				if err := h.s.Step(t.Context()); err == nil || h.s.Status().Operation != nil {
+					t.Fatal("ambiguous crash restart", err)
+				}
+				control.err = nil
+			}
+			control.target = "window"
+			h.step(t)
+			state := h.s.Status()
+			if state.EmergencyPrimary == nil || !state.EmergencyPrimary.Confirmed || state.Process != old || len(h.p.live) > 0 || h.p.stops != 0 || !done(state.Operation) {
+				t.Fatal("dead primary was restarted or signalled", state)
+			}
+		})
+	}
+}

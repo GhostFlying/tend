@@ -117,6 +117,12 @@ func (c *windowClient) rpc(ctx context.Context, op string, input, out any) error
 func (c *windowClient) Target(ctx context.Context, process updater.Identity) (string, error) {
 	var id string
 	err := c.rpc(ctx, "runner.window_target", process, &id)
+	// A historical server without this optional capability cannot have
+	// admitted a forced window. Preserve its normal crash-restart contract.
+	var wire *protocol.Error
+	if errors.As(err, &wire) && wire.Code == protocol.CodeInvalidRequest && wire.Message == `operation "runner.window_target" is not part of the runner protocol` {
+		return "", nil
+	}
 	return id, err
 }
 func (c *windowClient) Retire(ctx context.Context, req protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
