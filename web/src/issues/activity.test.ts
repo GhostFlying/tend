@@ -395,3 +395,55 @@ test("a pending history page does not delay live activity or lose earlier change
   expect(read.state.get().value?.more).toBe(false);
   read.close();
 });
+
+test.each(["delta-first", "history-first"])(
+  "activity keeps the new history boundary when reads resolve together (%s)",
+  async (order) => {
+    const initial = { ...page([entry("current", 10)], true, 10), event_seq: 20, readable: true };
+    let finishDelta!: (value: IssueActivityPage) => void;
+    let finishHistory!: (value: IssueActivityPage) => void;
+    const delta = new Promise<IssueActivityPage>((resolve) => {
+      finishDelta = resolve;
+    });
+    const history = new Promise<IssueActivityPage>((resolve) => {
+      finishHistory = resolve;
+    });
+    const ranges: string[] = [];
+    const read = new IssueActivityRead({
+      get: async <T>(path: string) => {
+        const query = new URL(path, "https://example.test").searchParams;
+        if (query.has("before")) return (await history) as T;
+        if (!query.has("since")) return initial as T;
+        ranges.push(`${query.get("since")}:${query.get("from")}`);
+        if (ranges.length === 1) return (await delta) as T;
+        const items = query.get("from") === "0" ? [entry("old", 4, "updated old")] : [];
+        return { ...initial, items, more: false, event_seq: 21 } as T;
+      },
+    });
+    await read.open("issue");
+    const earlier = read.earlier();
+    const refresh = read.refresh();
+    const releaseDelta = () =>
+      finishDelta({
+        ...initial,
+        items: [entry("current", 10, "updated current")],
+        more: false,
+        event_seq: 21,
+      });
+    const releaseHistory = () =>
+      finishHistory({ ...initial, items: [entry("old", 4)], more: false, next_before: 0 });
+    if (order === "delta-first") {
+      releaseDelta();
+      releaseHistory();
+    } else {
+      releaseHistory();
+      releaseDelta();
+    }
+    await Promise.all([earlier, refresh]);
+    const value = read.state.get().value;
+    read.close();
+    expect(ranges).toEqual(["20:10", "20:0"]);
+    expect(value?.items?.map(({ title }) => title)).toEqual(["updated old", "updated current"]);
+    expect(value).toMatchObject({ more: false, next_before: 0, event_seq: 21 });
+  },
+);

@@ -2,6 +2,12 @@ import type { IssueActivityPage, IssueActivityEntry } from "../api/generated/api
 import type { Reader } from "../live/data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 
+type ActivityDelta = {
+  base: IssueActivityPage;
+  pages: IssueActivityPage[];
+};
+type ActivityReadPage = IssueActivityPage & { delta?: ActivityDelta };
+
 /** Retain already-read pages while replacing streamed entries by stable ID. */
 export class IssueActivityRead {
   private id = "";
@@ -9,10 +15,10 @@ export class IssueActivityRead {
   private generation = 0;
   private earlierRead: Promise<void> | null = null;
   private controller: AbortController | undefined;
-  readonly read: WorkItemRead<IssueActivityPage>;
-  readonly state: WorkItemRead<IssueActivityPage>["state"];
+  readonly read: WorkItemRead<ActivityReadPage>;
+  readonly state: WorkItemRead<ActivityReadPage>["state"];
   constructor(private api: Reader) {
-    this.read = new WorkItemRead({
+    const source: Reader = {
       get: async <T>(path: string, signal?: AbortSignal) => {
         const generation = this.generation;
         if (signal?.aborted) throw signal.reason;
@@ -58,7 +64,10 @@ export class IssueActivityRead {
           next_before: page.next_before,
         } as T;
       },
-    });
+    };
+    this.read = new WorkItemRead(source, (page) =>
+      page.delta ? this.applyDelta(page.delta) : page,
+    );
     this.state = this.read.state;
   }
   open(id: string, retained?: IssueActivityPage | null): Promise<void> {
@@ -118,7 +127,11 @@ export class IssueActivityRead {
     for (const item of page.items ?? []) this.older.set(item.id, item);
   }
 
-  private async changes(path: string, current: IssueActivityPage, signal?: AbortSignal) {
+  private async changes(
+    path: string,
+    current: IssueActivityPage,
+    signal?: AbortSignal,
+  ): Promise<ActivityReadPage> {
     const from = current.more ? (current.next_before ?? 0) : 0;
     const query = `${path}&since=${current.event_seq}&from=${from}`;
     const head = await this.api.get<IssueActivityPage>(query, signal);
@@ -131,18 +144,22 @@ export class IssueActivityRead {
       );
       pages.push(page);
     }
-    if (signal?.aborted) return current;
+    return { ...head, delta: { base: current, pages } };
+  }
+
+  private applyDelta({ base, pages }: ActivityDelta): IssueActivityPage {
+    // WorkItemRead applies this immediately before publishing. A history page
+    // can finish after the network delta resolves but before it is installed.
     for (const changed of pages) this.merge(changed);
-    // Reading history can advance the range while the delta is in flight.
-    // earlier() then refreshes using its own page's coverage.
-    const latest = this.state.get().value ?? current;
+    const latest = this.state.get().value ?? base;
+    const sameCoverage =
+      latest.next_before === base.next_before &&
+      latest.more === base.more &&
+      latest.event_seq === base.event_seq;
     return {
       ...latest,
       items: this.items(),
-      event_seq:
-        latest.next_before === current.next_before && latest.more === current.more
-          ? head.event_seq
-          : latest.event_seq,
+      event_seq: sameCoverage ? pages[0]!.event_seq : latest.event_seq,
     };
   }
 
