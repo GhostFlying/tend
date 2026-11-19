@@ -34,6 +34,7 @@ const CurrentVersion int64 = 27
 const (
 	PhaseClaimed    = "claimed"
 	PhaseStarted    = "started"
+	PhasePausing    = "pausing"
 	PhaseWorkerDone = "worker_done"
 	PhaseSubmitting = "submitting"
 	PhaseReleasing  = "releasing"

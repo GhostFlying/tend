@@ -18,6 +18,7 @@ import (
 type ownedWorkerProcess struct {
 	Version              int                    `json:"version"`
 	RunID                string                 `json:"run_id"`
+	Attempt              int                    `json:"attempt,omitempty"`
 	Dir                  string                 `json:"directory"`
 	ThreadID             string                 `json:"thread_id,omitempty"`
 	Process              ownedProcessIdentity   `json:"process"`
@@ -78,7 +79,7 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 			if err := saveOwnedWorkerProcess(spec, record); err != nil {
 				return err
 			}
-			return errors.New("traex: detached native execution remains active; retain original workspace and use bounded isolation")
+			return fmt.Errorf("traex: detached native execution remains active: %w", harness.ErrOwnedWorkerStillPresent)
 		}
 		return nil
 	}
@@ -97,6 +98,36 @@ func (ws *Workers) StopOwnedWorker(ctx context.Context, spec harness.WorkerSpec)
 	}
 	record.CloseObserved = true
 	return saveOwnedWorkerProcess(spec, record)
+}
+
+// ObserveOwnedWorkerStop checks only the recorded process identities. After an
+// uncertain close an empty detached snapshot does not prove what was observed.
+func (ws *Workers) ObserveOwnedWorkerStop(ctx context.Context, spec harness.WorkerSpec) error {
+	record, err := ws.ownedWorkerProcess(spec)
+	if err != nil {
+		return err
+	}
+	// The first attempt can use a legacy record: no earlier attempt of this
+	// Run could have supplied it. Subsequent attempts need their exact pin.
+	if spec.Attempt <= 0 || record.Attempt != spec.Attempt && (spec.Attempt != 1 || record.Attempt != 0) {
+		return errors.New("traex: original app-server attempt identity is unavailable or changed")
+	}
+	if spec.Thread == "" || spec.Thread != record.ThreadID {
+		return errors.New("traex: original app-server thread identity is unavailable or changed")
+	}
+	if !record.closed() {
+		if len(record.Detached) == 0 {
+			return errors.New("traex: original detached process set is unavailable")
+		}
+		if err := confirmKnownOwnedProcessSetStopped(ctx, record.Process, record.Detached); err != nil {
+			return err
+		}
+		record.ReconciledCloseScope = knownOwnedProcessSet
+		if err := saveOwnedWorkerProcess(spec, record); err != nil {
+			return err
+		}
+	}
+	return codexenv.ConfirmExecutionClosed(ctx, spec.StateDir, "run:"+spec.RunID)
 }
 
 func (ws *Workers) ownedWorkerProcess(spec harness.WorkerSpec) (ownedWorkerProcess, error) {
@@ -174,7 +205,7 @@ func (ws *Workers) recordOwnedWorkerProcess(spec harness.WorkerSpec, opts *Optio
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	record := &ownedWorkerProcess{Version: 1, RunID: spec.RunID, Dir: spec.Dir}
+	record := &ownedWorkerProcess{Version: 1, RunID: spec.RunID, Attempt: spec.Attempt, Dir: spec.Dir}
 	opts.onStartProcess = func(cmd *exec.Cmd) error {
 		identity, err := inspectOwnedProcess(cmd.Process.Pid)
 		if err != nil {

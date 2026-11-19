@@ -52,7 +52,8 @@ type ClaimPayload struct {
 
 // Reconciliation verdicts for held runs.
 const (
-	// VerdictContinue means the run is current and its lease is active.
+	// VerdictContinue identifies a current run. An unknown held run with an
+	// outstanding pause may reconcile its stop receipt on a lapsed lease.
 	VerdictContinue = "continue"
 	// VerdictContinueRetained requires strict native reattachment support.
 	VerdictContinueRetained = "continue_retained"

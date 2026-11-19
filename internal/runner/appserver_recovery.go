@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -39,19 +40,27 @@ func (r *Runner) stopOwnedAppServer(ctx context.Context, as protocol.Assignment,
 	if !ok || !stopper.SupportsOwnedWorkerStop() {
 		return false, nil
 	}
+	err = r.withOwnedAppServer(ctx, as, run, execution, stopper.StopOwnedWorker)
+	if err != nil && !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
+		err = fmt.Errorf("%w: %w", harness.ErrOwnedWorkerUnconfirmed, err)
+	}
+	return true, err
+}
+
+func (r *Runner) withOwnedAppServer(ctx context.Context, as protocol.Assignment, run journal.Run, execution ResolvedExecution, operation func(context.Context, harness.WorkerSpec) error) error {
 	workspace, ok := execution.Workspaces.(interface {
 		ReattachRecovery(context.Context, protocol.Assignment) (Prepared, error)
 	})
 	if !ok {
-		return true, errors.New("runner: original app-server workspace recovery is unavailable")
+		return errors.New("runner: original app-server workspace recovery is unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	p, err := workspace.ReattachRecovery(ctx, as)
 	if err != nil {
-		return true, err
+		return err
 	}
-	return true, stopper.StopOwnedWorker(ctx, harness.WorkerSpec{RunID: as.RunID, Dir: p.Dir, StateDir: p.StateDir, Thread: run.Thread})
+	return operation(ctx, harness.WorkerSpec{RunID: as.RunID, Dir: p.Dir, StateDir: p.StateDir, Thread: run.Thread, Attempt: run.Attempts})
 }
 
 // recoverAppServerAttempt settles an interrupted local attempt as a failure,

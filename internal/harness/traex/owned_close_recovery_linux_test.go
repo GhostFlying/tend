@@ -107,7 +107,7 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 	}
 	identity.Group = group
 	ws := NewWorkers(WorkerOptions{})
-	spec := harness.WorkerSpec{RunID: "original-run", Dir: t.TempDir(), StateDir: t.TempDir(), Thread: "original-thread"}
+	spec := harness.WorkerSpec{RunID: "original-run", Dir: t.TempDir(), StateDir: t.TempDir(), Thread: "original-thread", Attempt: 1}
 	opts := Options{Bin: bin, Dir: spec.Dir, Env: []string{envAcceptanceCloseServer + "=1"}}
 	record, err := ws.recordOwnedWorkerProcess(spec, &opts)
 	if err != nil {
@@ -139,8 +139,28 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 	if err := confirmOwnedProcessStopped(saved.Process); err != nil {
 		t.Fatal("original group did not actually exit", err)
 	}
-	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
-		t.Fatalf("live detached process became completed execution: %v", err)
+	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) || !errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("live detached process did not retain retryable stop proof: %v", err)
+	}
+	if err := ws.ObserveOwnedWorkerStop(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("observation lost the live original process: %v", err)
+	}
+	changed := spec
+	changed.Attempt++
+	if err := ws.ObserveOwnedWorkerStop(ctx, changed); err == nil || errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("a different attempt must stay unresolved without automatic retry: %v", err)
+	}
+	reused := saved
+	reused.Detached = []ownedProcessIdentity{identity}
+	reused.Detached[0].StartTicks = "1"
+	if err := saveOwnedWorkerProcess(spec, reused); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.ObserveOwnedWorkerStop(ctx, spec); err == nil || errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("an identity mismatch must stay unresolved without automatic retry: %v", err)
+	}
+	if err := saveOwnedWorkerProcess(spec, saved); err != nil {
+		t.Fatal(err)
 	}
 	current, _, active, err := readOwnedProcess(identity.PID)
 	if err != nil || !sameOwnedProcessIdentity(current, identity) || !active {
@@ -159,10 +179,21 @@ func TestOwnedCloseDetachedExitReconcilesKnownProcessSet(t *testing.T) {
 	if err := ws.StopOwnedWorker(ctx, spec); !errors.Is(err, harness.ErrOwnedWorkerUnconfirmed) {
 		t.Fatal("legacy record without a PGID guessed its original process group", err)
 	}
+	if err := ws.ObserveOwnedWorkerStop(ctx, spec); err == nil || errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("a detached snapshot without its group must stay unresolved: %v", err)
+	}
+	missing := saved
+	missing.Detached = nil
+	if err := saveOwnedWorkerProcess(spec, missing); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.ObserveOwnedWorkerStop(ctx, spec); err == nil || errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+		t.Fatalf("missing detached evidence must stay unresolved: %v", err)
+	}
 	if err := saveOwnedWorkerProcess(spec, saved); err != nil {
 		t.Fatal(err)
 	}
-	if err := ws.StopOwnedWorker(ctx, spec); err != nil {
+	if err := ws.ObserveOwnedWorkerStop(ctx, spec); err != nil {
 		t.Fatal("original known process set could not reconcile after exit", err)
 	}
 	saved, err = ws.ownedWorkerProcess(spec)

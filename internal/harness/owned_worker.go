@@ -9,6 +9,14 @@ import (
 // independent stop could not prove its closure. It grants no retry or replay.
 var ErrOwnedWorkerUnconfirmed = errors.New("original owned worker closure is unconfirmed")
 
+// ErrOwnedWorkerStillPresent means the original recorded process set is
+// still observable. A later observation can prove exit without signalling it.
+var ErrOwnedWorkerStillPresent = errors.New("original owned worker process set still exists")
+
+type OwnedWorkerStopObserver interface {
+	ObserveOwnedWorkerStop(context.Context, WorkerSpec) error
+}
+
 // OwnedWorkerStopper closes a locally owned native process using durable run
 // identity. It cannot launch, resume or resend work. A missing or unverifiable
 // identity must return an error, retaining the original run for reconciliation.

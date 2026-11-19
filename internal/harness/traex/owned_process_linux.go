@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/harness"
 )
 
 type ownedProcessIdentity struct {
@@ -337,7 +339,7 @@ func confirmDetachedProcessesStopped(processes []ownedProcessIdentity) error {
 			return err
 		}
 		if sameOwnedProcessIdentity(current, original) && active {
-			return errors.New("traex: observed detached native execution remains active; original workspace must stay isolated")
+			return fmt.Errorf("traex: observed detached native execution remains active; original workspace must stay isolated: %w", harness.ErrOwnedWorkerStillPresent)
 		}
 	}
 	return nil
@@ -358,7 +360,7 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 	if present, err := ownedGroupPresent(original.PID); err != nil {
 		return err
 	} else if present {
-		return errors.New("traex: original app-server group still exists; independent external closure may be required")
+		return fmt.Errorf("traex: original app-server group still exists; independent external closure may be required: %w", harness.ErrOwnedWorkerStillPresent)
 	}
 	for _, process := range detached {
 		if err := ctx.Err(); err != nil {
@@ -381,7 +383,7 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 			return errors.New("traex: original detached process PID was reused")
 		}
 		if active {
-			return errors.New("traex: original detached native execution remains active")
+			return fmt.Errorf("traex: original detached native execution remains active: %w", harness.ErrOwnedWorkerStillPresent)
 		}
 		groups := []int{process.Group}
 		if process.PID != process.Group {
@@ -401,7 +403,7 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 				return err
 			}
 			if present {
-				return errors.New("traex: original detached process group still exists; independent external closure may be required")
+				return fmt.Errorf("traex: original detached process group still exists; independent external closure may be required: %w", harness.ErrOwnedWorkerStillPresent)
 			}
 		}
 	}
@@ -436,14 +438,14 @@ func confirmOwnedProcessStopped(original ownedProcessIdentity) error {
 		return err
 	}
 	if err == nil && active {
-		return errors.New("traex: original app-server is still active")
+		return fmt.Errorf("traex: original app-server is still active: %w", harness.ErrOwnedWorkerStillPresent)
 	}
 	active, err = ownedGroupActive(original.PID)
 	if err != nil {
 		return err
 	}
 	if active {
-		return errors.New("traex: original app-server descendants are still active")
+		return fmt.Errorf("traex: original app-server descendants are still active: %w", harness.ErrOwnedWorkerStillPresent)
 	}
 	return nil
 }
