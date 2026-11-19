@@ -9,12 +9,14 @@ import { MessageReceipts } from "./MessageReceipts.tsx";
 import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
 import { useEntryState } from "../app/router.ts";
 import {
+  Component,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type RefObject,
 } from "react";
 import type {
@@ -94,19 +96,32 @@ export function IssueActivity({
     ids: Set<string>;
     ready: boolean;
   } | null>(null);
-  const restoreProcessLayout = useCallback(
+  const snapshotProcessLayout = useCallback(
     (node: HTMLDivElement) => {
-      const anchor = readingAnchor.current;
-      if (!anchor || following.current || reading.followsLatest() || pagination.current?.ready)
-        return;
+      if (pagination.current?.ready) return null;
+      if (following.current || reading.followsLatest()) {
+        if (node.scrollHeight - node.scrollTop - node.clientHeight < 100) return null;
+        following.current = false;
+        reading.pauseFollowing();
+      }
+      const anchor = captureAnchor(node);
+      readingAnchor.current = anchor;
+      return anchor;
+    },
+    [reading],
+  );
+  const restoreProcessLayout = useCallback(
+    (node: HTMLDivElement, anchor: ScrollAnchor) => {
       correctScroll(node, () => restoreAnchor(node, anchor));
+      const restoredTop = node.scrollTop;
       cancelAnimationFrame(dataFrame.current);
       dataFrame.current = requestAnimationFrame(() => {
-        correctScroll(node, () => restoreAnchor(node, anchor));
+        if (Math.abs(node.scrollTop - restoredTop) < 1)
+          correctScroll(node, () => restoreAnchor(node, anchor));
         readingAnchor.current = captureAnchor(node);
       });
     },
-    [reading, correctScroll],
+    [correctScroll],
   );
   useEffect(() => {
     const node = scroll.current;
@@ -514,6 +529,7 @@ export function IssueActivity({
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
             onPaginationCancel={cancelContinuation}
+            onProcessSnapshot={snapshotProcessLayout}
             onProcessLayout={restoreProcessLayout}
             scroll={scroll}
             currentIssueId={issue.issue_id}
@@ -548,12 +564,45 @@ export function IssueActivity({
     </div>
   );
 }
+
+interface ProcessLayoutProps {
+  change: object | null;
+  scroll: RefObject<HTMLDivElement | null>;
+  snapshot(node: HTMLDivElement): ScrollAnchor | null;
+  restore(node: HTMLDivElement, anchor: ScrollAnchor): void;
+  children: ReactNode;
+}
+
+class ProcessLayout extends Component<ProcessLayoutProps> {
+  getSnapshotBeforeUpdate(previous: Readonly<ProcessLayoutProps>) {
+    const { change, scroll, snapshot } = this.props;
+    // Read before the DOM changes, even if the browser has yet to emit scroll.
+    return previous.change && change && change !== previous.change && scroll.current
+      ? snapshot(scroll.current)
+      : null;
+  }
+
+  componentDidUpdate(
+    _previous: Readonly<ProcessLayoutProps>,
+    _state: unknown,
+    anchor: ScrollAnchor | null,
+  ) {
+    const node = this.props.scroll.current;
+    if (node && anchor) this.props.restore(node, anchor);
+  }
+
+  render() {
+    return this.props.children;
+  }
+}
+
 function ActivityBlock({
   entry,
   rows,
   onContinuation,
   onPagination,
   onPaginationCancel,
+  onProcessSnapshot,
   onProcessLayout,
   scroll,
   currentIssueId,
@@ -566,7 +615,8 @@ function ActivityBlock({
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
   onPaginationCancel(trigger: string): void;
-  onProcessLayout(node: HTMLDivElement): void;
+  onProcessSnapshot(node: HTMLDivElement): ScrollAnchor | null;
+  onProcessLayout(node: HTMLDivElement, anchor: ScrollAnchor): void;
   scroll: RefObject<HTMLDivElement | null>;
 }) {
   const { client } = useServices();
@@ -649,11 +699,6 @@ function ActivityBlock({
     if (process.value && process.value.depth > savedProcessDepth)
       saveProcessDepth(process.value.depth);
   }, [process.value, savedProcessDepth, saveProcessDepth]);
-  useLayoutEffect(() => {
-    const node = scroll.current;
-    if (node && traceOpen && !process.loading && (process.value || process.error))
-      onProcessLayout(node);
-  }, [onProcessLayout, process.error, process.loading, process.value, scroll, traceOpen]);
   const processBlock = readable
     ? process.value
       ? {
@@ -704,7 +749,7 @@ function ActivityBlock({
   };
   const displayRows = activityTurnRows(rows, processBlock, readable);
   const firstReply = displayRows.find((row) => row.kind === "agent");
-  return (
+  const discussion = (
     <article
       className={styles.discussion}
       data-scroll-id={entry.id}
@@ -898,6 +943,16 @@ function ActivityBlock({
         </p>
       )}
     </article>
+  );
+  return (
+    <ProcessLayout
+      change={readable && traceOpen ? process : null}
+      scroll={scroll}
+      snapshot={onProcessSnapshot}
+      restore={onProcessLayout}
+    >
+      {discussion}
+    </ProcessLayout>
   );
 }
 function Milestone({

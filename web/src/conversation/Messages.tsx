@@ -212,16 +212,13 @@ export function AgentTurn({
     wasActive.current = status.active;
   }, [process, status.active]);
   const prefix = useId();
-  const [visibleStart, setVisibleStart] = useState(Math.max(0, tools.length - 12));
-  const waitingForTools = useRef(false);
+  const initialVisibleStart = Math.max(0, tools.length - 12);
   const ready = process?.ready;
-  useLayoutEffect(() => {
-    if (traceOpen && ready === false) waitingForTools.current = true;
-    if (ready && waitingForTools.current) {
-      waitingForTools.current = false;
-      setVisibleStart(Math.max(0, tools.length - 12));
-    }
-  }, [ready, tools.length, traceOpen]);
+  const [visibleStart, setVisibleStart] = useState(ready === false ? null : initialVisibleStart);
+  // Commit the initial window before the Issue measures its scroll anchor.
+  // Keep that window as later pages and tool updates arrive.
+  if (ready && visibleStart === null) setVisibleStart(initialVisibleStart);
+  const firstVisible = visibleStart ?? initialVisibleStart;
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
@@ -233,7 +230,7 @@ export function AgentTurn({
           aria-controls={`${prefix}-trace`}
           onClick={(event) => {
             event.currentTarget.focus();
-            if (!traceOpen && !process) setVisibleStart(Math.max(0, tools.length - 12));
+            if (!traceOpen && !process) setVisibleStart(initialVisibleStart);
             if (process) process.toggle();
             else setTraceOpen(!traceOpen);
           }}
@@ -257,20 +254,20 @@ export function AgentTurn({
                 : "这段历史记录没有保存可查看的执行步骤；已保存的公开回复显示在下方。"}
           </p>
         )}
-        {visibleStart > 0 && (
+        {firstVisible > 0 && (
           <button
             type="button"
             className={styles.traceTrigger}
-            onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
+            onClick={() => setVisibleStart(Math.max(0, firstVisible - 12))}
           >
-            显示更早 {visibleStart} 步
+            显示更早 {firstVisible} 步
           </button>
         )}
         {tools.map((item, index) => (
           <AgentItem
             key={item.message_id}
             item={item}
-            hidden={index < visibleStart}
+            hidden={index < firstVisible}
             hideChoices
             id={`${prefix}-item-${item.message_id}`}
             onToolOpenChange={() => {}}
