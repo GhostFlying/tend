@@ -298,3 +298,76 @@ func TestOwnedCloseDoesNotReplaceFailedObservationWithGroupExit(t *testing.T) {
 		t.Fatalf("incomplete observation became a close fact: %+v error=%v", saved, err)
 	}
 }
+
+func TestPauseObserverReconcilesPriorBootDespiteReusedPID(t *testing.T) {
+	current, group, active, err := readOwnedProcess(os.Getpid())
+	if err != nil || !active {
+		t.Fatalf("cannot read current test process: %+v %v", current, err)
+	}
+	detached := current
+	detached.BootID = "cacaabaa-0000-4000-8000-000000000000"
+	detached.Group = group
+	if detached.BootID == current.BootID {
+		t.Fatal("synthetic historical boot equals the current boot")
+	}
+	leader := detached
+	for n := current.PID + 1; n < current.PID+1000; n++ {
+		present, err := ownedGroupPresent(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !present && n != group {
+			leader.PID = n
+			leader.Group = n
+			break
+		}
+	}
+	if leader.PID == detached.PID {
+		t.Fatal("could not pick a distinct historical leader group")
+	}
+	spec := harness.WorkerSpec{RunID: "original", Thread: "original-thread", Attempt: 1, Dir: t.TempDir(), StateDir: t.TempDir()}
+	record := ownedWorkerProcess{Version: 1, RunID: spec.RunID, ThreadID: spec.Thread, Attempt: 1, Dir: spec.Dir, Process: leader, Detached: []ownedProcessIdentity{detached}}
+	ws := NewWorkers(WorkerOptions{})
+	for _, tc := range []struct {
+		name string
+		edit func(*ownedWorkerProcess)
+	}{
+		{"missing_snapshot", func(r *ownedWorkerProcess) { r.Detached = nil }},
+		{"mixed_boots", func(r *ownedWorkerProcess) { r.Detached[0].BootID = current.BootID }},
+		{"malformed_boot", func(r *ownedWorkerProcess) {
+			r.Process.BootID = "zacaabaa-0000-4000-8000-000000000000"
+			r.Detached[0].BootID = r.Process.BootID
+		}},
+		{"missing_group", func(r *ownedWorkerProcess) { r.Detached[0].Group = 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conflict := record
+			conflict.Detached = []ownedProcessIdentity{detached}
+			tc.edit(&conflict)
+			if err := saveOwnedWorkerProcess(spec, conflict); err != nil {
+				t.Fatal(err)
+			}
+			if err := ws.ObserveOwnedWorkerStop(t.Context(), spec); err == nil || errors.Is(err, harness.ErrOwnedWorkerStillPresent) {
+				t.Fatalf("unproven historical record did not stay unresolved: %v", err)
+			}
+			saved, err := ws.ownedWorkerProcess(spec)
+			if err != nil || saved.closed() {
+				t.Fatalf("unproven historical record was recorded as closed: %+v, %v", saved, err)
+			}
+		})
+	}
+	if err := saveOwnedWorkerProcess(spec, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.ObserveOwnedWorkerStop(t.Context(), spec); err != nil {
+		t.Fatal("complete previous-boot process set remains pending", err)
+	}
+	saved, err := ws.ownedWorkerProcess(spec)
+	if err != nil || saved.CloseObserved || saved.ReconciledCloseScope != knownOwnedProcessSet {
+		t.Fatalf("observer did not persist only the known-set proof: %+v, %v", saved, err)
+	}
+	after, _, active, err := readOwnedProcess(current.PID)
+	if err != nil || !active || !sameOwnedProcessIdentity(after, current) {
+		t.Fatalf("observer changed the current process that reused the detached PID: %+v, %v", after, err)
+	}
+}

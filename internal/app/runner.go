@@ -872,10 +872,10 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictRetain, Desired: run.DesiredState, Reason: "original maintenance execution requires independent business reconciliation"})
 			continue
 		}
-		if h.Observed == protocol.RunUnknown && pause != nil && desired == protocol.DesiredPaused {
-			// The runner holds the original pause but cannot confirm exit yet.
-			// Keep the lapsed credential usable for this stop receipt without
-			// renewing execution or representing it as live.
+		if h.Observed == protocol.RunUnknown && pause != nil && (desired == protocol.DesiredPaused || desired == protocol.DesiredHeld) {
+			// Observation and receipt reconciliation use the original pause.
+			// Return control even under owner hold without renewing execution
+			// or representing the original Run as live.
 			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause, ExternalWait: externalWait})
 			continue
 		}

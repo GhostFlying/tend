@@ -4,6 +4,7 @@ package traex
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -65,8 +66,7 @@ func readOwnedProcess(pid int) (identity ownedProcessIdentity, group int, active
 	if err != nil {
 		return identity, 0, false, err
 	}
-	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-	identity.BootID = strings.TrimSpace(string(boot))
+	identity.BootID, err = readOwnedKernelBootID()
 	return identity, group, active, err
 }
 
@@ -129,11 +129,11 @@ func stopOwnedProcess(ctx context.Context, original ownedProcessIdentity, checkD
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, err := readOwnedKernelBootID()
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(boot)) != original.BootID {
+	if boot != original.BootID {
 		// A host reboot ended the entire original kernel process set.
 		return nil
 	}
@@ -273,11 +273,11 @@ func ownedDetachedDescendants(original ownedProcessIdentity) ([]ownedProcessIden
 	if err := validOwnedProcessIdentity(original); err != nil {
 		return nil, err
 	}
-	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, err := readOwnedKernelBootID()
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(string(boot)) != original.BootID {
+	if boot != original.BootID {
 		return nil, nil
 	}
 	current, group, active, err := readOwnedProcess(original.PID)
@@ -354,7 +354,33 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := confirmOwnedProcessStopped(original); err != nil {
+	if err := validOwnedProcessIdentity(original); err != nil {
+		return err
+	}
+	if original.Group != 0 && original.Group != original.PID {
+		return errors.New("traex: original app-server group identity conflicts with its leader")
+	}
+	for _, process := range detached {
+		if err := validOwnedProcessIdentity(process); err != nil {
+			return err
+		}
+		if process.BootID != original.BootID {
+			return errors.New("traex: original detached process boot identity changed")
+		}
+		if process.Group <= 1 {
+			return errors.New("traex: original detached process group was not recorded; independent external closure is required")
+		}
+	}
+	boot, err := readOwnedKernelBootID()
+	if err != nil {
+		return err
+	}
+	if boot != original.BootID {
+		// Every validated identity belongs to the previous kernel. Numbers
+		// reused on this boot cannot say anything about that process set.
+		return ctx.Err()
+	}
+	if err := confirmCurrentOwnedProcessStopped(original); err != nil {
 		return err
 	}
 	if present, err := ownedGroupPresent(original.PID); err != nil {
@@ -365,15 +391,6 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 	for _, process := range detached {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		if process.BootID != original.BootID {
-			return errors.New("traex: original detached process boot identity changed")
-		}
-		if err := validOwnedProcessIdentity(process); err != nil {
-			return err
-		}
-		if process.Group <= 1 {
-			return errors.New("traex: original detached process group was not recorded; independent external closure is required")
 		}
 		current, group, active, err := readOwnedProcess(process.PID)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -410,9 +427,30 @@ func confirmKnownOwnedProcessSetStopped(ctx context.Context, original ownedProce
 	return ctx.Err()
 }
 
+func validOwnedBootID(id string) bool {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' || id != strings.ToLower(id) {
+		return false
+	}
+	var raw [16]byte
+	n, err := hex.Decode(raw[:], []byte(strings.ReplaceAll(id, "-", "")))
+	return err == nil && n == len(raw) && raw != [16]byte{}
+}
+
+func readOwnedKernelBootID() (string, error) {
+	body, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(body))
+	if !validOwnedBootID(id) {
+		return "", errors.New("traex: current kernel boot identity is unavailable")
+	}
+	return id, nil
+}
+
 func validOwnedProcessIdentity(original ownedProcessIdentity) error {
 	start, err := strconv.ParseUint(original.StartTicks, 10, 64)
-	if original.PID <= 1 || err != nil || start == 0 || len(original.BootID) != 36 || original.BootID[8] != '-' || original.BootID[13] != '-' || original.BootID[18] != '-' || original.BootID[23] != '-' {
+	if original.PID <= 1 || err != nil || start == 0 || !validOwnedBootID(original.BootID) {
 		return errors.New("traex: incomplete original app-server process identity")
 	}
 	return nil
@@ -422,16 +460,20 @@ func confirmOwnedProcessStopped(original ownedProcessIdentity) error {
 	if err := validOwnedProcessIdentity(original); err != nil {
 		return err
 	}
-	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	boot, err := readOwnedKernelBootID()
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(boot)) != original.BootID {
+	if boot != original.BootID {
 		// A host reboot ended the entire original kernel process set.
 		return nil
 	}
+	return confirmCurrentOwnedProcessStopped(original)
+}
+
+func confirmCurrentOwnedProcessStopped(original ownedProcessIdentity) error {
 	current, group, active, err := readOwnedProcess(original.PID)
-	if err == nil && (current != original || group != original.PID) {
+	if err == nil && (!sameOwnedProcessIdentity(current, original) || group != original.PID) {
 		return errors.New("traex: original app-server PID was reused; no process was stopped")
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

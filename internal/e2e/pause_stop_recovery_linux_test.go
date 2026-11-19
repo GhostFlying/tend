@@ -78,8 +78,9 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 
 	var mu sync.Mutex
 	var envelopes []protocol.Envelope
-	var holdReplay, failNextEventUpload, eventUploadFailed, holdBeforeReceipt atomic.Bool
-	var receiptHoldHellos atomic.Int64
+	var holdReplay, failNextEventUpload, eventUploadFailed, observeHold atomic.Bool
+	var holdReplies atomic.Int64
+	var originalRunID string
 	firstUpload := make(chan struct{})
 	releaseUpload := make(chan struct{})
 	holdReplay.Store(restart)
@@ -96,9 +97,6 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		var env protocol.Envelope
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return err
-		}
-		if env.Operation == protocol.OpRunnerHello && holdBeforeReceipt.Load() {
-			receiptHoldHellos.Add(1)
 		}
 		if env.Operation == protocol.OpRunnerEvents && failNextEventUpload.CompareAndSwap(true, false) {
 			close(firstUpload)
@@ -121,6 +119,28 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 			}
 			envelopes = append(envelopes, env)
 			mu.Unlock()
+		}
+		return nil
+	}, response: func(operation string, res *http.Response) error {
+		if operation != protocol.OpRunnerHello || !observeHold.Load() {
+			return nil
+		}
+		raw, err := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if err != nil {
+			return err
+		}
+		res.Body = io.NopCloser(bytes.NewReader(raw))
+		var wire struct{ Operation *protocol.Operation }
+		var hello protocol.HelloResult
+		if json.Unmarshal(raw, &wire) == nil && wire.Operation != nil &&
+			wire.Operation.Status == protocol.OpSucceeded && json.Unmarshal(wire.Operation.Result, &hello) == nil {
+			for _, v := range hello.Runs {
+				if v.RunID == originalRunID && v.Verdict == protocol.VerdictContinue &&
+					v.Desired == protocol.DesiredHeld && v.PauseHandoff != nil {
+					holdReplies.Add(1)
+				}
+			}
 		}
 		return nil
 	}}
@@ -196,6 +216,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 	})
 
 	as := original.Assignment
+	originalRunID = as.RunID
 	readIssue := func() protocol.IssueView {
 		t.Helper()
 		var v protocol.IssueView
@@ -223,6 +244,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 	eventually(t, "the original lease lapses while the stop remains pending", func() bool {
 		return srv.runState(protocol.RoleImplement) == protocol.RunUnknown && workerQuestionLease(t, srv, as.RunID).Status == store.LeaseLapsed
 	})
+	lapsed := workerQuestionLease(t, srv, as.RunID)
 	if restart {
 		stop()
 		start()
@@ -254,21 +276,20 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 	}
 	if !restart {
 		setControl(protocol.ControlHumanControl)
+		observeHold.Store(true)
 		eventually(t, "pause reconciliation sees the owner's hold", func() bool {
 			clock.Advance(25 * time.Millisecond)
-			return workerQuestionLease(t, srv, as.RunID).Status == store.LeaseActive
+			return holdReplies.Load() > 0
 		})
-		observed := workers.present.Load()
-		// Keep the hold beyond the prior retry and permit more Hello cycles.
-		// During the hold none of them may run the stop observer.
-		heldUntil := time.Now().Add(500 * time.Millisecond)
+		observed, firstReply := workers.present.Load(), holdReplies.Load()
 		eventually(t, "owner control stays in force across the pause retry", func() bool {
 			clock.Advance(25 * time.Millisecond)
-			return time.Now().After(heldUntil)
+			return holdReplies.Load() > firstReply
 		})
-		if workers.present.Load() != observed {
-			t.Fatal("pause observer ran during owner control")
+		if workers.present.Load() != observed || workerQuestionLease(t, srv, as.RunID) != lapsed {
+			t.Fatal("pause control observation touched the process or renewed the lapsed lease")
 		}
+		observeHold.Store(false)
 		setControl(protocol.ControlManaged)
 	}
 	if err := activeJournal.AppendEvent(ctx, as.RunID, protocol.RunEvent{Kind: "worker.observed", Body: json.RawMessage(`{"source":"pause-recovery-test"}`)}); err != nil {
@@ -297,16 +318,17 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 			}
 		})
 		setControl(protocol.ControlHumanControl)
-		holdBeforeReceipt.Store(true)
+		earlierReplies := holdReplies.Load()
+		observeHold.Store(true)
 		close(releaseUpload)
 		eventually(t, "the releasing Run reconciles through repeated Hello during takeover", func() bool {
 			clock.Advance(25 * time.Millisecond)
 			progress := readIssue().Pause
 			if progress == nil || progress.Pending != 1 || progress.Stopped != 0 ||
-				workerQuestionLease(t, srv, as.RunID).Status == store.LeaseReleased {
-				t.Fatal("the first pause receipt settled during owner control", progress)
+				workerQuestionLease(t, srv, as.RunID) != lapsed {
+				t.Fatal("the first pause receipt settled or changed the lapsed lease during owner control", progress)
 			}
-			return eventUploadFailed.Load() && receiptHoldHellos.Load() >= 2
+			return eventUploadFailed.Load() && holdReplies.Load() >= earlierReplies+2
 		})
 		mu.Lock()
 		sent := len(envelopes)
@@ -314,7 +336,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		if sent != 0 {
 			t.Fatalf("runner submitted the first pause receipt during takeover: %d requests", sent)
 		}
-		holdBeforeReceipt.Store(false)
+		observeHold.Store(false)
 		setControl(protocol.ControlManaged)
 	}
 	eventually(t, "the first event upload fails after physical closure", func() bool {

@@ -318,6 +318,8 @@ type network struct {
 	before func(*http.Request) error
 	// request observes the exact operation before delivery; set before start.
 	request func(string)
+	// response observes the delivered response; set before start.
+	response func(string, *http.Response) error
 }
 
 func (n *network) loseNext(op string, times int) {
@@ -401,6 +403,12 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err == nil && lose {
 		res.Body.Close()
 		return nil, errors.New("connection reset")
+	}
+	if err == nil && n.response != nil {
+		if err := n.response(env.Operation, res); err != nil {
+			res.Body.Close()
+			return nil, err
+		}
 	}
 	return res, err
 }

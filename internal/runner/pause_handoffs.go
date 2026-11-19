@@ -194,6 +194,9 @@ func (r *Runner) finishPause(ctx context.Context, as protocol.Assignment, a *act
 // reportPause retains every original receipt until it has its own ACK. A pause
 // never runs workspace completion/cleanup and never replaces unknown work.
 func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment, a *active) error {
+	r.mu.Lock()
+	a.pauseOnly, a.reporting = true, true
+	r.mu.Unlock()
 	if r.pauseStopDesired(a) == protocol.DesiredHeld {
 		return &pauseStopPending{errHeld}
 	}
