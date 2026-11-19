@@ -9,6 +9,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func (h *harness) reconcileResources(host string) []protocol.WorkspaceReconcile {
@@ -134,4 +135,46 @@ func TestWorkspaceReconcileRejectsOwnerPrincipal(t *testing.T) {
 		t.Fatalf("owner impersonated runner process proof: %v", err)
 	}
 
+}
+
+func TestRollingWorkspaceReleaseKeepsPredecessorProofUntilAcceptanceEnds(t *testing.T) {
+	h := newDeliverableHarness(t)
+	task := h.createReportTask("accept on successor", temporaryReportSpec())
+	impl, _, _ := h.claimDeliverableRun()
+	h.reportDirectory(impl, t.TempDir())
+	op := h.runAs(impl, protocol.OpRunsSubmitArtifact, protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "complete"}}, SubmitArtifact{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	if h.releaseResource(task.TaskID, impl.Workspace.ID) {
+		t.Fatal("released occupied workspace before acceptance")
+	}
+	accept, ok, _ := h.claimDeliverableRun()
+	if !ok || accept.Role != protocol.RoleAccept {
+		t.Fatal(accept)
+	}
+	// Seed only the generation mapping here; the rolling admission test covers claim.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		runtime, err := store.GetHostRuntime(t.Context(), tx.Q(), "linux-1")
+		if err != nil {
+			return err
+		}
+		runtime.Runtime.JournalID = "successor"
+		if err = tx.PutHostRuntime(t.Context(), "linux-1", runtime); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO runner_journal_runs(run_id,journal_id) VALUES(?,'successor')`, accept.RunID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	op = h.runAs(accept, protocol.OpAcceptancesSubmit, protocol.VerdictPayload{Verdict: protocol.VerdictPassed}, SubmitAcceptance{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	proof := protocol.WorkspaceRelease{WorkspaceID: impl.Workspace.ID, TaskID: task.TaskID, JournalID: "successor"}
+	op = h.exec(runner("linux-1"), h.env(protocol.OpWorkspaceRelease, protocol.Target{Type: "workspace", ID: impl.Workspace.ID}, proof, nil), ReleaseWorkspace{})
+	if op.Error != nil || h.resourceForTask(task.TaskID).OccupiedBy != "" {
+		t.Fatal("predecessor proof lost while its task was still bound", op)
+	}
 }
