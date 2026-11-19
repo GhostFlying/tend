@@ -94,24 +94,20 @@ export function IssueActivity({
     ids: Set<string>;
     ready: boolean;
   } | null>(null);
-  const restoreProcessLayout = useCallback(() => {
-    const node = scroll.current;
-    const anchor = readingAnchor.current;
-    if (
-      !node ||
-      !anchor ||
-      following.current ||
-      reading.followsLatest() ||
-      pagination.current?.ready
-    )
-      return;
-    correctScroll(node, () => restoreAnchor(node, anchor));
-    cancelAnimationFrame(dataFrame.current);
-    dataFrame.current = requestAnimationFrame(() => {
+  const restoreProcessLayout = useCallback(
+    (node: HTMLDivElement) => {
+      const anchor = readingAnchor.current;
+      if (!anchor || following.current || reading.followsLatest() || pagination.current?.ready)
+        return;
       correctScroll(node, () => restoreAnchor(node, anchor));
-      readingAnchor.current = captureAnchor(node);
-    });
-  }, [scroll, reading, correctScroll]);
+      cancelAnimationFrame(dataFrame.current);
+      dataFrame.current = requestAnimationFrame(() => {
+        correctScroll(node, () => restoreAnchor(node, anchor));
+        readingAnchor.current = captureAnchor(node);
+      });
+    },
+    [reading, correctScroll],
+  );
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
@@ -186,8 +182,8 @@ export function IssueActivity({
   const rows = state.value?.items ?? emptyEntries;
   const activityRoot = useRef<HTMLDivElement>(null);
   const readable = state.value?.readable === true;
-  const processReads = useMemo(() => new IssueProcessReads(client), [client, issue.issue_id]);
-  useEffect(() => () => processReads.close(), [processReads]);
+  const processReads = useMemo(() => new IssueProcessReads(client), [client]);
+  useEffect(() => () => processReads.close(), [processReads, issue.issue_id]);
   useEffect(() => {
     if (!readable || !rows.length) return;
     let cancelIdle: (() => void) | undefined;
@@ -519,6 +515,7 @@ export function IssueActivity({
             onPagination={beginContinuation}
             onPaginationCancel={cancelContinuation}
             onProcessLayout={restoreProcessLayout}
+            scroll={scroll}
             currentIssueId={issue.issue_id}
           />
         ) : group.length > 1 ? (
@@ -558,6 +555,7 @@ function ActivityBlock({
   onPagination,
   onPaginationCancel,
   onProcessLayout,
+  scroll,
   currentIssueId,
   processReads,
 }: {
@@ -568,7 +566,8 @@ function ActivityBlock({
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
   onPaginationCancel(trigger: string): void;
-  onProcessLayout(): void;
+  onProcessLayout(node: HTMLDivElement): void;
+  scroll: RefObject<HTMLDivElement | null>;
 }) {
   const { client } = useServices();
   const readable = !!processReads;
@@ -625,15 +624,18 @@ function ActivityBlock({
     },
     [block, processReads],
   );
+  const invalidateProcess = useCallback(() => {
+    processVersion.current++;
+  }, []);
   useEffect(() => {
     if (traceOpen) requestProcess();
-    return () => {
-      processVersion.current++;
-    };
-  }, [requestProcess, traceOpen]);
+    return invalidateProcess;
+  }, [invalidateProcess, requestProcess, traceOpen]);
   useLayoutEffect(() => {
-    if (traceOpen && !process.loading && (process.value || process.error)) onProcessLayout();
-  }, [onProcessLayout, process.error, process.loading, process.value, traceOpen]);
+    const node = scroll.current;
+    if (node && traceOpen && !process.loading && (process.value || process.error))
+      onProcessLayout(node);
+  }, [onProcessLayout, process.error, process.loading, process.value, scroll, traceOpen]);
   const processBlock = readable
     ? process.value
       ? {
