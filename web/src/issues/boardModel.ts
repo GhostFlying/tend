@@ -50,12 +50,21 @@ export function executionLabel(counts?: ExecutionCounts): string {
 
 // Current responsibility stays open after its historical executions finish.
 export function responsibilityLabel(item: IssueSummary): string {
-  if (item.state === "closed") return "Issue 已完成";
-  if (item.state === "cancelled") return "Issue 已取消";
-  if (item.state === "cancelling") return "取消收尾中";
-  if (item.assignment_state !== "active") return "Agent 交接中";
   const board = item.board;
   const counts = board?.execution;
+  if (item.state === "closed" || item.state === "cancelled") {
+    const labels = [item.state === "closed" ? "Issue 已完成" : "Issue 已取消"];
+    const stopping =
+      (counts?.starting ?? 0) +
+      (counts?.running ?? 0) +
+      (counts?.accepting ?? 0) +
+      (counts?.recovering ?? 0);
+    if (stopping) labels.push(`${stopping} 项执行收尾中`);
+    if (counts?.unknown) labels.push("执行结果待核对");
+    return labels.join(" · ");
+  }
+  if (item.state === "cancelling") return "取消收尾中";
+  if (item.assignment_state !== "active") return "Agent 交接中";
   const summarize = (label: string, includeRunning = false) => {
     const labels = [label];
     if (includeRunning && counts?.running) labels.push(`${counts.running} 项运行中`);

@@ -1974,6 +1974,7 @@ async function checkBoardColumnWidths() {
           "offscreen columns leave keyboard navigation",
         );
         await waitForCardInViewport("done");
+        await card("done").getByText("Issue 已完成 · 1 项执行收尾中", { exact: true }).waitFor();
         assert(
           await doneTab.evaluate((tab) => document.activeElement === tab),
           "the selected tab retains visible keyboard focus after a swipe",
@@ -2050,6 +2051,9 @@ async function checkBoardColumnWidths() {
         await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
         await minimumWidth("cancelled");
+        await card("cancelled")
+          .getByText("Issue 已取消 · 1 项执行收尾中", { exact: true })
+          .waitFor();
 
         const backlogTab = page.getByRole("tab", { name: /^待安排/ });
         const backlogTitle = card("backlog").getByRole("button", {
@@ -2089,6 +2093,36 @@ async function checkBoardColumnWidths() {
         }
         assert.equal(await boardFits(), width === 1920);
         if (width === 1920) {
+          const terminalCards = [
+            ["done", "Issue 已完成"],
+            ["cancelled", "Issue 已取消"],
+          ] as const;
+          for (const [status, label] of terminalCards) {
+            await card(status).getByText(`${label} · 1 项执行收尾中`, { exact: true }).waitFor();
+          }
+          const terminalRows = terminalCards.map(([status]) =>
+            issueRows.find((row) => row.issue_id === `board-${status}`)!,
+          );
+          try {
+            for (const row of terminalRows) row.board!.execution.running = 0;
+            const event = {
+              event_seq: ++seq,
+              object_type: "run",
+              object_id: "terminal-owner-run",
+              kind: "run.manager_stopped",
+              created_at: new Date().toISOString(),
+            };
+            for (const stream of streams) {
+              stream.write(
+                `id: ${event.event_seq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`,
+              );
+            }
+            for (const [status, label] of terminalCards) {
+              await card(status).getByText(label, { exact: true }).waitFor();
+            }
+          } finally {
+            for (const row of terminalRows) row.board!.execution.running = 1;
+          }
           const box = (await card("cancelled").boundingBox())!;
           assert(box.x + box.width <= width);
           const columnWidths = await board.evaluate((el) =>

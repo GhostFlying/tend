@@ -137,3 +137,69 @@ func TestIssueBoardProjectsCurrentOwnerExecutionAcrossPhysicalWait(t *testing.T)
 	}
 	check("independent acceptance queued while owner runs", protocol.ExecutionCounts{Running: 1, Queued: 1}, "")
 }
+
+func TestIssueBoardKeepsOwnerExecutionUntilTerminalStop(t *testing.T) {
+	for _, endpoint := range []struct {
+		name   string
+		action string
+		status protocol.IssueWorkStatus
+		state  protocol.IssueState
+	}{
+		{"done", "set_status", protocol.IssueDone, protocol.IssueClosed},
+		{"cancelled column", "set_status", protocol.IssueWorkCancelled, protocol.IssueCancelled},
+		{"cancel", "cancel", protocol.IssueWorkCancelled, protocol.IssueCancelled},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			h, _, issue, assignment, _ := reviewManagerAssignment(t)
+			check := func(phase string, want int) {
+				t.Helper()
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					for _, board := range []bool{false, true} {
+						page, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{
+							Board: board, IncludeClosed: true, ReadRoot: issue.IssueID,
+						})
+						if err != nil {
+							return err
+						}
+						if len(page.Items) != 1 || page.Items[0].IssueID != issue.IssueID {
+							t.Fatalf("%s: board=%t did not return this Issue: %+v", phase, board, page)
+						}
+						row := page.Items[0]
+						counts := row.Execution
+						if board && row.Board != nil {
+							counts = &row.Board.Execution
+						}
+						if counts == nil || counts.Starting != want || counts.Queued != 0 || counts.WaitingExternal != 0 {
+							t.Errorf("%s: board=%t issue=%s execution=%+v, want %d starting and no continuation", phase, board, row.State, counts, want)
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			check("claimed", 1)
+			var payload any = protocol.SetIssueStatusPayload{
+				ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: endpoint.status,
+			}
+			if endpoint.action == "cancel" {
+				payload = protocol.IssueControlPayload{
+					ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Cancel settled responsibility",
+				}
+			}
+			issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, endpoint.action, payload))
+			if issue.State != endpoint.state || h.run(assignment.RunID).ObservedState != protocol.RunStarting ||
+				h.lease(assignment.RunID).Status != store.LeaseActive {
+				t.Fatal("terminal Issue must retain its original Run and lease until the stop receipt")
+			}
+			check("terminal before stop receipt", 1)
+
+			stopOwnerClaim(t, h, assignment)
+			if h.run(assignment.RunID).ObservedState != protocol.RunFailed || h.lease(assignment.RunID).Status != store.LeaseReleased {
+				t.Fatal("physical stop must retire the original Run and release its lease")
+			}
+			check("after stop receipt", 0)
+		})
+	}
+}

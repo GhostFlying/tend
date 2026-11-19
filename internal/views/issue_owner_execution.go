@@ -12,10 +12,11 @@ import (
 // issueOwnerExecution reads the current coordination carrier independently of
 // the ordinary Task associations and the manager's logical lifecycle.
 func (f executionFacts) issueOwnerExecution(ctx context.Context, q store.Querier, issue protocol.Issue) (*protocol.TaskExecutionView, error) {
-	if issue.AssignmentState != "active" || issue.State == protocol.IssueClosed || issue.State == protocol.IssueCancelled {
+	if issue.AssignmentState != "active" {
 		return nil, nil
 	}
-	if _, queued := f.issues[issue.IssueID]; queued {
+	allowContinuation := issue.State != protocol.IssueClosed && issue.State != protocol.IssueCancelled
+	if _, queued := f.issues[issue.IssueID]; queued && allowContinuation {
 		return &protocol.TaskExecutionView{State: protocol.ExecutionQueued, Role: protocol.RoleIssueManager}, nil
 	}
 	m, err := store.CurrentIssueManagerTask(ctx, q, issue.IssueID)
@@ -30,10 +31,13 @@ func (f executionFacts) issueOwnerExecution(ctx context.Context, q store.Querier
 			m.Pin.Identity.ExecutionEnvironmentID+"/"+m.Pin.Identity.LocalID != issue.Assignee.Ref {
 			return nil, nil
 		}
-		execution, err := ownerCarrierRun(ctx, q, issue, m)
+		execution, err := ownerCarrierRun(ctx, q, issue, m, allowContinuation)
 		if execution != nil || err != nil {
 			return execution, err
 		}
+	}
+	if !allowContinuation {
+		return nil, nil
 	}
 	if state, pending := f.ownerActions[m.TaskID]; pending {
 		return &protocol.TaskExecutionView{State: state, Role: protocol.RoleIssueManager}, nil
@@ -41,9 +45,10 @@ func (f executionFacts) issueOwnerExecution(ctx context.Context, q store.Querier
 	return nil, nil
 }
 
-func ownerCarrierRun(ctx context.Context, q store.Querier, issue protocol.Issue, m store.IssueManagerTask) (*protocol.TaskExecutionView, error) {
+func ownerCarrierRun(ctx context.Context, q store.Querier, issue protocol.Issue, m store.IssueManagerTask, allowContinuation bool) (*protocol.TaskExecutionView, error) {
 	// The carrier pin covers older Runs without their own pin. An explicit Run
 	// identity or responsibility must agree whenever the ledger recorded it.
+	// An Issue can reach its endpoint before the runner releases its lease.
 	var v protocol.TaskExecutionView
 	var observed protocol.RunObserved
 	var stoppedWait bool
@@ -54,12 +59,14 @@ func ownerCarrierRun(ctx context.Context, q store.Querier, issue protocol.Issue,
  WHERE r.task_id=? AND r.role='issue_manager' AND r.host_id=?
  AND (e.run_id IS NULL OR (json_extract(e.pin_json,'$.identity.execution_environment_id')=? AND json_extract(e.pin_json,'$.identity.local_id')=?))
  AND (d.run_id IS NULL OR (d.issue_id=? AND d.assignment_epoch=? AND d.agent_ref=?))
- AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR
-      (r.observed_state='finished' AND EXISTS(
+ AND ((r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND
+       (? OR EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status IN ('active','lapsed')))) OR
+      (? AND r.observed_state='finished' AND EXISTS(
          SELECT 1 FROM run_external_waits w JOIN leases l USING(run_id)
          WHERE w.run_id=r.run_id AND w.status='waiting' AND w.successor_run_id IS NULL AND l.status='released')))
  ORDER BY (r.observed_state='finished'),r.created_at DESC,r.run_id DESC LIMIT 1`,
-		m.TaskID, m.HostID, m.Pin.Identity.ExecutionEnvironmentID, m.Pin.Identity.LocalID, issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref).Scan(&v.RunID, &observed, &stoppedWait)
+		m.TaskID, m.HostID, m.Pin.Identity.ExecutionEnvironmentID, m.Pin.Identity.LocalID,
+		issue.IssueID, issue.AssignmentEpoch, issue.Assignee.Ref, allowContinuation, allowContinuation).Scan(&v.RunID, &observed, &stoppedWait)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -81,7 +88,7 @@ func ownerCarrierRun(ctx context.Context, q store.Querier, issue protocol.Issue,
 	default:
 		v.State = protocol.ExecutionRunning
 	}
-	if v.State == protocol.ExecutionStarting || v.State == protocol.ExecutionRunning {
+	if allowContinuation && (v.State == protocol.ExecutionStarting || v.State == protocol.ExecutionRunning) {
 		v.Recovery, err = issueOwnerRunRecovery(ctx, q, issue, v.RunID)
 		if v.Recovery != nil {
 			v.State = protocol.ExecutionRecovering
