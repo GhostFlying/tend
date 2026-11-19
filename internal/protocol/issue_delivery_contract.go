@@ -67,6 +67,10 @@ func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {
 		branches = append(branches, map[string]any{"properties": props, "required": append([]string{"action"}, rule.required...)})
 	}
 	return map[string]any{"anyOf": branches, "allOf": []any{
+		map[string]any{
+			"if":   map[string]any{"required": []string{"pr_url"}},
+			"then": map[string]any{"properties": map[string]any{"action": map[string]any{"const": "register_pr"}}},
+		},
 		map[string]any{"properties": map[string]any{"reason": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"reason"}},
 		map[string]any{"if": map[string]any{"required": []string{"action", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"type": "string", "const": "complete"}}}, "then": map[string]any{"required": []string{"execution_task_id"}}},
 		map[string]any{"properties": map[string]any{"execution_duty_revision": map[string]any{"type": "integer", "minimum": 0}}}, map[string]any{"if": map[string]any{"required": []string{"execution_duty_revision"}, "properties": map[string]any{"execution_duty_revision": map[string]any{"type": "integer", "minimum": 1}}}, "then": map[string]any{"required": []string{"execution_task_id", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"type": "string", "const": "complete"}}}},
