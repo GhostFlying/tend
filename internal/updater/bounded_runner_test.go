@@ -535,6 +535,29 @@ func TestBoundedStartupAfterRollingCommitKeepsIndependentJournal(t *testing.T) {
 	}
 	h.s.state.Format = rollingStateFormat
 	h.s.state.CurrentJournal = "accepting-journal"
+	base := filepath.Join(filepath.Dir(h.data), "runner")
+	current := filepath.Join(base, "generations", h.s.state.CurrentJournal, "journal.db")
+	if err := os.MkdirAll(filepath.Dir(current), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"", ".incarnation"} {
+		if err := os.Rename(h.data+suffix, current+suffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original := filepath.Join(base, "journal.db")
+	if err := os.WriteFile(original, []byte("retained predecessor"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.s.cfg.DataFiles = []string{original}
+	grant.Plan.Journal.Path = current
+	grant.Plan.Authorization.DataIdentity = &grant.Plan.Journal
+	hash, err := protocol.RunnerBoundedMaintenancePlanSHA256(grant.Plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant.Plan.Authorization.PlanSHA256 = hash
+
 	if err := h.s.save(); err != nil {
 		t.Fatal(err)
 	}
