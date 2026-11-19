@@ -77,7 +77,7 @@ test("a revised turn reloads all disclosed pages and shares the depth read", asy
     },
   });
   const first = await reader.load(start);
-  const second = await reader.more(start, first);
+  const second = await reader.load(start, "high", first.depth + 1);
   expect(second.depth).toBe(2);
   const reload = reader.load(revision, "high", second.depth);
   expect(reader.load(revision, "high", second.depth)).toBe(reload);
@@ -88,5 +88,40 @@ test("a revised turn reloads all disclosed pages and shares the depth read", asy
     false,
     true,
   ]);
+  reader.close();
+});
+
+test("public process pages order records whose transcript callbacks arrived early", async () => {
+  const turn = block("ordered");
+  const tools = Array.from({ length: 3 }, (_, i) => ({
+    ...turn.trigger,
+    message_id: `tool-${i + 1}`,
+    kind: "tool_use",
+    seq: i + 1,
+    tool: {
+      name: "fixture",
+      input: "",
+      output: "",
+      status: "completed",
+      turn_id: "ordered",
+      updated_at: "",
+    } as const,
+  }));
+  const reader = new IssueProcessReads({
+    get: async <T>(path: string) => {
+      const second = path.includes("process_after=1");
+      return {
+        ...turn,
+        items: second ? [] : [{ ...tools[2], seq: 12 }],
+        process: {
+          items: second ? tools.slice(1) : tools.slice(0, 1),
+          more: !second,
+          ...(second ? {} : { next: 1 }),
+        },
+      } as T;
+    },
+  });
+  const result = await reader.load(turn, "high", 2);
+  expect(result.items.map(({ message_id }) => message_id)).toEqual(["tool-1", "tool-2", "tool-3"]);
   reader.close();
 });

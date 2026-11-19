@@ -24,11 +24,11 @@ export class WorkItemRead<T> {
     private received: (value: T) => T | void = () => {},
   ) {}
 
-  open(path: string): Promise<void> {
+  open(path: string, retained: T | null = null): Promise<void> {
     if (this.path === path) return this.refresh();
     this.close();
     this.path = path;
-    this.state.set({ value: null, loading: false });
+    this.state.set({ value: retained, loading: false });
     return this.refresh();
   }
 

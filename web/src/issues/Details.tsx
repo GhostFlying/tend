@@ -100,8 +100,15 @@ export function IssueDetails({
     void reads.openDeliveries(id);
     const stop = live.subscribeEvents((event) => {
       if (event.object_type === "message") {
-        const bound = reads.detail.state.get().value?.conversation?.conversation_id;
-        if (!event.item || event.item.conversation_id === bound) void reads.activity.refresh();
+        const detail = reads.detail.state.get().value;
+        // The activity cursor can be live before the Issue's conversation binding
+        // arrives. Until then, let the scoped activity endpoint filter deltas.
+        if (
+          !event.item ||
+          !detail ||
+          event.item.conversation_id === detail.conversation?.conversation_id
+        )
+          void reads.activity.refresh();
       } else reads.refresh();
     });
     const reset = live.snapshot.subscribe(() => reads.refresh());
