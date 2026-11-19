@@ -21,6 +21,9 @@ func TestPublicationAndDeliveryInputContracts(t *testing.T) {
 		p     UpdateIssueDeliveryPayload
 		field string
 	}{
+		{UpdateIssueDeliveryPayload{Action: "register_pr"}, "pr_url"},
+		{UpdateIssueDeliveryPayload{Action: "register_pr", PRURL: "https://example.invalid/a/b/pull/1"}, "GitHub.com"},
+		{UpdateIssueDeliveryPayload{Action: "report", TaskID: "original", PRURL: "https://github.com/a/b/pull/1"}, "register_pr"},
 		{UpdateIssueDeliveryPayload{Action: "recover_preparation", TaskID: "original"}, "expected_task_control_revision"},
 		{UpdateIssueDeliveryPayload{Action: "bind", TaskID: "original", ExecutionTaskID: "same"}, "expected_task_control_revision"},
 		{UpdateIssueDeliveryPayload{Action: "complete", TaskID: "original", ExecutionRunID: "old"}, "execution_task_id"},
@@ -31,7 +34,7 @@ func TestPublicationAndDeliveryInputContracts(t *testing.T) {
 			t.Fatal(tc, err)
 		}
 	}
-	for _, p := range []UpdateIssueDeliveryPayload{{Action: "submit_result", Result: &ArtifactPayload{}}, {Action: "report", TaskID: "source"}, {Action: "resume", TaskID: "source"}, {Action: "prepare", TaskID: "source"}, {Action: "report", TaskID: "source", UpgradeID: "historically-ignored"}, {Action: "submit_result", Result: &ArtifactPayload{}, Candidate: &IssueDeliveryCandidate{}}, {Action: "complete", TaskID: "source", ExecutionTaskID: "history", ExecutionRunID: "original", ExecutionDutyRevision: 2}} {
+	for _, p := range []UpdateIssueDeliveryPayload{{Action: "register_pr", PRURL: "https://github.com/a/b/pull/1"}, {Action: "submit_result", Result: &ArtifactPayload{}}, {Action: "report", TaskID: "source"}, {Action: "resume", TaskID: "source"}, {Action: "prepare", TaskID: "source"}, {Action: "report", TaskID: "source", UpgradeID: "historically-ignored"}, {Action: "submit_result", Result: &ArtifactPayload{}, Candidate: &IssueDeliveryCandidate{}}, {Action: "complete", TaskID: "source", ExecutionTaskID: "history", ExecutionRunID: "original", ExecutionDutyRevision: 2}} {
 		p.Reason = "Actual result"
 		if err := p.ValidateInput(); err != nil {
 			t.Fatal(p, err)
@@ -63,7 +66,7 @@ func TestPublicationAndDeliveryInputContracts(t *testing.T) {
 		}
 	}
 	branches := doc.Definitions["UpdateIssueDeliveryPayload"]["anyOf"].([]any)
-	if len(branches) != 8 {
+	if len(branches) != 9 {
 		t.Fatal("actions missing", branches)
 	}
 }

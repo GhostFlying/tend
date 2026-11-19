@@ -20825,6 +20825,20 @@
       "additionalProperties": false,
       "allOf": [
         {
+          "if": {
+            "required": [
+              "pr_url"
+            ]
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "const": "register_pr"
+              }
+            }
+          }
+        },
+        {
           "properties": {
             "reason": {
               "minLength": 1,
