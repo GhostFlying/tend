@@ -596,7 +596,7 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
-  {
+  for (const followEnd of [true, false]) {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 844 },
       serviceWorkers: "block",
@@ -660,6 +660,7 @@ try {
     let detailRequests = 0;
     let changedAt = 0;
     let currentProse = prose;
+    let appended: typeof trailing | null = null;
     let starting = () => {};
     let release = () => {};
     const started = new Promise<void>((resolve) => {
@@ -686,7 +687,7 @@ try {
           json: {
             items: query.has("since")
               ? Number(query.get("since")) < changedAt
-                ? [
+                ? (appended ?? [
                     {
                       ...row,
                       block: {
@@ -694,7 +695,7 @@ try {
                         items: [{ ...readableBlock.items[0]!, body: currentProse }],
                       },
                     },
-                  ]
+                  ])
                 : []
               : [{ ...row, block: readableBlock }, ...trailing],
             more: false,
@@ -748,9 +749,71 @@ try {
       await trigger.click();
       await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor();
       assert.equal(detailRequests, 1, "opening must reuse the held detail prefetch");
+      const lastTool = firstTools.at(-1)!.message_id;
+      const scrollport = page.locator("[data-issue-scroll]");
+      const initialHeight = await scrollport.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+        return node.scrollHeight;
+      });
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      if (followEnd) {
+        appended = trailing.slice(-4).map((entry, index) => {
+          const id = `new-readable-tail-${index}`;
+          const position = trailing.at(-1)!.position + index + 1;
+          return {
+            ...entry,
+            id,
+            position,
+            block: {
+              ...entry.block,
+              position,
+              trigger: { ...entry.block.trigger, message_id: id },
+              items: [
+                {
+                  ...entry.block.items[0]!,
+                  message_id: `${id}-reply`,
+                  reply_to: id,
+                  body: `末尾新增 ${index}`,
+                },
+              ],
+            },
+          };
+        });
+        changedAt = seq + 1;
+        publish("conversation.message", {
+          ...appended.at(-1)!.block.trigger,
+          conversation_id: issue.conversation!.conversation_id!,
+        });
+        await page.getByText("末尾新增 3", { exact: true }).waitFor();
+        await page.waitForFunction((height) => {
+          const node = document.querySelector("[data-issue-scroll]")!;
+          return (
+            node.scrollHeight > height + 100 &&
+            node.scrollHeight - node.scrollTop - node.clientHeight <= 2
+          );
+        }, initialHeight);
+        const measureEnd = () =>
+          scrollport.evaluate((node) => ({
+            height: node.scrollHeight,
+            gap: node.scrollHeight - node.scrollTop - node.clientHeight,
+          }));
+        const before = await measureEnd();
+        release();
+        await discussion.locator(`[data-tool-item="${lastTool}"]`).waitFor();
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+        const after = await measureEnd();
+        assert(
+          after.height > before.height && before.gap <= 2 && after.gap <= 2,
+          `following the end moved from ${before.gap} px to ${after.gap} px after process details arrived`,
+        );
+        assert.equal(detailRequests, 1);
+        console.log(
+          `PASS following the end through activity updates and process details (${before.gap} → ${after.gap} px)`,
+        );
+        continue;
+      }
       const paragraph = page.getByText("继续阅读 3", { exact: true });
       await page.exposeBinding("releaseActivityDetail", () => release());
-      const lastTool = firstTools.at(-1)!.message_id;
       const readingPositions = await paragraph.evaluateHandle(
         (target, toolID) =>
           new Promise<{ stop(): { originalTop: number; positions: number[] } }>((done) => {
