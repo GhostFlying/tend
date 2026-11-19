@@ -193,6 +193,7 @@ func buildAssignment(ctx context.Context, q store.Querier, run store.RunRow, lea
 	as := protocol.Assignment{
 		PreparationDiagnostics: true,
 		MountDirectories:       true,
+		MountOriginIdentity:    true,
 		Relations:              relations, Protocol: run.Protocol,
 		RunID: run.RunID, LeaseID: lease.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: run.TaskID,
 		ActionID: run.ActionID, Role: run.Role, Desired: desiredFor(run, action, task), Generation: run.Generation,
@@ -1030,6 +1031,9 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		if !shaPattern.MatchString(m.ResolvedBaseSHA) || m.ResolvedFrom == "" || !domain.ValidBranch(m.Branch) {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q needs a full base sha, its source and a valid branch", m.Path)
 		}
+		if m.OriginIdentity != "" && (len(m.OriginIdentity) != 64 || !shaPattern.MatchString(m.OriginIdentity)) {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "mount %q has an invalid origin identity", m.Path)
+		}
 		reported[m.Path] = m
 	}
 	now := x.Now.UnixMilli()
@@ -1055,7 +1059,7 @@ func (ReportWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		}
 		if err := tx.InsertMountFact(ctx, ws.WorkspaceID, store.MountFact{
 			Path: m.Path, Repo: m.Repo, BaseJSON: string(base), ResolvedBaseSHA: r.ResolvedBaseSHA,
-			ResolvedFrom: r.ResolvedFrom, Branch: r.Branch, Directory: r.Directory,
+			ResolvedFrom: r.ResolvedFrom, Branch: r.Branch, Directory: r.Directory, OriginIdentity: r.OriginIdentity,
 		}, now); err != nil {
 			return Outcome{}, err
 		}

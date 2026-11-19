@@ -172,7 +172,7 @@ func workspace(ctx context.Context, q store.Querier, taskID string) (*protocol.W
 	for _, path := range slices.Sorted(maps.Keys(facts)) {
 		m := facts[path]
 		v.Mounts = append(v.Mounts, protocol.MountView{
-			Directory: m.Directory, Path: m.Path, Repo: m.Repo, Base: json.RawMessage(m.BaseJSON), ResolvedBaseSHA: m.ResolvedBaseSHA, ResolvedFrom: m.ResolvedFrom, Branch: m.Branch,
+			Directory: m.Directory, OriginIdentity: m.OriginIdentity, Path: m.Path, Repo: m.Repo, Base: json.RawMessage(m.BaseJSON), ResolvedBaseSHA: m.ResolvedBaseSHA, ResolvedFrom: m.ResolvedFrom, Branch: m.Branch,
 		})
 	}
 	return v, nil

@@ -62,3 +62,46 @@ func TestFindGitHubBranchPRRequiresOneExactRepositoryAndBranch(t *testing.T) {
 		})
 	}
 }
+
+func TestIssuePullRequestLookupRequiresTheOriginalGitOrigin(t *testing.T) {
+	const remote = "https://github.com/acme/repo.git"
+	for _, tc := range []struct {
+		name, identity string
+		query          bool
+	}{
+		{name: "original", identity: protocol.RepositoryRemoteKey(remote), query: true},
+		{name: "old record without origin"},
+		{name: "different Orca origin", identity: protocol.RepositoryRemoteKey("https://github.com/acme/fork.git")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			e := newTestEnv(t, f.srv.URL)
+			f.answer("GET /api/v1/tasks/task", protocol.TaskDetail{
+				TaskSummary: protocol.TaskSummary{PrimaryIssueID: "issue"},
+				WorkspaceState: &protocol.WorkspaceView{OwnerWorkItemID: "issue", Mounts: []protocol.MountView{{
+					Path: "repo", Repo: "acme-repo", Branch: "work/first", ResolvedBaseSHA: strings.Repeat("a", 40), OriginIdentity: tc.identity,
+				}}},
+			})
+			f.answer("GET /api/v1/repos/acme-repo", protocol.RepositoryRegistration{Repo: "acme-repo", RemoteURL: remote})
+			client, err := e.client(protocol.ScopeOwner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			link, err := issuePullRequestFromTask(t.Context(), client, "issue", "task", "repo", func(_ context.Context, args ...string) ([]byte, error) {
+				called = true
+				if !slices.Contains(args, "head=acme:work/first") {
+					t.Fatal(args)
+				}
+				return []byte(`[{"number":44,"html_url":"https://github.com/acme/repo/pull/44","head":{"ref":"work/first","repo":{"full_name":"acme/repo"}},"base":{"repo":{"full_name":"acme/repo"}}}]`), nil
+			})
+			if called != tc.query {
+				t.Fatal("provider queried with missing or different origin evidence", called)
+			}
+			if tc.query && (err != nil || link != "https://github.com/acme/repo/pull/44") ||
+				!tc.query && (err == nil || !strings.Contains(err.Error(), "--pr-url") || link != "") {
+				t.Fatal(link, err)
+			}
+		})
+	}
+}

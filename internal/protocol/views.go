@@ -78,6 +78,7 @@ type WorkspaceView struct {
 // spec mount key, not necessarily a subdirectory of WorkspaceView.Path: the
 // Orca single-repository layout runs directly at that working directory.
 type MountView struct {
+	OriginIdentity string `json:"origin_identity,omitempty"`
 	// Directory is the physical worktree, absent until a runner reports it.
 	Directory       string          `json:"directory,omitempty"`
 	Path            string          `json:"path"`

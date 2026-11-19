@@ -219,7 +219,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			if *request != "" {
 				return usagef("request recovery requires the original --pr-url and receipt coordinates; branch lookup is for new requests")
 			}
-			prURL, err = issuePullRequestFromTask(ctx, c, target.ID, fromTask, mount)
+			prURL, err = issuePullRequestFromTask(ctx, c, target.ID, fromTask, mount, runGitHubBranchQuery)
 			if err != nil {
 				return err
 			}

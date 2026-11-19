@@ -44,7 +44,7 @@ func (w directoryReportWorkspace) Prepare(context.Context, protocol.Assignment) 
 	return Prepared{Report: w.report}, nil
 }
 
-func TestWorkspaceDirectoryReportNegotiationAndRetry(t *testing.T) {
+func TestWorkspaceMountReportNegotiationAndRetry(t *testing.T) {
 	for _, negotiated := range []bool{false, true} {
 		t.Run(fmt.Sprint(negotiated), func(t *testing.T) {
 			clock := testkit.NewClock()
@@ -53,7 +53,7 @@ func TestWorkspaceDirectoryReportNegotiationAndRetry(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer j.Close()
-			as := protocol.Assignment{RunID: "run_directory", Role: protocol.RoleImplement, MountDirectories: negotiated}
+			as := protocol.Assignment{RunID: "run_directory", Role: protocol.RoleImplement, MountDirectories: negotiated, MountOriginIdentity: negotiated}
 			if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerAppServer); err != nil {
 				t.Fatal(err)
 			}
@@ -83,8 +83,8 @@ func TestWorkspaceDirectoryReportNegotiationAndRetry(t *testing.T) {
 						}
 					} else {
 						var report protocol.WorkspaceReport
-						if err := json.Unmarshal(env.Payload, &report); err != nil || len(report.Mounts) != 1 || report.Mounts[0].Directory != "/actual/worktree" {
-							t.Errorf("negotiated directory absent: %s %v", env.Payload, err)
+						if err := json.Unmarshal(env.Payload, &report); err != nil || len(report.Mounts) != 1 || report.Mounts[0].Directory != "/actual/worktree" || report.Mounts[0].OriginIdentity != "origin-digest" {
+							t.Errorf("negotiated mount facts absent: %s %v", env.Payload, err)
 						}
 					}
 					if len(reports) == 1 {
@@ -95,7 +95,7 @@ func TestWorkspaceDirectoryReportNegotiationAndRetry(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
 			}))
 			defer srv.Close()
-			workspace := directoryReportWorkspace{report: protocol.WorkspaceReport{Mounts: []protocol.ResolvedMount{{Path: "repo", Directory: "/actual/worktree", Branch: "feature", ResolvedBaseSHA: "base", ResolvedFrom: "commit"}}}}
+			workspace := directoryReportWorkspace{report: protocol.WorkspaceReport{Mounts: []protocol.ResolvedMount{{Path: "repo", Directory: "/actual/worktree", OriginIdentity: "origin-digest", Branch: "feature", ResolvedBaseSHA: "base", ResolvedFrom: "commit"}}}}
 			r := New(Config{Journal: j, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), Workspaces: workspace, ServerURL: srv.URL, HTTPClient: srv.Client(), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), RetryDelay: time.Nanosecond})
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
@@ -105,8 +105,8 @@ func TestWorkspaceDirectoryReportNegotiationAndRetry(t *testing.T) {
 			if len(reports) != 2 || reports[0].RequestID != reports[1].RequestID || !bytes.Equal(reports[0].Payload, reports[1].Payload) {
 				t.Fatalf("retry changed report identity: %+v", reports)
 			}
-			if workspace.report.Mounts[0].Directory != "/actual/worktree" {
-				t.Fatal("wire compatibility erased the physical-directory fact")
+			if workspace.report.Mounts[0].Directory != "/actual/worktree" || workspace.report.Mounts[0].OriginIdentity != "origin-digest" {
+				t.Fatal("wire compatibility erased the local mount facts")
 			}
 		})
 	}

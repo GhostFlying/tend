@@ -13815,6 +13815,9 @@
         "directory": {
           "type": "string"
         },
+        "origin_identity": {
+          "type": "string"
+        },
         "path": {
           "type": "string"
         },

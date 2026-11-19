@@ -5814,6 +5814,7 @@ export interface MountView {
   base: unknown;
   branch: string;
   directory?: string;
+  origin_identity?: string;
   path: string;
   repo: string;
   resolved_base_sha: string;
