@@ -162,7 +162,7 @@ type active struct {
 	// reporting marks a run that only sends its final report. It no
 	// longer writes to the workspace, so it is not fenced.
 	reporting bool
-	// pauseOnly checks the old process set without renewing the original lease.
+	// pauseOnly checks the old process set or reports its receipt without renewing the original lease.
 	pauseOnly bool
 	// retained prevents local settlement from discarding reconciliation facts.
 	retained bool
@@ -631,7 +631,11 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			r.runnerProtocol = max(r.runnerProtocol, run.Assignment.Protocol)
 			r.controlMu.Unlock()
 		}
-		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: r.observed(run)})
+		observed, err := r.observed(ctx, run)
+		if err != nil {
+			return err
+		}
+		held = append(held, protocol.HeldRun{RunID: run.Assignment.RunID, LeaseID: run.Assignment.LeaseID, Observed: observed})
 		byID[run.Assignment.RunID] = run
 	}
 	runtime, err := r.runtimeObservation(ctx)
@@ -844,16 +848,21 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 }
 
 // observed is what the runner can say about a held run.
-func (r *Runner) observed(run journal.Run) protocol.RunObserved {
-	switch {
-	case run.Phase == journal.PhaseClaimed:
-		return protocol.RunStarting
-	case run.Phase == journal.PhasePausing:
-		return protocol.RunUnknown
-	case run.Fenced:
-		return protocol.RunInterrupted
+func (r *Runner) observed(ctx context.Context, run journal.Run) (protocol.RunObserved, error) {
+	if run.Phase == journal.PhaseClaimed {
+		return protocol.RunStarting, nil
 	}
-	return protocol.RunRunning
+	receipt, err := r.pauseReceiptReady(ctx, run)
+	if err != nil {
+		return "", err
+	}
+	if run.Phase == journal.PhasePausing || receipt {
+		return protocol.RunUnknown, nil
+	}
+	if run.Fenced {
+		return protocol.RunInterrupted, nil
+	}
+	return protocol.RunRunning, nil
 }
 
 // dropOrRelease ends a held run without an executor: it is released if
@@ -928,13 +937,21 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		}
 		return
 	}
-	pauseOnly := journaled.Phase == journal.PhasePausing
+	pausing := journaled.Phase == journal.PhasePausing
 	retry := r.pauseRetries[runID]
-	if pauseOnly && (retry.blocked || as.Desired != protocol.DesiredPaused) ||
+	if pausing && (retry.blocked || as.Desired != protocol.DesiredPaused) ||
 		as.Desired != protocol.DesiredStopped && retry.due.After(r.cfg.Now()) {
 		r.mu.Unlock()
 		return
 	}
+	pauseReceipt, err := r.pauseReceiptReady(ctx, journaled)
+	if err != nil {
+		r.mu.Unlock()
+		r.cfg.Log.WarnContext(ctx, "could not inspect original pause receipt", "run_id", runID, "err", err)
+		r.requestReconcile()
+		return
+	}
+	pauseOnly := pausing || pauseReceipt
 	runCtx, cancel := context.WithCancelCause(ctx)
 	desired := as.Desired
 	if desired == "" {

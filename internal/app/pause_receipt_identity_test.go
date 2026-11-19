@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -92,5 +94,47 @@ func TestFirstPauseReceiptWaitsForOwnerHandback(t *testing.T) {
 	if op := h.exec(principal, env, YieldPause{}); op.Status != protocol.OpSucceeded ||
 		h.lease(as.RunID).Status != store.LeaseReleased {
 		t.Fatal("owner control hid the acknowledgement of a prior commit", op)
+	}
+}
+
+func TestPauseControlHelloPreservesLapsedLease(t *testing.T) {
+	h, runtime := pendingIssueOwnerHarness(t)
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityPauseHandoffs)
+	i := issueAdmissionStatus(t, h, createBacklogTestIssue(t, h), protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
+	as := admissionClaim(t, h, runtime)
+	if as == nil || !as.PauseHandoffs {
+		t.Fatalf("no negotiated pause assignment: %+v", as)
+	}
+	issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+	h.clock.Advance(DefaultLeaseTTL + time.Second)
+	if _, err := h.app.ExpireLeases(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	original := h.lease(as.RunID)
+	paused := h.run(as.RunID)
+	if paused.ObservedState != protocol.RunUnknown || paused.PauseHandoff == nil || original.Status != store.LeaseLapsed {
+		t.Fatalf("fixture did not reach lapsed pause: run=%s lease=%s", h.run(as.RunID).ObservedState, original.Status)
+	}
+	for _, control := range []struct {
+		mode protocol.ControlMode
+		want protocol.RunDesired
+	}{{protocol.ControlHumanControl, protocol.DesiredHeld}, {protocol.ControlManaged, protocol.DesiredPaused}} {
+		task := h.task(as.TaskID)
+		op := h.exec(owner, h.env("control.set_mode", taskTarget(as.TaskID), protocol.SetControlModePayload{Mode: control.mode}, rev(task.ControlRevision)), SetControlMode{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		runtime.Sequence++
+		p := protocol.HelloPayload{Runtime: runtime, WorkspaceProtocol: 1, Held: []protocol.HeldRun{{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunUnknown}}}
+		op = h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"}, p, nil), Hello{})
+		var reply protocol.HelloResult
+		if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &reply) != nil || len(reply.Runs) != 1 ||
+			reply.Runs[0].Desired != control.want || reply.Runs[0].PauseHandoff == nil ||
+			*reply.Runs[0].PauseHandoff != *paused.PauseHandoff {
+			t.Fatalf("Hello did not return %s with the original pause: %+v, %+v", control.want, op, reply)
+		}
+		if got := h.lease(as.RunID); got != original || h.run(as.RunID).ObservedState != protocol.RunUnknown {
+			t.Fatalf("control-only Hello changed the original lease or Run: lease=%+v, want=%+v, observed=%s", got, original, h.run(as.RunID).ObservedState)
+		}
 	}
 }
