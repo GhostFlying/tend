@@ -213,11 +213,14 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 		flush = r.flushManagerEvents
 	}
 	if err := flush(ctx, as); err != nil {
-		return pauseReceiptError(err)
+		if isRetryable(err) {
+			return &pauseStopPending{err}
+		}
+		return &completionPending{err}
 	}
-	op, err := r.sendOnce(ctx, runCredential(as), &pause.Envelope)
+	op, err := r.send(ctx, runCredential(as), &pause.Envelope)
 	if err != nil || op.Status != protocol.OpSucceeded {
-		return pauseReceiptError(errors.Join(err, errors.New("runner: pause receipt awaits settlement")))
+		return &completionPending{errors.Join(err, errors.New("runner: pause receipt awaits settlement"))}
 	}
 	if as.Manager != nil {
 		for _, p := range requests {
@@ -236,13 +239,6 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 		return &completionPending{err}
 	}
 	return r.finishJournal(ctx, as.RunID)
-}
-
-func pauseReceiptError(err error) error {
-	if isRetryable(err) {
-		return &pauseStopPending{err}
-	}
-	return &completionPending{err}
 }
 
 func (r *Runner) pauseReceiptReady(ctx context.Context, run journal.Run) (bool, error) {
