@@ -107,7 +107,7 @@ func checkTaskBudgetsAndIsolation(t *testing.T) {
 			}
 		}
 		slices.Sort(names)
-		if !slices.Equal(names, []string{"api", "app", "e2e", "mainthread", "other", "quality", "runner", "sandbox", "serverkit", "web"}) {
+		if !slices.Equal(names, []string{"api", "app", "e2e", "mainthread", "other", "quality", "runner", "sandbox", "serverkit", "store", "web"}) {
 			t.Fatal("checks omitted or repeated", names)
 		}
 		if b.exclusiveE2E && (len(isolated) != 1 || isolated[0].name != "e2e") {

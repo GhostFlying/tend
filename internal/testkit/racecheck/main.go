@@ -351,7 +351,7 @@ func main() {
 	reportDir := flag.String("report-dir", "", "optional directory for native Go test JSON reports")
 	timeout := flag.String("timeout", "60m", "timeout per test process")
 	planPath := flag.String("plan", "", "optional source-bound impact plan")
-	group := flag.String("group", "all", "package group: all, app, api, mainthread, e2e, serverkit, sandbox, runner, other")
+	group := flag.String("group", "all", "package group: all, "+strings.Join(impact.Groups(), ", "))
 	flag.Parse()
 	if *shards == 0 {
 		*shards = max(1, min(4, runtime.GOMAXPROCS(0)/8))
