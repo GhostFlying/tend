@@ -31,6 +31,12 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.controlMu.Lock()
 	control := r.control
 	r.controlMu.Unlock()
+	// The new journal was launched by this installation. Its first hello may
+	// still carry the predecessor's submit target until health is committed.
+	if r.cfg.JournalID != "" && r.cfg.InitialMaintenance && control.UpgradeID != "" && control.UpgradeID == r.cfg.UpgradeID {
+		r.updaterMu.Unlock()
+		return
+	}
 	r.mu.Lock()
 	confirmed := r.confirmedRuntime
 	r.mu.Unlock()
