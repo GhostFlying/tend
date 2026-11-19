@@ -44,11 +44,11 @@ func (ReleaseWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO workspace_journal_releases(workspace_id,task_id,journal_id,run_count)
+	proof, err := tx.Exec(ctx, `INSERT INTO workspace_journal_releases(workspace_id,task_id,journal_id,run_count)
         SELECT ?,?,?,COUNT(*) FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
         WHERE wr.workspace_id=? AND r.task_id=? AND COALESCE(j.journal_id,'')=?
         HAVING COUNT(*)>0 AND COUNT(*) FILTER(WHERE r.observed_state IN ('starting','running','waiting','interrupted','unknown'))=0
-        ON CONFLICT(workspace_id,task_id,journal_id) DO UPDATE SET run_count=excluded.run_count`, p.WorkspaceID, p.TaskID, p.JournalID, p.WorkspaceID, p.TaskID, p.JournalID)
+        ON CONFLICT(workspace_id,task_id,journal_id) DO UPDATE SET run_count=excluded.run_count WHERE run_count<>excluded.run_count`, p.WorkspaceID, p.TaskID, p.JournalID, p.WorkspaceID, p.TaskID, p.JournalID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -65,7 +65,11 @@ func (ReleaseWorkspace) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 	}
 	if blocked {
-		return Outcome{Result: protocol.WorkspaceReleaseResult{}, NoEffect: true}, nil
+		changes, err := proof.RowsAffected()
+		if err != nil {
+			return Outcome{}, err
+		}
+		return Outcome{Result: protocol.WorkspaceReleaseResult{}, NoEffect: changes == 0}, nil
 	}
 	now := x.Now.UnixMilli()
 	if _, err := tx.Exec(ctx, `UPDATE workspaces SET occupied_by=NULL,status='retained',released_at=?,updated_at=? WHERE workspace_id=? AND occupied_by=?`, now, now, w.WorkspaceID, p.TaskID); err != nil {

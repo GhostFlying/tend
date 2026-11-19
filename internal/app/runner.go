@@ -379,7 +379,14 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
 	}
-	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=?`, p.WorkspaceProtocol, host.HostID); err != nil {
+	// A reconnecting predecessor can report its own capabilities without
+	// replacing the admission capabilities of the current runner.
+	var instance string
+	if p.Runtime != nil {
+		instance = p.Runtime.InstanceID
+	}
+	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=? AND NOT EXISTS
+      (SELECT 1 FROM draining_runners d WHERE d.host_id=hosts.host_id AND d.instance_id=?)`, p.WorkspaceProtocol, host.HostID, instance); err != nil {
 		return Outcome{}, fmt.Errorf("app: report claim capabilities: %w", err)
 	}
 	if host.WorkspaceProtocol != p.WorkspaceProtocol {
@@ -729,7 +736,14 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
 	}
-	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=?`, p.WorkspaceProtocol, host.HostID); err != nil {
+	// A reconnecting predecessor can report its own capabilities without
+	// replacing the admission capabilities of the current runner.
+	var instance string
+	if p.Runtime != nil {
+		instance = p.Runtime.InstanceID
+	}
+	if _, err := tx.Exec(ctx, `UPDATE hosts SET workspace_protocol=? WHERE host_id=? AND NOT EXISTS
+      (SELECT 1 FROM draining_runners d WHERE d.host_id=hosts.host_id AND d.instance_id=?)`, p.WorkspaceProtocol, host.HostID, instance); err != nil {
 		return Outcome{}, fmt.Errorf("app: report runner capabilities: %w", err)
 	}
 	now := x.Now.UnixMilli()

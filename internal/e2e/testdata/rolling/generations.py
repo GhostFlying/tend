@@ -68,12 +68,19 @@ ExecStartPost=/usr/bin/python3 {Path(__file__).with_name('controlled.py').resolv
 """)
     def systemctl(*args, check=True):
         subprocess.run(["systemctl", "--user", *args], timeout=40, check=check)
+    # This account uses linger without a PAM login. Transient installer units
+    # inherit the manager's environment, not the environment of the fixed unit.
+    systemctl("import-environment", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
     systemctl("link", str(unit))
     def cleanup():
         subprocess.run(["journalctl", "--user", "-u", unit.name, "-n", "14", "--no-pager"], check=False)
+        subprocess.run(["journalctl", "--user", "-t", "tend-self-installer", "-n", "16", "--no-pager"], check=False)
         systemctl("stop", unit.name, check=False)
     stack.callback(cleanup)
     systemctl("start", unit.name)
+    subprocess.run(["systemd-run", "--user", "--quiet", "--wait", "--pipe", "--collect",
+                    "/usr/bin/systemctl", "--user", "show", unit.name, "--property=ActiveState"],
+                   check=True, timeout=20)
     initial = int((root / "initial.pid").read_text())
     eventually("old supervisor listening", lambda: (state / "control.sock").is_socket(), [])
     subprocess.run([fixed, "bootstrap", "--config", cfg, "--pid", str(initial)], check=True,
