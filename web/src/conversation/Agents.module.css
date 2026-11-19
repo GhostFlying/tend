@@ -110,6 +110,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+a.tag {
+  color: var(--accent);
+}
 .tag svg,
 .menu svg,
 .returnLink svg {
@@ -267,6 +270,6 @@
 .tags[data-issue-context="true"] {
   margin-top: 0;
 }
-.tags[data-issue-context="true"] .menu {
+.issueMenu {
   margin-left: auto;
 }

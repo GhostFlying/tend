@@ -4319,6 +4319,7 @@ export interface IssueActivityPage {
  * via the `definition` "IssueActivityEntry".
  */
 export interface IssueActivityEntry {
+  admission?: boolean;
   artifact_id?: string;
   author: string;
   block?: IssueTranscriptBlock;

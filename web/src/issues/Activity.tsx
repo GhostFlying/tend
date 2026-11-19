@@ -5,7 +5,7 @@ import {
   DeliveryProgress,
 } from "./DeliveryProgress.tsx";
 import { EventNotification } from "./EventNotification.tsx";
-import { MessageReceipts } from "./MessageReceipts.tsx";
+import { MessageReceipts, ReceiptDetails } from "./MessageReceipts.tsx";
 import { ExternalSourceMessage } from "../conversation/SourceDetails.tsx";
 import { useEntryState } from "../app/router.ts";
 import {
@@ -543,6 +543,16 @@ export function IssueActivity({
             scroll={scroll}
             currentIssueId={issue.issue_id}
           />
+        ) : entry.admission ? (
+          <ReceiptDetails key={entry.id} className={styles.admission} data-scroll-id={entry.id}>
+            <Milestone
+              entry={entry}
+              results={results}
+              onIssue={onIssue}
+              onTask={onTask}
+              groupedFirst
+            />
+          </ReceiptDetails>
         ) : group.length > 1 ? (
           <EventGroup
             key={key}
