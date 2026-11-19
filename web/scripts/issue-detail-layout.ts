@@ -629,6 +629,7 @@ try {
     const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
     const processPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
     let detailRequests = 0;
+    let changedAt = 0;
     let starting = () => {};
     let release = () => {};
     const started = new Promise<void>((resolve) => {
@@ -644,7 +645,10 @@ try {
         assert.equal(query.get("view"), "readable");
         return route.fulfill({
           json: {
-            items: query.has("since") ? [] : [{ ...row, block: readableBlock }],
+            items:
+              query.has("since") && Number(query.get("since")) >= changedAt
+                ? []
+                : [{ ...row, block: readableBlock }],
             more: false,
             readable: true,
             event_seq: seq,
@@ -658,8 +662,17 @@ try {
         detailRequests++;
         starting();
         await releaseDetail;
+        const second = new URL(route.request().url()).searchParams.has("process_after");
         await route.fulfill({
-          json: { ...readableBlock, process: { ...readableBlock.process, items: [tool] } },
+          json: {
+            ...readableBlock,
+            process: {
+              ...readableBlock.process,
+              items: second ? [{ ...tool, message_id: "readable-second-tool", seq: 502 }] : [tool],
+              more: !second,
+              ...(second ? {} : { next: tool.seq }),
+            },
+          },
         });
       },
     );
@@ -677,8 +690,24 @@ try {
       await discussion.locator('[data-tool-item="readable-fixture-tool"]').waitFor();
       assert.equal(detailRequests, 1);
       await discussion.getByText(prose, { exact: true }).waitFor();
+      await discussion.getByRole("button", { name: "继续读取公开过程" }).click();
+      const secondTool = discussion.locator('[data-tool-item="readable-second-tool"]');
+      await secondTool.waitFor();
+      const reloaded = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === processPath && url.searchParams.get("process_after") === "501";
+      });
+      changedAt = seq + 1;
+      publish("conversation.process_changed", {
+        ...block.trigger,
+        conversation_id: issue.conversation!.conversation_id!,
+      });
+      await reloaded;
+      await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor({ state: "hidden" });
+      assert.equal(await trigger.getAttribute("aria-expanded"), "true");
+      await secondTool.waitFor();
       await discussion.screenshot({ path: join(output, "issue-readable-process.png") });
-      console.log("PASS readable activity detail reuse");
+      console.log("PASS readable activity detail reuse and expanded page retention");
     } finally {
       release();
       await context.close();

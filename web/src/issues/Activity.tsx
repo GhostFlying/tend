@@ -574,6 +574,7 @@ function ActivityBlock({
   }>({ loading: false });
   const processVersion = useRef(0);
   const loadedProcess = useRef<IssueTranscriptBlock | null>(null);
+  const processDepth = useRef(1);
   const retryPage = useRef<ProcessDetails | undefined>(undefined);
   const requestProcess = useCallback(
     (previous?: ProcessDetails) => {
@@ -581,11 +582,14 @@ function ActivityBlock({
       retryPage.current = previous;
       const revision = ++processVersion.current;
       setProcess((state) => ({ ...(state.value ? { value: state.value } : {}), loading: true }));
-      const pending = previous ? processReads.more(block, previous) : processReads.load(block);
+      const pending = previous
+        ? processReads.more(block, previous)
+        : processReads.load(block, "high", processDepth.current);
       void pending.then(
         (value) => {
           if (processVersion.current === revision) {
             loadedProcess.current = block;
+            processDepth.current = value.depth;
             setProcess({ value, loading: false });
           }
         },

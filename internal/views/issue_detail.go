@@ -243,12 +243,18 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
  query(readable,since,through) AS (VALUES(?,?,?)),
  primary_tasks AS (SELECT o.task_id FROM task_work_item_owners o JOIN tasks t USING(task_id) WHERE o.work_item_id=? AND t.kind<>'issue_manager'),
  manager_tasks AS (SELECT task_id FROM issue_manager_tasks WHERE issue_id=?),
- changed_messages AS MATERIALIZED (
-  SELECT DISTINCT m.message_id, m.reply_to
-  FROM query, events e JOIN conversation_messages m ON m.message_id=CASE
-   WHEN e.object_type='message' THEN e.object_id ELSE json_extract(e.body_json,'$.message_id') END
+ changed_message_ids(id) AS (
+  SELECT CASE WHEN e.object_type='message' THEN e.object_id ELSE json_extract(e.body_json,'$.message_id') END
+  FROM query, events e
   WHERE query.since>0 AND e.event_seq>query.since AND e.event_seq<=query.through
    AND (e.object_type='message' OR e.object_type='work_item_choice')
+  UNION
+  SELECT r.object_id FROM query, refresh_notifications r
+  WHERE query.since>0 AND r.event_seq>query.since AND r.event_seq<=query.through
+   AND r.kind='conversation.process_changed' AND r.object_type='message'
+ ),
+ changed_messages AS MATERIALIZED (
+  SELECT m.message_id,m.reply_to FROM changed_message_ids d JOIN conversation_messages m ON m.message_id=d.id
  ),
  changed_blocks(id) AS MATERIALIZED (
   SELECT message_id FROM changed_messages

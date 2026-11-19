@@ -3,6 +3,7 @@ import type { Reader } from "../live/data.ts";
 
 export interface ProcessDetails {
   items: IssueConversationItem[];
+  depth: number;
   after: number;
   processAfter: number;
   more: boolean;
@@ -11,6 +12,7 @@ export interface ProcessDetails {
 interface ProcessRequest {
   block: IssueTranscriptBlock;
   controller: AbortController;
+  depth: number;
   promise: Promise<ProcessDetails>;
 }
 
@@ -19,7 +21,6 @@ const prefetchLimit = 4;
 /** Shares the first detail request for each turn within one open Issue. */
 export class IssueProcessReads {
   private readonly first = new Map<string, ProcessRequest>();
-  private readonly pending = new Set<AbortController>();
   private readonly attempted = new Set<string>();
   private prefetching = false;
   private generation = 0;
@@ -56,34 +57,41 @@ export class IssueProcessReads {
     }
     return {
       items: [...items.values()],
+      depth: (previous?.depth ?? 0) + 1,
       after: result.next_seq ?? previous?.after ?? 0,
       processAfter: result.process?.next ?? previous?.processAfter ?? 0,
       more: result.more || !!result.process?.more,
     };
   }
 
-  load(block: IssueTranscriptBlock, priority: RequestPriority = "high"): Promise<ProcessDetails> {
+  load(
+    block: IssueTranscriptBlock,
+    priority: RequestPriority = "high",
+    depth = 1,
+  ): Promise<ProcessDetails> {
     const id = block.trigger.message_id;
     const previous = this.first.get(id);
-    if (previous?.block === block) return previous.promise;
-    previous?.controller.abort();
-    const controller = new AbortController();
-    const promise = this.page(block, controller, priority).catch((error: unknown) => {
-      if (this.first.get(id)?.controller === controller) this.first.delete(id);
+    const same = previous?.block === block ? previous : undefined;
+    if (same && same.depth >= depth) return same.promise;
+    if (!same) previous?.controller.abort();
+    const controller = same?.controller ?? new AbortController();
+    const fetchThroughDepth = async () => {
+      let details = same ? await same.promise : await this.page(block, controller, priority);
+      while (details.more && details.depth < depth && !controller.signal.aborted) {
+        details = await this.page(block, controller, priority, details);
+      }
+      return details;
+    };
+    const promise = fetchThroughDepth().catch((error: unknown) => {
+      if (this.first.get(id)?.promise === promise) this.first.delete(id);
       throw error;
     });
-    this.first.set(id, { block, controller, promise });
+    this.first.set(id, { block, controller, depth, promise });
     return promise;
   }
 
-  async more(block: IssueTranscriptBlock, previous: ProcessDetails): Promise<ProcessDetails> {
-    const controller = new AbortController();
-    this.pending.add(controller);
-    try {
-      return await this.page(block, controller, "high", previous);
-    } finally {
-      this.pending.delete(controller);
-    }
+  more(block: IssueTranscriptBlock, previous: ProcessDetails): Promise<ProcessDetails> {
+    return this.load(block, "high", previous.depth + 1);
   }
 
   async prefetch(candidates: readonly IssueTranscriptBlock[]) {
@@ -107,9 +115,7 @@ export class IssueProcessReads {
   close() {
     this.generation++;
     for (const request of this.first.values()) request.controller.abort();
-    for (const controller of this.pending) controller.abort();
     this.first.clear();
-    this.pending.clear();
     this.attempted.clear();
     this.prefetching = false;
   }
