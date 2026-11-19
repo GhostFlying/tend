@@ -162,6 +162,8 @@ type active struct {
 	// reporting marks a run that only sends its final report. It no
 	// longer writes to the workspace, so it is not fenced.
 	reporting bool
+	// pauseOnly checks the old process set without renewing the original lease.
+	pauseOnly bool
 	// retained prevents local settlement from discarding reconciliation facts.
 	retained bool
 	// reconcileOnExit follows an authoritative control that superseded retention.
@@ -183,6 +185,7 @@ type Runner struct {
 	cfg            Config
 	c              *client
 	reconcile      chan struct{}
+	pauseWake      chan struct{}
 	workspaceWake  chan struct{}
 	heartbeatWake  chan struct{}
 	helloGate      chan struct{}
@@ -191,6 +194,7 @@ type Runner struct {
 	ttl            time.Duration
 	ttlWake        chan struct{} // closed when the TTL changes
 	active         map[string]*active
+	pauseRetries   map[string]pauseRetry
 	historyReading map[string]bool
 	historyResults map[string]protocol.ManagerHistoryReply
 	wg             sync.WaitGroup
@@ -272,6 +276,8 @@ func New(cfg Config) *Runner {
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
 		reconcile:      make(chan struct{}, 1),
+		pauseWake:      make(chan struct{}, 1),
+		pauseRetries:   map[string]pauseRetry{},
 		workspaceWake:  make(chan struct{}, 1),
 		heartbeatWake:  make(chan struct{}, 1),
 		helloGate:      make(chan struct{}, 1),
@@ -772,6 +778,9 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictContinue:
+			if run.Phase == journal.PhasePausing && (v.PauseHandoff == nil || v.Desired != protocol.DesiredPaused) {
+				continue
+			}
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
 				return err
 			}
@@ -824,6 +833,8 @@ func (r *Runner) observed(run journal.Run) protocol.RunObserved {
 	switch {
 	case run.Phase == journal.PhaseClaimed:
 		return protocol.RunStarting
+	case run.Phase == journal.PhasePausing:
+		return protocol.RunUnknown
 	case run.Fenced:
 		return protocol.RunInterrupted
 	}
@@ -902,19 +913,29 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		}
 		return
 	}
+	pauseOnly := journaled.Phase == journal.PhasePausing
+	if pauseOnly {
+		retry := r.pauseRetries[runID]
+		if as.Desired != protocol.DesiredPaused || retry.blocked || retry.due.After(r.cfg.Now()) {
+			r.mu.Unlock()
+			return
+		}
+	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	desired := as.Desired
 	if desired == "" {
 		desired = protocol.DesiredRun
 	}
-	a := &active{as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1)}
+	a := &active{as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1), reporting: pauseOnly, pauseOnly: pauseOnly}
 	r.active[runID] = a
 	r.mu.Unlock()
 	r.wg.Go(func() {
+		var pending *pauseStopPending
 		defer func() {
 			cancel(nil)
 			r.mu.Lock()
 			delete(r.active, runID)
+			r.deferPauseRetry(runID, pending)
 			reconcile := a.reconcileOnExit
 			r.mu.Unlock()
 			if reconcile {
@@ -926,7 +947,12 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 			}
 		}()
 		if err := r.execute(ctx, runCtx, runID, a); err != nil && ctx.Err() == nil {
-			r.cfg.Log.ErrorContext(ctx, "run executor failed", "run_id", runID, "err", err)
+			if paused, ok := errors.AsType[*pauseStopPending](err); ok {
+				pending = paused
+				r.cfg.Log.WarnContext(ctx, "pause awaits original process stop", "run_id", runID, "lease_id", as.LeaseID, "err", err)
+			} else {
+				r.cfg.Log.ErrorContext(ctx, "run executor failed", "run_id", runID, "err", err)
+			}
 		}
 	})
 }
@@ -1003,7 +1029,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	refs := make([]protocol.LeaseRef, 0, len(r.active))
 	for id, a := range r.active {
-		if !a.retained {
+		if !a.retained && !a.pauseOnly {
 			refs = append(refs, protocol.LeaseRef{RunID: id, LeaseID: a.as.LeaseID})
 		}
 	}
@@ -1048,7 +1074,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	// reachable through Hello even after the original executor has exited.
 	if held, err := r.cfg.Journal.Runs(ctx); err == nil {
 		for _, run := range held {
-			if run.Fenced {
+			if run.Fenced && run.Phase != journal.PhasePausing {
 				r.requestReconcile()
 				break
 			}
@@ -1164,6 +1190,10 @@ func (r *Runner) reconciler(ctx context.Context) {
 			return
 		case <-r.reconcile:
 		case <-r.cfg.AgentChanges:
+		case <-r.pauseWake:
+			continue
+		case <-r.nextPauseRetry():
+			r.consumePauseRetries()
 		case <-retry:
 		}
 		retry = nil

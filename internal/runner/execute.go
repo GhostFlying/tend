@@ -73,6 +73,8 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			err = r.prepare(runCtx, as)
 		case journal.PhaseStarted:
 			err = r.work(ctx, runCtx, as, a)
+		case journal.PhasePausing:
+			return r.recoverPauseStop(ctx, a, run)
 		case journal.PhaseWorkerDone:
 			r.flushFinalEvents(ctx, as)
 			if r.stopRequested(runCtx, a) {
@@ -176,6 +178,9 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 					continue
 				}
 				if err := r.stopAgent(ctx, as); err != nil {
+					if pending := r.deferOwnedPauseStop(ctx, a, latest, err); pending != nil {
+						return pending
+					}
 					return &completionPending{err}
 				}
 				if latest.Held {
@@ -194,6 +199,9 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			// attempt waits until tend wants the run again.
 			continue
 		case isOwnedRecoveryUncertain(err):
+			if pending := r.deferOwnedPauseStop(ctx, a, run, err); pending != nil {
+				return pending
+			}
 			r.cfg.Log.WarnContext(ctx, "original app-server recovery remains unconfirmed; run retained for explicit reconciliation or bounded isolation", "run_id", runID, "err", err)
 			if fenceErr := r.markExecutorFenced(ctx, a); fenceErr != nil {
 				return errors.Join(err, fenceErr)

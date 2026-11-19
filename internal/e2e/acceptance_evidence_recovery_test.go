@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
+	"github.com/GhostFlying/tend/internal/procx"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
@@ -27,6 +30,7 @@ import (
 )
 
 const acceptanceRecoveryHelper = "TEND_TEST_E2E_ACCEPTANCE_RECOVERY"
+const pauseRecoveryChildPID = "TEND_TEST_E2E_PAUSE_CHILD_PID"
 
 func TestMain(m *testing.M) {
 	if path := os.Getenv(acceptanceRecoveryHelper); path != "" && len(os.Args) == 2 && os.Args[1] == "app-server" {
@@ -84,6 +88,23 @@ func serveAcceptanceRecoveryProcess(path string) error {
 			return err
 		}
 		if request.Method == "turn/start" {
+			if pidPath := os.Getenv(pauseRecoveryChildPID); pidPath != "" {
+				child := exec.CommandContext(context.Background(), "sleep", "60")
+				procx.Contain(child)
+				if err := child.Start(); err != nil {
+					return err
+				}
+				pid := child.Process.Pid
+				if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0600); err != nil {
+					procx.KillGroup(child)
+					_ = child.Wait()
+					return err
+				}
+				// The fixture's test process is the subreaper. The child
+				// intentionally outlives this app-server process.
+				_ = child.Process.Release()
+				continue
+			}
 			arguments := map[string]any{
 				"verdict": "blocked", "evidence": map[string]string{"check": "original quality gate"},
 				"files": []map[string]string{{"path": os.Getenv("TEND_TEST_E2E_EVIDENCE_PATH"), "name": "check.log"}},
