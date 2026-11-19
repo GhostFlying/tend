@@ -79,6 +79,29 @@ func TestExternalOwnedCloseProofBindsOriginalExecution(t *testing.T) {
 	}
 }
 
+func TestObserveOwnedWorkerStopUsesExactExternalCloseProof(t *testing.T) {
+	spec, record, proof := externalOwnedCloseFixture(t)
+	// The recorded boot is historical. The external proof is the evidence
+	// for closing it, independent of the local kernel state.
+	saveExternalOwnedCloseProof(t, spec, proof.Intent.OwnedRecordSHA256, proof)
+	workers := NewWorkers(WorkerOptions{})
+	spec.Attempt = 2
+	if err := workers.ObserveOwnedWorkerStop(t.Context(), spec); err == nil {
+		t.Fatal("a proof from the first attempt covered a later attempt")
+	}
+	spec.Attempt = 1
+	if err := workers.ObserveOwnedWorkerStop(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := workers.ownedWorkerProcess(spec)
+	if err != nil || got.CloseObserved || got.ReconciledCloseScope != protocol.ExternalExecutionBoundary {
+		t.Fatalf("wrong close provenance: original=%+v saved=%+v err=%v", record, got, err)
+	}
+	if err := workers.ObserveOwnedWorkerStop(t.Context(), spec); err != nil {
+		t.Fatalf("recorded proof could not be replayed: %v", err)
+	}
+}
+
 func TestExternalOwnedCloseProofRejectsMismatchedFacts(t *testing.T) {
 	for _, tc := range []struct {
 		name string

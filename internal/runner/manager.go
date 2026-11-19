@@ -26,6 +26,9 @@ import (
 func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (resultErr error) {
 	defer func() {
 		if resultErr != nil && lifetime.Err() == nil {
+			if _, pending := errors.AsType[*pauseStopPending](resultErr); pending {
+				return // The pause scheduler retains the original receipt.
+			}
 			if rejection, ok := errors.AsType[*protocol.Error](resultErr); ok && rejection.Code != protocol.CodeUnknownOutcome && !isRetryable(resultErr) {
 				// A permanent rejection leaves the same durable original pending.
 				// Do not immediately hello/re-enter this releasing executor with

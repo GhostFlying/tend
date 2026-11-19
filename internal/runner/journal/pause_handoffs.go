@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -56,4 +57,17 @@ func (j *Journal) Pause(ctx context.Context, run string) (*protocol.PauseHandoff
 		return nil, err
 	}
 	return &p, nil
+}
+
+// TryBeginPauseStop only parks a running attempt. A concurrently persisted
+// result, hold, or terminal phase keeps its existing settlement path.
+func (j *Journal) TryBeginPauseStop(ctx context.Context, runID string, attempt int) (bool, error) {
+	result, err := j.db.ExecContext(ctx, `UPDATE runs SET phase=?, updated_at=?
+		WHERE run_id=? AND phase=? AND attempts=? AND held=0`,
+		PhasePausing, j.now().UnixMilli(), runID, PhaseStarted, attempt)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }

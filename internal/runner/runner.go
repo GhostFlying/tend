@@ -779,6 +779,14 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictContinue:
 			if run.Phase == journal.PhasePausing && (v.PauseHandoff == nil || v.Desired != protocol.DesiredPaused) {
+				if v.Desired == protocol.DesiredHeld {
+					if a := r.lookup(v.RunID); a != nil {
+						r.applyDesired(ctx, a, v.Desired, sent)
+					}
+					r.mu.Lock()
+					r.schedulePauseRetry(v.RunID)
+					r.mu.Unlock()
+				}
 				continue
 			}
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
@@ -914,12 +922,10 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		return
 	}
 	pauseOnly := journaled.Phase == journal.PhasePausing
-	if pauseOnly {
-		retry := r.pauseRetries[runID]
-		if as.Desired != protocol.DesiredPaused || retry.blocked || retry.due.After(r.cfg.Now()) {
-			r.mu.Unlock()
-			return
-		}
+	retry := r.pauseRetries[runID]
+	if retry.blocked || retry.due.After(r.cfg.Now()) || pauseOnly && as.Desired != protocol.DesiredPaused {
+		r.mu.Unlock()
+		return
 	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	desired := as.Desired
@@ -949,7 +955,7 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 		if err := r.execute(ctx, runCtx, runID, a); err != nil && ctx.Err() == nil {
 			if paused, ok := errors.AsType[*pauseStopPending](err); ok {
 				pending = paused
-				r.cfg.Log.WarnContext(ctx, "pause awaits original process stop", "run_id", runID, "lease_id", as.LeaseID, "err", err)
+				r.cfg.Log.WarnContext(ctx, "original pause reconciliation pending", "run_id", runID, "lease_id", as.LeaseID, "err", err)
 			} else {
 				r.cfg.Log.ErrorContext(ctx, "run executor failed", "run_id", runID, "err", err)
 			}
