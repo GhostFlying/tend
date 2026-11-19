@@ -527,3 +527,34 @@ func TestBoundedRunnerReconcilesOriginalBackupWithoutOverwritingIt(t *testing.T)
 		})
 	}
 }
+
+func TestBoundedStartupAfterRollingCommitKeepsIndependentJournal(t *testing.T) {
+	h, grant := boundedRunnerFixture(t)
+	if err := h.s.criticalState(); err != nil {
+		t.Fatal(err)
+	}
+	h.s.state.Format = rollingStateFormat
+	h.s.state.CurrentJournal = "accepting-journal"
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	grant.Plan.Authorization.ExpectedGeneration = h.s.Status().Generation
+	if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
+		t.Fatal(err)
+	}
+	for range 8 {
+		if h.s.Status().Operation.Phase == "checking" {
+			break
+		}
+		if err := boundedRunnerTestStep(t, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := h.s.Status()
+	if state.Operation.Phase != "checking" || state.Format != rollingStateFormat || len(h.p.journalIDs) != 1 || h.p.journalIDs[0] != state.CurrentJournal {
+		t.Fatal("recovery launched against a different journal", state.Operation, h.p.journalIDs)
+	}
+	if _, err := ValidateBoundedRecoveryStartup(state, "runner", state.Operation.CandidateProcess, grant.RecoveryAuthorizationID); err != nil {
+		t.Fatal(err)
+	}
+}

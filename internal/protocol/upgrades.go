@@ -106,6 +106,7 @@ type RunnerRetirement struct {
 
 type RunnerRetirementResult struct {
 	RunnerRetirement
-	Allowed   bool `json:"allowed"`
-	Confirmed bool `json:"confirmed"`
+	ReadySequence int64 `json:"ready_sequence,omitempty"`
+	Allowed       bool  `json:"allowed"`
+	Confirmed     bool  `json:"confirmed"`
 }

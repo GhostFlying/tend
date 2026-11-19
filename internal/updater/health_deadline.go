@@ -17,7 +17,9 @@ type HealthWindow struct {
 	Cause            string `json:"cause,omitempty"`
 }
 
-func boundedStateFormat(format int) bool { return format == 4 || format == 5 }
+const rollingStateFormat = 6
+
+func boundedStateFormat(format int) bool { return format >= 4 && format <= rollingStateFormat }
 
 func (s *Supervisor) criticalState() error {
 	if s.state.UpdaterEpoch == "" {
@@ -32,7 +34,7 @@ func (s *Supervisor) criticalState() error {
 		s.state.UpdaterEpoch, s.state.UpdaterBootID = epoch, boot
 	}
 	// Prior writers ignore optional JSON fields. They must refuse this format.
-	s.state.Format = 5
+	s.state.Format = max(5, s.state.Format)
 	return nil
 }
 

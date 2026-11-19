@@ -19,6 +19,7 @@ import (
 )
 
 type fakeProcess struct {
+	journalIDs     []string
 	next           int
 	live           map[int]Identity
 	starts, stops  int
@@ -51,6 +52,7 @@ func (p *fakeProcess) Start(_ context.Context, binary string, _ Config, env map[
 	p.next++
 	p.starts++
 	p.releaseIDs = append(p.releaseIDs, env["TEND_UPDATER_RELEASE_ID"])
+	p.journalIDs = append(p.journalIDs, env["TEND_RUNNER_JOURNAL_ID"])
 	sum, err := hashFile(binary)
 	if err != nil {
 		return Identity{}, err

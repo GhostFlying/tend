@@ -129,7 +129,7 @@ func ValidateOperationMaintenanceSource(state State, p protocol.CommittedMainten
 	}
 	m := state.Maintenance
 	op, ok := state.OperationHistory[p.SourceOperation.OperationID]
-	if state.Format != 5 || !ok || m == nil || digest(m.Plan) != digest(p) || state.Operation != nil && state.Operation.ID == op.ID {
+	if (state.Format < 5 || state.Format > rollingStateFormat) || !ok || m == nil || digest(m.Plan) != digest(p) || state.Operation != nil && state.Operation.ID == op.ID {
 		return errors.New("updater: unfinished predecessor ownership was not transferred")
 	}
 	original := State{Operation: &op, Current: op.Candidate, CommittedProof: &m.OriginalProof}

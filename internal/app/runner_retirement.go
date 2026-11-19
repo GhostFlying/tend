@@ -41,6 +41,15 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "retirement identity changed")
 		}
 		result.AuthorizationID, result.Allowed, result.Confirmed = auth, true, confirmed.Valid
+		if !confirmed.Valid && input.AuthorizationID == "" {
+			drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if retirementReady(drain, x.Now.UnixMilli()) {
+				result.ReadySequence = drain.Runtime.Sequence
+			}
+		}
 		if confirmed.Valid || input.AuthorizationID == "" {
 			return Outcome{Result: result, NoEffect: true}, nil
 		}
@@ -78,7 +87,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			continue
 		}
 		rt := drain.Runtime
-		if rt.Mode != protocol.RunnerReady || rt.AppliedControlRevision != drain.Control.Revision || rt.PendingClaims != 0 || rt.PendingOperations != 0 || len(rt.Blockers) != 0 || x.Now.UnixMilli()-drain.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
+		if !retirementReady(drain, x.Now.UnixMilli()) {
 			break
 		}
 		n, err := store.CountJournalRuns(ctx, tx.Q(), host, rt.JournalID)
@@ -94,6 +103,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
 		result.Allowed = true
+		result.ReadySequence = rt.Sequence
 		_, err = tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,authorization_id,process_json) VALUES(?,?,?,?,?)`, host, process.LaunchID, input.UpgradeID, result.AuthorizationID, string(raw))
 		if err != nil {
 			return Outcome{}, err
@@ -101,4 +111,9 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{Result: result, Events: []Event{{ObjectType: "host", ObjectID: host, Kind: "runner.retirement_authorized"}}}, nil
 	}
 	return Outcome{NoEffect: true, Result: result}, nil
+}
+
+func retirementReady(drain store.DrainingRunner, now int64) bool {
+	rt := drain.Runtime
+	return rt.Mode == protocol.RunnerReady && rt.AppliedControlRevision == drain.Control.Revision && rt.PendingClaims == 0 && rt.PendingOperations == 0 && len(rt.Blockers) == 0 && now-drain.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
 }
