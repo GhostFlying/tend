@@ -102,20 +102,21 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 			return Outcome{}, err
 		}
 	}
-	if err := refreshPauseContinuations(ctx, x, tx); err != nil {
+	if err := refreshPauseContinuations(ctx, x, tx, nil); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFinished, "pause_request_id": p.RequestID}, Events: []Event{{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.pause_yielded", Body: map[string]any{"pause": p.PauseHandoff}}}}, nil
 }
 
-func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx) error {
+func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx, end func(int)) error {
 	// Retained backlog is not ready work. Avoid loading its frozen Task and
 	// responsibility graph on every unrelated native event or empty claim.
 	// Cancellation of the primary responsibility must still settle its action,
 	// including when the original pause was requested by a held review Issue.
-	end := tx.ObserveCountedPhase(store.WritePauseContinuations)
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT h.run_id FROM run_pause_handoffs h JOIN runs r USING(run_id) JOIN plan_actions a ON a.action_id=r.action_id JOIN issue_controls paused ON paused.issue_id=h.issue_id JOIN task_work_item_owners o ON o.task_id=r.task_id JOIN issue_controls primary_issue ON primary_issue.issue_id=o.work_item_id WHERE h.stopped=1 AND h.continuation_action_id IS NULL AND h.successor_run_id IS NULL AND a.status='dispatched' AND ((paused.work_status<>'backlog' AND paused.state<>'paused') OR primary_issue.state='cancelling') AND NOT EXISTS(SELECT 1 FROM run_question_handoffs q WHERE q.run_id=h.run_id) AND NOT EXISTS(SELECT 1 FROM run_external_waits w WHERE w.run_id=h.run_id) ORDER BY h.run_id`)
-	defer end(len(ids))
+	if end != nil {
+		defer end(len(ids))
+	}
 	if err != nil {
 		return err
 	}

@@ -383,12 +383,12 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 	}
 	endClaimRefresh := tx.ObservePhase(store.WriteClaimRefresh)
-	refreshErr := refreshPauseContinuations(ctx, x, tx)
+	refreshErr := refreshPauseContinuations(ctx, x, tx, tx.ObserveCountedPhase(store.WritePauseContinuations))
 	if refreshErr == nil {
-		refreshErr = refreshExternalWaits(ctx, x, tx)
+		_, refreshErr = refreshExternalWaitsChanged(ctx, x, tx, tx.ObserveCountedPhase(store.WriteExternalWaitRefresh))
 	}
 	if refreshErr == nil {
-		refreshErr = refreshManagerTasks(ctx, x, tx)
+		refreshErr = refreshIssueManagerTasks(ctx, x, tx, "", tx.ObserveCountedPhase(store.WriteIssueManagerRefresh))
 	}
 	endClaimRefresh()
 	if refreshErr != nil {

@@ -105,14 +105,14 @@ func refreshAffectedManagers(ctx context.Context, x *Exec, tx *store.Tx) error {
 	if err := refreshExternalWaits(ctx, x, tx); err != nil {
 		return err
 	}
-	if err := refreshPauseContinuations(ctx, x, tx); err != nil {
+	if err := refreshPauseContinuations(ctx, x, tx, nil); err != nil {
 		return err
 	}
 	if x.globalManagerRefresh && !x.managersRefreshed {
 		return refreshManagerTasks(ctx, x, tx)
 	}
 	for id := range x.affectedIssues {
-		if err := refreshIssueManagerTasks(ctx, x, tx, id); err != nil {
+		if err := refreshIssueManagerTasks(ctx, x, tx, id, nil); err != nil {
 			return fmt.Errorf("refresh affected Issue: %w", err)
 		}
 	}

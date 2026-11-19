@@ -74,13 +74,14 @@ func (a *App) FinishRunnerManager(ctx context.Context, run string) error {
 // refreshManagerTasks turns committed inbox work into another ordinary action.
 // Waiting responsibility holds neither a lease nor a host slot.
 func refreshManagerTasks(ctx context.Context, x *Exec, tx *store.Tx) error {
-	return refreshIssueManagerTasks(ctx, x, tx, "")
+	return refreshIssueManagerTasks(ctx, x, tx, "", nil)
 }
 
-func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue string) error {
-	end := tx.ObserveCountedPhase(store.WriteIssueManagerRefresh)
+func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue string, end func(int)) error {
 	count := 0
-	defer func() { end(count) }()
+	if end != nil {
+		defer func() { end(count) }()
+	}
 	parked, err := store.ManagerUpgradeParked(ctx, tx.Q())
 	if err != nil {
 		return err
