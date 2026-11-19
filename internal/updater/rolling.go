@@ -140,14 +140,17 @@ func (s *Supervisor) requestRetirement(ctx context.Context, req protocol.RunnerR
 		if err != nil {
 			return false, err
 		}
-		if result.WindowID != req.WindowID || result.AuthorizationID == "" {
-			return false, nil
-		}
-		drain.WindowID = req.WindowID
-		drain.GrantBootID = boot
-		drain.GrantDeadlineMillis = start
-		if result.Allowed && result.RemainingMillis > 0 && result.RemainingMillis <= 30*60*1000 {
-			drain.GrantDeadlineMillis += result.RemainingMillis
+		// The runner may qualify for natural retirement between these two reads.
+		if result.WindowID != "" || !result.Allowed {
+			if result.WindowID != req.WindowID || result.AuthorizationID == "" {
+				return false, nil
+			}
+			drain.WindowID = req.WindowID
+			drain.GrantBootID = boot
+			drain.GrantDeadlineMillis = start
+			if result.Allowed && result.RemainingMillis > 0 && result.RemainingMillis <= 30*60*1000 {
+				drain.GrantDeadlineMillis += result.RemainingMillis
+			}
 		}
 	} else if !result.Allowed {
 		return false, nil

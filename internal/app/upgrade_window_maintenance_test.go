@@ -15,7 +15,7 @@ import (
 // fixture. The Run, maintenance request, retirement grant, acknowledgement and
 // install phase all pass through the ordinary business entry points.
 func TestUpgradeWindowMaintenance(t *testing.T) {
-	for _, scenario := range []string{"work_finishes", "deadline", "cancel", "receipt_after_expiry", "unused_after_expiry"} {
+	for _, scenario := range []string{"work_finishes", "finishes_after_offer", "deadline", "cancel", "receipt_after_expiry", "unused_after_expiry"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, c := selfUpgradeFixture(t)
 			selfUpgradeHosts(t, h, true)
@@ -138,7 +138,16 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				}
 				return
 			}
-			if scenario == "work_finishes" {
+			natural := scenario == "work_finishes" || scenario == "finishes_after_offer"
+			if scenario == "finishes_after_offer" {
+				h.clock.Advance(5 * time.Second)
+				offer := retire(req)
+				if offer.Allowed || offer.WindowID == "" {
+					t.Fatal(offer)
+				}
+				req.WindowID = offer.WindowID
+			}
+			if natural {
 				if op := h.runAs(as, protocol.OpRunsSubmitArtifact, testArtifact(h.task(task.TaskID).WorkspaceName), SubmitArtifact{}); op.Error != nil {
 					t.Fatal(op)
 				}
@@ -155,7 +164,7 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 			if result := retire(wrong); result.Allowed {
 				t.Fatal("different process authorized")
 			}
-			if scenario != "work_finishes" {
+			if !natural {
 				offer := retire(req)
 				if offer.Allowed || offer.WindowID != batch.View.UpgradeID {
 					t.Fatal("historical supervisor received an unbounded grant", offer)
@@ -163,6 +172,9 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				req.WindowID = offer.WindowID
 			}
 			grant := retire(req)
+			if natural && grant.WindowID != "" {
+				t.Fatal("natural retirement kept a force deadline", grant)
+			}
 			if !grant.Allowed || grant.AuthorizationID == "" || retire(req).AuthorizationID != grant.AuthorizationID {
 				t.Fatal("missing original permission", grant)
 			}
@@ -206,7 +218,7 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 			if stopped.State != "stopped" {
 				t.Fatal(stopped)
 			}
-			if scenario != "work_finishes" {
+			if !natural {
 				if !slices.Equal(stopped.UnknownRuns, []string{as.RunID}) || h.run(as.RunID).ObservedState != protocol.RunUnknown || h.lease(as.RunID).Status != store.LeaseLapsed || h.lease(as.RunID).LeaseID != as.LeaseID {
 					t.Fatal("original work lost", stopped, h.run(as.RunID), h.lease(as.RunID))
 				}
