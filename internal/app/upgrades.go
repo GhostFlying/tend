@@ -154,7 +154,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	}
 	busy := map[string]int64{}
 	for _, h := range hosts {
-		n, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+		_, n, err := store.HostSlotCounts(ctx, tx.Q(), h.HostID)
 		if err != nil {
 			return Outcome{}, err
 		}

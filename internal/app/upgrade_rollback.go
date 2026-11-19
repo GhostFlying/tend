@@ -92,7 +92,7 @@ func reconcileUpgradeRollbacks(ctx context.Context, x *Exec, tx *store.Tx, r *st
 		if err != nil {
 			return false, err
 		}
-		runs, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+		_, runs, err := store.HostSlotCounts(ctx, tx.Q(), h.HostID)
 		if err != nil {
 			return false, err
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestUpgradeServerStopGrantReservesConservativeRestartCoverage(t *testing.T) {
@@ -80,9 +81,28 @@ func TestUpgradeDownloadFailureRetryIgnoresPreviousControlError(t *testing.T) {
 }
 
 func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
-	for _, invalid := range []string{"confirmed", "healthy-before-rollback", "missing", "wrong-candidate", "wrong-current", "wrong-hash", "busy"} {
+	for _, invalid := range []string{"confirmed", "earlier-window-exit", "healthy-before-rollback", "missing", "wrong-candidate", "wrong-current", "wrong-hash", "busy"} {
 		t.Run(invalid, func(t *testing.T) {
 			h, c := upgradeHarness(t)
+			if invalid == "earlier-window-exit" {
+				h.createTask(owner, createTaskPayload{Title: "prior window", Spec: testSpec})
+				original, ok, _ := h.claim("linux-1")
+				if !ok {
+					t.Fatal("missing original Run")
+				}
+				ctx, now := t.Context(), h.clock.Now()
+				if err := h.store.Write(ctx, func(tx *store.Tx) error {
+					if err := tx.SetLease(ctx, original.LeaseID, store.LeaseActive, store.LeaseLapsed, now.UnixMilli(), now.UnixMilli()); err != nil {
+						return err
+					}
+					if err := tx.UpdateRunObserved(ctx, original.RunID, protocol.RunUnknown, now.UnixMilli()); err != nil {
+						return err
+					}
+					return seedWindowExit(ctx, tx, now, original)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			upgradeToRunners(h, c)
 			upgradeTick(h, ServerObservation{})
 			upgradeAck(h, "linux-1", protocol.RunnerReady)
@@ -139,7 +159,7 @@ func TestUpgradeRunnerRollbackReceiptReconcilesAfterTimeout(t *testing.T) {
 				t.Fatal(op)
 			}
 			upgradeTick(h, ServerObservation{})
-			if invalid != "confirmed" && invalid != "healthy-before-rollback" {
+			if invalid != "confirmed" && invalid != "earlier-window-exit" && invalid != "healthy-before-rollback" {
 				if upgradeRead(h).Hosts[0].Rollback != nil || upgradeCtl(h, "linux-1").Mode != protocol.RunnerMaintenance {
 					t.Fatal("unproven rollback released maintenance")
 				}

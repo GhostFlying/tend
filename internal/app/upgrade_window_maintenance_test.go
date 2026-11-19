@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -269,14 +270,7 @@ func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
 	for _, proved := range []bool{false, true} {
 		err := h.store.Write(ctx, func(tx *store.Tx) error {
 			if proved {
-				source := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "handoff", ReleaseID: "old", CreatedAt: now, Status: "completed"}}
-				if err := tx.PutUpgrade(ctx, source); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json,confirmed_at) VALUES('linux-1','old','handoff','','original-stop','{}',?)`, now.UnixMilli()); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO runner_window_released_leases VALUES(?,?,'original-stop')`, assignment.RunID, assignment.LeaseID); err != nil {
+				if err := seedWindowExit(ctx, tx, now, assignment); err != nil {
 					return err
 				}
 			}
@@ -290,4 +284,19 @@ func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
 			t.Fatal(proved, batch.ManagerParks)
 		}
 	}
+}
+
+// The completed handoff and physical receipt precede the business operation under test.
+func seedWindowExit(ctx context.Context, tx *store.Tx, now time.Time, assignment protocol.Assignment) error {
+	source := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "handoff", ReleaseID: "old", CreatedAt: now.Add(-time.Hour), Status: "completed"}}
+	if err := tx.PutUpgrade(ctx, source); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json,confirmed_at) VALUES('linux-1','old','handoff','','original-stop','{}',?)`, now.UnixMilli()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO runner_window_released_leases VALUES(?,?,'original-stop')`, assignment.RunID, assignment.LeaseID); err != nil {
+		return err
+	}
+	return nil
 }
