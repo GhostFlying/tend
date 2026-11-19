@@ -32,6 +32,8 @@ type capabilityCommand struct {
 	Post          bool
 }
 
+const hostMaintenanceOperation = "hosts.maintenance"
+
 var capabilityCommands = []capabilityCommand{
 	{Name: "task resume-wait", Operation: protocol.OpTasksResumeWait, Target: "task", RevisionRoute: "-", JSONDefault: true},
 	{Name: "task ci-continuation", Route: "/api/v1/tasks/{id}/ci-continuation/{run}", JSONDefault: true},
@@ -131,7 +133,8 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation compact", Operation: "conversation.compact", Target: "conversation", RevisionRoute: "/api/v1/agent-conversations/{id}", RevisionField: "revision"},
 	{Name: "conversation settings set", Operation: "conversation.set_settings", Target: "conversation", RevisionRoute: "/api/v1/conversation/settings", RevisionField: "revision"},
 	{Name: "issue notifications set", Operation: "issues.set_notification_settings", Target: "issue_settings", RevisionRoute: "/api/v1/issue-notification-settings", RevisionField: "revision"},
-	{Name: "host maintenance", Operation: "hosts.maintenance", Target: "host", RevisionRoute: "/api/v1/snapshot", RevisionField: "host"},
+	{Name: "host set-maintenance", Operation: hostMaintenanceOperation, Target: "host", RevisionRoute: "/api/v1/snapshot", RevisionField: "host"},
+	{Name: "host maintenance", Operation: hostMaintenanceOperation, Target: "host", RevisionRoute: "/api/v1/snapshot", RevisionField: "host"}, // Compatibility alias.
 	{Name: "host authorize-bounded-maintenance", Operation: boundedRunnerOwnerOperation, Target: "host", RevisionRoute: "-"},
 	{Name: "host release-bounded-admission", Operation: protocol.OpReleaseBoundedRunnerAdmission, Target: "host", RevisionRoute: "-"},
 	{Name: "upgrade control", Operation: "upgrades.control", Target: "upgrade", RevisionRoute: "/api/v1/upgrades/{id}", RevisionField: "upgrade.revision"},
@@ -192,7 +195,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return runManagerReconciliation(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
-	if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {
+	if cmd.Operation == hostMaintenanceOperation {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, hostMaintenanceHelp(cmd.Name)) }
+	} else if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {
 		fs.Usage = func() {
 			fmt.Fprint(e.Stderr, commandUsage(strings.Fields(cmd.Name)))
 			fs.PrintDefaults()

@@ -163,6 +163,8 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "--data", `{"message_id":"msg_01ARZ3NDEKTSV4RRFFQ69G5FAV","version":1,"text":"Answer the original question"}`)
 			} else if cmd.Operation == protocol.OpReconcileManagerRun {
 				args = append(args, "--mode", "read_receipts", "--run", "original", "--lease", "original-lease", "--close-request", "original-close", "--close-sha256", strings.Repeat("a", 64), "--stopped-request", "original-stopped", "--stopped-sha256", strings.Repeat("b", 64), "--assignment-epoch", "3", "--reason", "Read the original native receipt")
+			} else if cmd.Operation == hostMaintenanceOperation {
+				args = append(args, "--data", `{"mode":"maintenance"}`)
 			} else {
 				args = append(args, "--data", `{}`)
 			}
@@ -180,7 +182,16 @@ func CapabilityBindings() []CapabilityBinding {
 			continue
 		}
 		args := []string{"--data", `{}`}
-		if action == "update-delivery" {
+		switch operation {
+		case issueDependenciesOperation:
+			args = []string{"--data", `{"depends_on":["dependency"]}`}
+		case "issues.reparent":
+			args = []string{"--data", `{"parent_issue_id":"parent","expected_parent_revision":2}`}
+		case "issues.update_progress":
+			args = []string{"--data", `{"summary":"Checks passed","next_step":"Read results"}`}
+		case "issues.refresh_delivery":
+			args = []string{"--data", `{"delivery_id":"delivery"}`}
+		case "issues.update_delivery":
 			args = []string{"--data", `{"action":"report","task_id":"source","reason":"Report an accepted bounded result"}`}
 		}
 		if action != "create" {
@@ -393,7 +404,11 @@ func commandUsage(prefix []string) string {
 	}
 	fmt.Fprintf(&out, "usage: %s <command> [arguments]\n\n", prefixName)
 	for _, command := range names {
-		fmt.Fprintf(&out, "  %s\n", command)
+		fmt.Fprintf(&out, "  %s", command)
+		if summary := commandHelpSummaries[command]; summary != "" {
+			fmt.Fprintf(&out, "  %s", summary)
+		}
+		out.WriteByte('\n')
 	}
 	if name != "" {
 		if name == "agents capabilities list" || name == "agents capabilities show" || name == "task capability-explain" {
@@ -457,6 +472,9 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nSubmit one complete saved owner Envelope using --file <path> (or - for stdin) or --data <json>. --dry-run validates and prints it without IO. Preserve Target.ID, nested task_id/rule_id/subscription_id/message_id, request trace, payload and original revisions. Missing business identities are rejected. Read the typed business object first when an earlier outcome is unknown; this command neither looks up a request result nor automatically retries.\n")
 	}
 
+	if name == "host" {
+		out.WriteString("\nRead runner admission with host show. Change it with host set-maintenance. The legacy host maintenance command also writes.\n")
+	}
 	if name == "issue" || name == "issue create" || name == "issue set-status" || name == "issue pause" || name == "issue resume" || name == "issue cancel" {
 		out.WriteString("\nNew Issues start in backlog and create no execution allocation. Select a category and explicitly move backlog to todo with issue set-status <id> --status todo --category <category> [--agent <environment/local>]. The runner claims todo directly when dependencies and capacity permit. An assigned Issue waits for its named Agent. Use the existing explicit owner replacement to select a different Agent. Backlog cannot jump to running, review or done. Returning to backlog or pausing closes new admission for the whole responsibility tree; negotiated runners confirm process exit before releasing their current Run and slot. A later todo retains Task/spec/workspace/results and creates a unique successor. Independent Task pause, human control and unresolved receipts still apply. issue show --json and issue list --board expose queue_reason and pause progress. Cancel ends a settled Issue atomically; unresolved obligations keep it cancelling and require actual settlement before finish-cancel. Issue cancellation does not prove its manager process stopped. Keep the original request/revision/epoch for unknown outcomes.\n")
 	}
@@ -472,7 +490,8 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nIssue PR policy: show <issue_id>; set <issue_id> --mode auto|manual --repository <owner/repo> --reason <text>; clear <issue_id> --reason <text>. Auto grants protected integration after review and checks. To also grant deployment, explicitly add --deploy-server-instance <configured-instance> [--deploy-hosts <runner-one,runner-two>]; omitted hosts means server only. Without deployment scope the policy remains merge-only. Within that scope, rebases and candidate updates reuse original authority; the Issue owner judges actual requirement enlargement and requests new authority when needed. Missing policy is not automatic authorization. Existing exact candidate approvals remain within their original scope. Optional --revision/--epoch select the original Issue version. --source-message and --source-revision preserve an actual owner source.\n")
 		out.WriteString("Use --dry-run to save the complete update Envelope. If its outcome is unknown, read issue pr-policy show <issue-id> and issue show <issue-id> for actual policy and control state. Do not rerun the policy helper against a newer plan or automatically submit an unknown external action.\n")
 	}
-	if name == "issue" || name == "issue update-progress" {
+	if name == "issue" {
+		out.WriteString("\nRead dependencies with tend issue show \"$ISSUE_ID\" --json (depends_on). Write the complete list with issue set-dependencies. The legacy issue dependencies command also writes.\nRead recorded provider facts with issue deliveries. Queue a fresh observation with issue refresh-delivery.\n")
 		fmt.Fprintf(&out, "\nIssue progress: update-progress requires summary and next_step, including two explicit empty strings to clear. Limits are %d and %d Unicode code points respectively, independent of UTF-8 byte width; the shared schema and local CLI check use the same limits. Preserve the original revision/epoch when reconciling a submitted request. The --data or --file JSON may include delivery with delivery_id, provider, repository, number, head_sha, base_sha and target_sha from issue deliveries. The Issue assignee may include conflict_action (seen or working) with the original last_conflict.revision as conflict_revision.\n", protocol.MaxIssueProgressSummaryCharacters, protocol.MaxIssueProgressNextStepCharacters)
 	}
 	if name == "issue" || name == "issue create-task" || name == "issue update-task" {
