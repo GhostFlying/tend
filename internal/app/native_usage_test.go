@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -462,4 +463,69 @@ func TestNativePreviewRollsBackAndIncludesReleasedEarlierPages(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestNativeUsageUploadRollsBackProviderAndEarlierSamples(t *testing.T) {
+	h, as := messageRun(t)
+	traex := nativeSample(h.clock.Now().UnixMilli())
+	raw, err := json.Marshal(protocol.NativeIdentity{Provider: "traex", SessionID: traex.ThreadID, State: "known"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.app.RecordRunEvents(t.Context(), runPrincipal(as.RunID, as.Role), as.RunID, []protocol.RunEvent{{Seq: 1, Kind: protocol.EventNativeIdentity, Body: raw}}); err != nil {
+		t.Fatal(err)
+	}
+	codex := traex
+	codex.Provider, codex.Source, codex.RecordID = "codex", "native-ledger/codex/native-thread", "codex-record"
+
+	upload := func(samples ...protocol.TokenUsageSample) (protocol.Operation, error) {
+		t.Helper()
+		p := protocol.UsageUpload{RunID: as.RunID, RootThreadID: traex.ThreadID, SessionID: traex.SessionID, Samples: samples, Coverage: "caught_up"}
+		return h.app.Execute(t.Context(), runner("linux-1"), h.env(protocol.OpRunnerUsageUpload, protocol.Target{Type: "host", ID: "linux-1"}, p, nil), UploadNativeUsage{})
+	}
+	check := func(provider string, count int) {
+		t.Helper()
+		ctx := t.Context()
+		if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+			var gotProvider, gotSession string
+			var gotCount int
+			if err := tx.Q().QueryRowContext(ctx, `SELECT provider,session_id FROM token_usage_sources WHERE run_id=? AND thread_id=?`, as.RunID, traex.ThreadID).Scan(&gotProvider, &gotSession); err != nil {
+				return err
+			}
+			if err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*) FROM token_usage_bindings WHERE run_id=?`, as.RunID).Scan(&gotCount); err != nil {
+				return err
+			}
+			if gotProvider != provider || gotSession != traex.SessionID || gotCount != count {
+				t.Errorf("provider=%q session=%q binding count=%d, want %q %q %d", gotProvider, gotSession, gotCount, provider, traex.SessionID, count)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if op, err := upload(); err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
+	}
+	check("native", 0)
+	if op, err := upload(traex, codex); !isForbiddenUsage(err) {
+		t.Fatalf("mixed-provider batch = %+v, %v", op, err)
+	}
+	check("native", 0)
+	wrongChild := codex
+	wrongChild.ThreadID, wrongChild.SessionID = "another-thread", "another-session"
+	if op, err := upload(codex, wrongChild); !isForbiddenUsage(err) {
+		t.Fatalf("wrong child session = %+v, %v", op, err)
+	}
+	check("native", 0)
+	for range 2 {
+		if op, err := upload(codex); err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal(op, err)
+		}
+		check("codex", 1)
+	}
+}
+
+func isForbiddenUsage(err error) bool {
+	pe, ok := errors.AsType[*protocol.Error](err)
+	return ok && pe.Code == protocol.CodeForbidden
 }
