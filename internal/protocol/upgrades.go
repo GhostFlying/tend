@@ -27,7 +27,7 @@ type UpgradeWindowStop struct {
 	Protocol        int64            `json:"protocol"`
 	Generation      int64            `json:"generation"`
 	SourceUpgradeID string           `json:"source_upgrade_id,omitempty"`
-	DrainUntil      int64            `json:"drain_until_ms"`
+	Primary         bool             `json:"primary,omitempty"`
 	Runs            []LeaseRef       `json:"runs"`
 	State           string           `json:"state"`
 	UnknownRuns     []string         `json:"unknown_runs,omitempty"`

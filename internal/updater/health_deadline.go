@@ -18,8 +18,9 @@ type HealthWindow struct {
 }
 
 const rollingStateFormat = 6
+const emergencyStateFormat = 7
 
-func boundedStateFormat(format int) bool { return format >= 4 && format <= rollingStateFormat }
+func boundedStateFormat(format int) bool { return format >= 4 && format <= emergencyStateFormat }
 
 func (s *Supervisor) criticalState() error {
 	if s.state.UpdaterEpoch == "" {

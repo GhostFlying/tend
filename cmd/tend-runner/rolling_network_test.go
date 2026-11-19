@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"tailscale.com/client/local"
-
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -50,7 +48,7 @@ func TestTailscaledSideChannelKeepsTendCredentialsOnTheServerRequest(t *testing.
 	daemon.Listener = ln
 	daemon.Start()
 	defer daemon.Close()
-	client, err := (sideChannelConfig{Kind: "tailscaled"}).client("http://tend.example.invalid", &local.Client{Socket: socket, UseSocketOnly: true})
+	client, err := (sideChannelConfig{Kind: "tailscaled", Socket: socket}).Client("http://tend.example.invalid")
 	if err != nil {
 		t.Fatal(err)
 	}

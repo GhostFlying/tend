@@ -83,6 +83,9 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		r.ServerCommitted = &proof
 	}
 	for _, h := range r.Hosts {
+		if h.PrimaryOffline {
+			continue
+		}
 		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 		if err != nil {
 			return "", err

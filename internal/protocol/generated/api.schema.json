@@ -21607,9 +21607,6 @@
     "UpgradeWindowStop": {
       "additionalProperties": false,
       "properties": {
-        "drain_until_ms": {
-          "type": "integer"
-        },
         "forced": {
           "type": "boolean"
         },
@@ -21621,6 +21618,9 @@
         },
         "journal_id": {
           "type": "string"
+        },
+        "primary": {
+          "type": "boolean"
         },
         "process": {
           "$ref": "#/definitions/RecoveryIdentity"
@@ -21660,7 +21660,6 @@
         "process",
         "protocol",
         "generation",
-        "drain_until_ms",
         "runs",
         "state"
       ],

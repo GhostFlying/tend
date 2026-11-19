@@ -22,6 +22,7 @@ type RollingLaunch struct {
 }
 
 type DrainingProcess struct {
+	Confirmed           bool     `json:"confirmed,omitempty"`
 	WindowID            string   `json:"window_id,omitempty"`
 	GrantBootID         string   `json:"grant_boot_id,omitempty"`
 	GrantDeadlineMillis int64    `json:"grant_deadline_millis,omitempty"`
@@ -105,7 +106,7 @@ func (a journalAuthority) Retire(ctx context.Context, journal string, req protoc
 func (s *Supervisor) retireDrained(ctx context.Context) error {
 	var failures []error
 	for key, drain := range s.state.DrainingProcesses {
-		if key == s.state.Process.LaunchID || drain.Process.LaunchID != key || s.state.CurrentJournal == "" {
+		if key == s.state.Process.LaunchID || drain.Process.LaunchID != key || s.state.CurrentJournal == "" && s.opts.WindowAuthority == nil {
 			continue
 		}
 		if err := s.retirePredecessor(ctx, drain); err != nil {
@@ -119,14 +120,32 @@ func (s *Supervisor) retireDrained(ctx context.Context) error {
 }
 
 func (s *Supervisor) savePredecessor(drain DrainingProcess) error {
-	s.state.DrainingProcesses[drain.Process.LaunchID] = drain
+	if drain.Process == s.state.Process {
+		if err := s.criticalState(); err != nil {
+			return err
+		}
+		s.state.Format = max(s.state.Format, emergencyStateFormat)
+		s.state.EmergencyPrimary = &drain
+	} else {
+		s.state.DrainingProcesses[drain.Process.LaunchID] = drain
+	}
 	return s.save()
+}
+
+func (s *Supervisor) retirementRPC(ctx context.Context, req protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
+	if s.opts.WindowAuthority != nil && s.state.EmergencyPrimary != nil {
+		return s.opts.WindowAuthority.Retire(ctx, req)
+	}
+	if s.opts.RollingAuthority == nil {
+		return protocol.RunnerRetirementResult{}, errors.New("updater: retirement authority unavailable")
+	}
+	return s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
 }
 
 // Natural retirement uses the original wire request. A server can offer a
 // bounded, forced stop; only its affirmative echo can authorize that operation.
 func (s *Supervisor) requestRetirement(ctx context.Context, req protocol.RunnerRetirement, drain *DrainingProcess) (bool, error) {
-	result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	result, err := s.retirementRPC(ctx, req)
 	if err != nil {
 		return false, err
 	}
@@ -136,7 +155,7 @@ func (s *Supervisor) requestRetirement(ctx context.Context, req protocol.RunnerR
 		if err != nil {
 			return false, err
 		}
-		result, err = s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+		result, err = s.retirementRPC(ctx, req)
 		if err != nil {
 			return false, err
 		}
@@ -173,7 +192,7 @@ func (s *Supervisor) declineUnusedStop(ctx context.Context, req protocol.RunnerR
 		return ErrUnknown
 	}
 	req.AuthorizationID, req.Unused = drain.AuthorizationID, true
-	ack, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	ack, err := s.retirementRPC(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -182,6 +201,10 @@ func (s *Supervisor) declineUnusedStop(ctx context.Context, req protocol.RunnerR
 	}
 	drain.WindowID, drain.AuthorizationID, drain.GrantBootID = "", "", ""
 	drain.GrantDeadlineMillis = 0
+	if drain.Process == s.state.Process {
+		s.state.EmergencyPrimary = nil
+		return s.save()
+	}
 	return s.savePredecessor(drain)
 }
 
@@ -206,7 +229,7 @@ func (s *Supervisor) retirePredecessor(ctx context.Context, drain DrainingProces
 			if previouslyRequested {
 				// Repeating a signal requires a newer heartbeat of the same
 				// exact process in addition to the original grant.
-				observed, e := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+				observed, e := s.retirementRPC(ctx, req)
 				if e != nil {
 					return e
 				}
@@ -261,9 +284,13 @@ func (s *Supervisor) retirePredecessor(ctx context.Context, drain DrainingProces
 		}
 	}
 	req.AuthorizationID = drain.AuthorizationID
-	result, err := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+	result, err := s.retirementRPC(ctx, req)
 	if err != nil || !result.Confirmed {
 		return err
+	}
+	if drain.Process == s.state.Process {
+		drain.Confirmed = true
+		return s.savePredecessor(drain)
 	}
 	s.state.RetiredJournals = append(s.state.RetiredJournals, drain.JournalID)
 	delete(s.state.DrainingProcesses, drain.Process.LaunchID)

@@ -126,7 +126,7 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 			}
 			view.Phase = "server_updater"
 			view.ForceMaintenance = true
-			view.WindowStops = []protocol.UpgradeWindowStop{{HostID: "fixture-host", Process: protocol.RecoveryIdentity{PID: 127, LaunchID: "predecessor"}, Protocol: 5, State: "stopped", DrainUntil: 3000, Runs: []protocol.LeaseRef{{RunID: "long-run", LeaseID: "original-lease"}}, UnknownRuns: []string{"long-run"}}}
+			view.WindowStops = []protocol.UpgradeWindowStop{{HostID: "fixture-host", Process: protocol.RecoveryIdentity{PID: 127, LaunchID: "predecessor"}, Protocol: 5, State: "stopped", Runs: []protocol.LeaseRef{{RunID: "long-run", LeaseID: "original-lease"}}, UnknownRuns: []string{"long-run"}}}
 			view.Hosts = []protocol.UpgradeHostView{
 				{HostID: "excluded", Status: "skipped", Phase: "skipped"},
 				{HostID: "updater-only", Status: "skipped", Phase: "verified", Updater: &protocol.UpdaterSelfObservation{Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original-request"}}},

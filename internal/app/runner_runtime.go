@@ -117,6 +117,16 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 		if old.Runtime.InstanceID == r.InstanceID && old.Runtime.Generation != r.Generation {
 			return protocol.Errorf(protocol.CodeConflictPayload, "runner instance generation changed")
 		}
+		if hello && old.Runtime.InstanceID != r.InstanceID {
+			var pinned bool
+			err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades u JOIN json_each(u.state_json,'$.view.window_stops') s WHERE u.status IN ('running','attention') AND json_extract(s.value,'$.primary')=1 AND json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.process.launch_id')=?)`, host, old.Runtime.InstanceID).Scan(&pinned)
+			if err != nil {
+				return err
+			}
+			if pinned {
+				return protocol.Errorf(protocol.CodeInvalidTransition, "accepting runner is under emergency maintenance")
+			}
+		}
 		if old.Runtime.InstanceID != r.InstanceID && r.Generation <= old.Runtime.Generation {
 			return protocol.Errorf(protocol.CodeConflictPayload, "runner process generation is stale")
 		}

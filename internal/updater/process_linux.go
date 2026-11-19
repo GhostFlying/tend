@@ -448,7 +448,17 @@ func (p LinuxProcess) Stop(ctx context.Context, id Identity, timeout time.Durati
 // StopIf validates a fixed authority after the expensive executable and pidfd
 // identity checks, at the signal dispatch boundary.
 func (p LinuxProcess) StopIf(ctx context.Context, id Identity, timeout time.Duration, beforeSignal func() error) error {
-	return p.signalExact(ctx, id, timeout, syscall.SIGTERM, beforeSignal)
+	err := p.signalExact(ctx, id, min(timeout, 2*time.Second), syscall.SIGTERM, beforeSignal)
+	if !errors.Is(err, errProcessStillRunning) {
+		return err
+	}
+	// TERM was dispatched. Keep that fact even if the grant expires before
+	// escalation. Re-pin and re-check before KILL on this exact process.
+	err = p.signalExact(ctx, id, timeout, syscall.SIGKILL, beforeSignal)
+	if err != nil {
+		return fmt.Errorf("%w: emergency termination after TERM: %v", ErrUnknown, err)
+	}
+	return nil
 }
 
 // Crash is limited to the exact reviewed parent process. It never signals a
@@ -500,6 +510,8 @@ func (p LinuxProcess) signalExact(ctx context.Context, id Identity, timeout time
 	})
 }
 
+var errProcessStillRunning = errors.New("updater: process did not stop within the signal grace period")
+
 // Only Stop may enter this observation loop, after pinning and signalling once.
 func observeSignalledProcess(ctx context.Context, id Identity, timeout time.Duration, inspect func(context.Context, int) (Identity, error)) error {
 	timer := time.NewTimer(timeout)
@@ -520,7 +532,7 @@ func observeSignalledProcess(ctx context.Context, id Identity, timeout time.Dura
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
-			return errors.New("updater: process did not stop; no forced termination attempted")
+			return errProcessStillRunning
 		case <-ticker.C:
 		}
 	}

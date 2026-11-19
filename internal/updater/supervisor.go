@@ -16,6 +16,7 @@ import (
 )
 
 type Options struct {
+	WindowAuthority       WindowAuthority
 	Log                   *slog.Logger
 	ConfigFile            string
 	ValidateConfiguration func(context.Context, string, string, string) error
@@ -98,7 +99,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format < 1 || state.Format > rollingStateFormat) || state.InstanceID != cfg.InstanceID {
+	if (state.Format < 1 || state.Format > emergencyStateFormat) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.CurrentJournal != "" && (cfg.Role != "runner" || state.Format < rollingStateFormat || !release.ValidID(state.CurrentJournal)) {
@@ -144,7 +145,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 			}
 		}
 	}
-	if state.Format >= rollingStateFormat && s.opts.RollingAuthority == nil {
+	if (state.CurrentJournal != "" || len(state.DrainingProcesses) > 0) && s.opts.RollingAuthority == nil {
 		return fail(errors.New("updater: rolling runner transport is required"))
 	}
 	s.durable = cloneState(state)
@@ -601,7 +602,14 @@ func (s *Supervisor) Step(ctx context.Context) error {
 	}
 	op := s.state.Operation
 	if done(op) {
-		err := s.monitor(ctx)
+		var err error
+		if stop := s.state.EmergencyPrimary; stop != nil && stop.Process == s.state.Process {
+			if !stop.Confirmed {
+				err = s.retirePredecessor(ctx, *stop)
+			}
+		} else {
+			err = s.monitor(ctx)
+		}
 		if err == nil && done(s.state.Operation) && len(s.state.DrainingProcesses) > 0 {
 			err = s.retireDrained(ctx)
 		}

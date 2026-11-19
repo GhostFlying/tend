@@ -206,3 +206,36 @@ func TestRollingWindowGrantUsesOriginalDispatchCutoff(t *testing.T) {
 		})
 	}
 }
+
+type primaryWindowAuthority struct{ *windowStopAuthority }
+
+func (a primaryWindowAuthority) Target(context.Context, Identity) (string, error) {
+	return "window", nil
+}
+func (a primaryWindowAuthority) Retire(ctx context.Context, in protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
+	return a.windowStopAuthority.Retire(ctx, "", in)
+}
+
+func TestEmergencyPrimaryReopensWithoutRespawningAfterLostExitReceipt(t *testing.T) {
+	h := newHarness(t)
+	original := h.s.Status().Process
+	a := &retirementAuthority{fakeAuthority: h.a, sequence: 3, ready: map[string]bool{original.LaunchID: true}, loseAck: true, confirmed: map[string]int{}}
+	h.opts.WindowAuthority = primaryWindowAuthority{&windowStopAuthority{retirementAuthority: a}}
+	h.reopen(t)
+	if err := h.s.discoverEmergency(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.Step(t.Context()); err == nil {
+		t.Fatal("expected interrupted receipt")
+	}
+	if s := h.s.Status().EmergencyPrimary; s == nil || !s.Stopped || s.Confirmed || s.Process != original {
+		t.Fatal(s)
+	}
+	h.reopen(t)
+	h.step(t)
+	h.reopen(t)
+	h.step(t)
+	if len(h.p.live) != 0 || h.p.stops != 1 || !h.s.Status().EmergencyPrimary.Confirmed || a.confirmed[original.LaunchID] != 2 {
+		t.Fatal("lost original physical exit", h.s.Status())
+	}
+}

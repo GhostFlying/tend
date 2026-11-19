@@ -443,6 +443,16 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			return protocol.Operation{}, err
 		}
 		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, result)
+	case "runner.window_target":
+		var process protocol.RecoveryIdentity
+		if err := decodeStrict(env.Payload, &process); err != nil {
+			return protocol.Operation{}, err
+		}
+		id, err := s.app.PrimaryWindowTarget(ctx, p, process)
+		if err != nil {
+			return protocol.Operation{}, err
+		}
+		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, id)
 	case "runner.rolling_retire":
 		return s.app.Execute(ctx, p, env, app.RetireRollingRunner{})
 	case "runner.upgrade_health":

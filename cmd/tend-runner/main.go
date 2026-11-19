@@ -251,7 +251,7 @@ func run(ctx context.Context, path, version string, log *slog.Logger) error {
 
 	client := http.DefaultClient
 	if journalID != "" && cfg.SideChannel != nil {
-		client, err = cfg.SideChannel.client(cfg.ServerURL, cfg.SideChannel.daemon())
+		client, err = cfg.SideChannel.Client(cfg.ServerURL)
 		if err != nil {
 			return err
 		}

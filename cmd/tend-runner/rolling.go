@@ -15,7 +15,6 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner"
-	"tailscale.com/client/local"
 )
 
 // Both invocations run in the runner's credential context. Neither opens its
@@ -43,7 +42,7 @@ func rollingCommand(ctx context.Context, action string, args []string, in io.Rea
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if cfg.SideChannel != nil {
 		var err error
-		client, err = cfg.SideChannel.client(cfg.ServerURL, cfg.SideChannel.daemon())
+		client, err = cfg.SideChannel.Client(cfg.ServerURL)
 		if err != nil {
 			return err
 		}
@@ -81,8 +80,4 @@ func rollingCommand(ctx context.Context, action string, args []string, in io.Rea
 		return errors.New("runner: submitted operation has no durable observation")
 	}
 	return json.NewEncoder(out).Encode(map[string]any{"host_id": state.InstanceID, "upgrade_id": *id, "phase": state.Operation.Phase, "candidate_instance": state.Operation.LaunchID})
-}
-
-func (c sideChannelConfig) daemon() *local.Client {
-	return &local.Client{Socket: c.Socket, UseSocketOnly: c.Socket != ""}
 }

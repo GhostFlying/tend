@@ -128,6 +128,7 @@ type CommittedProof struct {
 	Process             Identity `json:"process"`
 }
 type State struct {
+	EmergencyPrimary         *DrainingProcess                                  `json:"emergency_primary,omitempty"`
 	CurrentJournal           string                                            `json:"current_journal,omitempty"`
 	RetiredJournals          []string                                          `json:"retired_journals,omitempty"`
 	DrainingProcesses        map[string]DrainingProcess                        `json:"draining_processes,omitempty"`

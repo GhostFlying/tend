@@ -73,7 +73,15 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		} else if input.Unused {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "no matching unused forced stop")
 		}
-		if !confirmed.Valid && input.AuthorizationID == "" {
+		if !confirmed.Valid && input.AuthorizationID == "" && stop != nil && stop.Primary {
+			rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if rt.Runtime.InstanceID == process.LaunchID {
+				result.ReadySequence = rt.Runtime.Sequence
+			}
+		} else if !confirmed.Valid && input.AuthorizationID == "" {
 			drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
 			if err != nil {
 				return Outcome{}, err
@@ -97,6 +105,30 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		result.Confirmed = true
 		events := []Event{{ObjectType: "host", ObjectID: host, Kind: "runner.retired"}}
 		if stop != nil {
+			if stop.Primary {
+				rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if rt.Runtime.InstanceID == process.LaunchID {
+					ctl, err := runnerControl(ctx, tx.Q(), host, x.Now.UnixMilli())
+					if err != nil {
+						return Outcome{}, err
+					}
+					if ctl.UpgradeID == window.View.UpgradeID {
+						ctl.UpgradeID = ""
+						ctl.Mode = protocol.RunnerMaintenance
+						ctl.Revision++
+						if err := tx.PutHostControl(ctx, host, ctl, x.Now.UnixMilli()); err != nil {
+							return Outcome{}, err
+						}
+					}
+					rt.Online = false
+					if err := tx.PutHostRuntime(ctx, host, rt); err != nil {
+						return Outcome{}, err
+					}
+				}
+			}
 			runEvents, err := confirmWindowStop(ctx, x, tx, stop, auth)
 			if err != nil {
 				return Outcome{}, err
@@ -118,6 +150,26 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "stop acknowledgement has no original authorization")
 	}
+	if stop != nil && stop.Primary {
+		if window.View.Status != "running" || upgradeBatchExpired(window, x.Now.UnixMilli()) {
+			return Outcome{Result: result, NoEffect: true}, nil
+		}
+		result.WindowID = window.View.UpgradeID
+		if input.WindowID != result.WindowID {
+			return Outcome{Result: result, NoEffect: true}, nil
+		}
+		stop.Process = process
+		stop.Forced = true
+		result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
+		rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if rt.Runtime.InstanceID == process.LaunchID {
+			result.ReadySequence = rt.Runtime.Sequence
+		}
+		return grantRetirement(ctx, x, tx, result, stop.JournalID, raw, &window, stop)
+	}
 	drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
 	if err != nil {
 		return Outcome{}, err
@@ -134,9 +186,18 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			continue
 		}
 		rt := drain.Runtime
-		force := stop != nil && window.View.Status == "running" && !upgradeBatchExpired(window, x.Now.UnixMilli()) && x.Now.UnixMilli() >= stop.DrainUntil
-		ready := retirementReady(drain, x.Now.UnixMilli())
-		if ready {
+		force := stop != nil && window.View.Status == "running" && !upgradeBatchExpired(window, x.Now.UnixMilli())
+		if force {
+			result.WindowID = window.View.UpgradeID
+			if input.WindowID != result.WindowID {
+				break
+			}
+			stop.Forced = true
+			result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
+		} else {
+			if !retirementReady(drain, x.Now.UnixMilli()) {
+				break
+			}
 			n, err := store.CountJournalRuns(ctx, tx.Q(), host, rt.JournalID)
 			if err != nil {
 				return Outcome{}, err
@@ -145,38 +206,12 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
-			ready = n == 0 && len(pending) == 0
-		}
-		if !ready {
-			if !force {
+			if n != 0 || len(pending) != 0 {
 				break
 			}
-			// Older supervisors can still retire naturally. Only an updater that
-			// echoed this offer can enforce the dispatch cutoff across a restart.
-			result.WindowID = window.View.UpgradeID
-			if input.WindowID != result.WindowID {
-				break
-			}
-			stop.Forced = true
-			result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
 		}
-		result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
-		result.Allowed = true
 		result.ReadySequence = rt.Sequence
-		_, err = tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json) VALUES(?,?,?,?,?,?)`, host, process.LaunchID, input.UpgradeID, rt.JournalID, result.AuthorizationID, string(raw))
-		if err != nil {
-			return Outcome{}, err
-		}
-		events := []Event{{ObjectType: "host", ObjectID: host, Kind: "runner.retirement_authorized"}}
-		if stop != nil {
-			stop.State = "stop_authorized"
-			changed, err := persistWindowChange(ctx, x, tx, &window)
-			if err != nil {
-				return Outcome{}, err
-			}
-			events = append(events, changed)
-		}
-		return Outcome{Result: result, Events: events}, nil
+		return grantRetirement(ctx, x, tx, result, rt.JournalID, raw, &window, stop)
 	}
 	return Outcome{NoEffect: true, Result: result}, nil
 }
@@ -184,4 +219,24 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 func retirementReady(drain store.DrainingRunner, now int64) bool {
 	rt := drain.Runtime
 	return rt.Mode == protocol.RunnerReady && rt.AppliedControlRevision == drain.Control.Revision && rt.PendingClaims == 0 && rt.PendingOperations == 0 && len(rt.Blockers) == 0 && now-drain.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds()
+}
+
+func grantRetirement(ctx context.Context, x *Exec, tx *store.Tx, result protocol.RunnerRetirementResult, journal string, raw []byte, window *store.UpgradeRow, stop *protocol.UpgradeWindowStop) (Outcome, error) {
+	result.AuthorizationID = x.IDs.New(protocol.PrefixRequest)
+	result.Allowed = true
+
+	_, err := tx.Exec(ctx, `INSERT INTO runner_retirements(host_id,instance_id,upgrade_id,journal_id,authorization_id,process_json) VALUES(?,?,?,?,?,?)`, x.Principal.Subject, result.Process.LaunchID, result.UpgradeID, journal, result.AuthorizationID, string(raw))
+	if err != nil {
+		return Outcome{}, err
+	}
+	events := []Event{{ObjectType: "host", ObjectID: x.Principal.Subject, Kind: "runner.retirement_authorized"}}
+	if stop != nil {
+		stop.State = "stop_authorized"
+		changed, err := persistWindowChange(ctx, x, tx, window)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, changed)
+	}
+	return Outcome{Result: result, Events: events}, nil
 }

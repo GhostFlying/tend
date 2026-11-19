@@ -41,7 +41,7 @@ class LocalDial(BaseHTTPRequestHandler):
                     (upstream if source is self.connection else self.connection).sendall(data)
 
 
-def runner_unit(root, old, bundle, config, env, stack):
+def runner_unit(root, old, bundle, config, env, stack, current_supervisor=False):
     state = root / "supervisor"
     runner_env = root / "service.env"
     write_private(runner_env, "".join(f"{k}={v}\n" for k, v in env.items()))
@@ -55,7 +55,7 @@ def runner_unit(root, old, bundle, config, env, stack):
         "protocol": 5, "storage_version": 1,
     }))
     fixed = root / "tend-updater"
-    shutil.copy2(old / "tend-updater", fixed)
+    shutil.copy2((bundle if current_supervisor else old) / "tend-updater", fixed)
     unit = root / ("tend-runner-" + root.parent.name + ".service")
     write_private(unit, f"""[Service]
 Type=simple
@@ -88,7 +88,7 @@ ExecStartPost=/usr/bin/python3 {Path(__file__).with_name('controlled.py').resolv
     return state, initial
 
 
-def exercise(root, old, first, third, seed, next_window=None):
+def exercise(root, old, first, third, seed, next_window=None, sole=False):
     assert pwd.getpwuid(os.getuid()).pw_name == "tend-wire-fixture"
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -147,12 +147,32 @@ def exercise(root, old, first, third, seed, next_window=None):
         run(cli, "login", "--server", "http://" + address)
         for task in tasks[1:]:
             run(cli, "pause", task)
-        state, oldpid = runner_unit(rc, old, first, runner_config, env, stack)
+        state, oldpid = runner_unit(rc, old, first, runner_config, env, stack, current_supervisor=sole)
         gates = lambda: set(root.glob("*.gate"))
         eventually("first long run", lambda: len(gates()) == 1, [])
         first_gate, = gates()
         lease = lambda task: rows("select r.run_id,l.lease_id,l.status from runs r join leases l using(run_id) where task_id=?", (task,))
         original_lease, = lease(tasks[0])
+        if sole:
+            def upgrade(*flags, check=True):
+                return subprocess.run([cli, "upgrade", "start", "--socket", root / "server.sock",
+                                       "--release", next_window, "--server-only", "--json", *flags],
+                                      env=env, capture_output=True, check=check, timeout=120)
+            ordinary = upgrade(check=False)
+            assert ordinary.returncode and b"outside the target range" in ordinary.stderr, ordinary.stderr
+            batch = json.loads(upgrade("--force-maintenance").stdout)
+            target, = batch["window_stops"]
+            assert target["primary"] and target["process"]["pid"] == oldpid
+            assert target["runs"] == [dict(run_id=original_lease[0], lease_id=original_lease[1])]
+            eventually("new server commits with its sole busy runner stopped",
+                       lambda: batch_done(batch["upgrade_id"]), [], timeout=210)
+            assert lease(tasks[0]) == [(original_lease[0], original_lease[1], "lapsed")]
+            assert rows("select observed_state from runs where run_id=?", (original_lease[0],)) == [("unknown",)]
+            eventually("durable local exit receipt", lambda: json.loads((state / "state.json").read_text())
+                       .get("emergency_primary", {}).get("confirmed"), [])
+            assert not Path(f"/proc/{oldpid}").exists()
+            print("sole busy historical runner stopped and candidate server committed", flush=True)
+            return
         daemon_sock = str(rc / "tailscaled.sock")
         class Daemon(socketserver.ThreadingUnixStreamServer):
             daemon_threads = True
@@ -209,7 +229,6 @@ def exercise(root, old, first, third, seed, next_window=None):
             target, = window["window_stops"]
             assert window["phase"] == "window_maintenance" and target["process"]["pid"] == oldpid
             assert target["runs"] == [dict(run_id=original_lease[0], lease_id=original_lease[1])]
-            os.kill(oldpid, 0)
             eventually("server upgrade after exact predecessor exit", lambda: batch_done(batch), [], timeout=210)
             proof, = status()["window_stops"]
             assert proof["state"] == "stopped" and proof["unknown_runs"] == [original_lease[0]], proof
@@ -236,7 +255,9 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="tend-gen-", dir="/tmp") as tmp:
         root = Path(tmp)
         try:
-            exercise(root, *map(Path, sys.argv[1:]))
+            args = sys.argv[1:]
+            sole = args[-1] == "--sole"
+            exercise(root, *map(Path, args[:-1] if sole else args), sole=sole)
         except BaseException:
             for path in [*root.glob("*.log"), *root.glob("host/*.log"), *root.glob("host/supervisor/state.json")]:
                 print(path.name, path.read_text()[-6000:], flush=True)

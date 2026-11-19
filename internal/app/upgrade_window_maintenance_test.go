@@ -123,8 +123,8 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				}
 				return nil
 			}
-			if r := retire(req); r.Allowed {
-				t.Fatal("early stop", r)
+			if r := retire(req); r.Allowed || r.WindowID != batch.View.UpgradeID {
+				t.Fatal("busy runner must receive an immediate bounded stop offer", r)
 			}
 			if v := upgradeTick(h, ServerObservation{MainDrained: true}); v.Phase != windowMaintenance {
 				t.Fatal("premature install", v)
@@ -141,7 +141,6 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 			}
 			natural := scenario == "work_finishes" || scenario == "finishes_after_offer"
 			if scenario == "finishes_after_offer" {
-				h.clock.Advance(5 * time.Second)
 				offer := retire(req)
 				if offer.Allowed || offer.WindowID == "" {
 					t.Fatal(offer)
@@ -157,15 +156,13 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				if _, err := h.app.RuntimeHeartbeat(ctx, runner(host), protocol.HeartbeatPayload{Runtime: &old}); err != nil {
 					t.Fatal(err)
 				}
-			} else {
-				h.clock.Advance(5 * time.Second)
 			}
 			wrong := req
 			wrong.Process.StartTicks++
 			if result := retire(wrong); result.Allowed {
 				t.Fatal("different process authorized")
 			}
-			if !natural {
+			if req.WindowID == "" {
 				offer := retire(req)
 				if offer.Allowed || offer.WindowID != batch.View.UpgradeID {
 					t.Fatal("historical supervisor received an unbounded grant", offer)
@@ -173,8 +170,8 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				req.WindowID = offer.WindowID
 			}
 			grant := retire(req)
-			if natural && grant.WindowID != "" {
-				t.Fatal("natural retirement kept a force deadline", grant)
+			if grant.WindowID != batch.View.UpgradeID {
+				t.Fatal("emergency stop lost its deadline", grant)
 			}
 			if !grant.Allowed || grant.AuthorizationID == "" || retire(req).AuthorizationID != grant.AuthorizationID {
 				t.Fatal("missing original permission", grant)
@@ -299,4 +296,95 @@ func seedWindowExit(ctx context.Context, tx *store.Tx, now time.Time, assignment
 		return err
 	}
 	return nil
+}
+
+func TestEmergencyWindowStopsSoleAcceptingRunner(t *testing.T) {
+	for _, busy := range []bool{false, true} {
+		name := "idle"
+		if busy {
+			name = "running"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, c := selfUpgradeFixture(t)
+			selfUpgradeHosts(t, h, true)
+			ctx := t.Context()
+			const host = "linux-1"
+			rt := upgradeAck(h, host, protocol.RunnerNormal)
+			rt.Build.PID = 84
+			rt.Sequence++
+			rt.Protocol, rt.ProtocolMin, rt.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
+			if op := h.versionedHello(host, &rt); op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			var ref protocol.Assignment
+			if busy {
+				_, _ = h.createTask(owner, createTaskPayload{Title: "busy accepting runner", Spec: testSpec})
+				var ok bool
+				ref, ok = h.claimWith(host, h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: host}, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: &rt}, nil))
+				if !ok {
+					t.Fatal("initial claim")
+				}
+				if op := h.runAs(ref, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Error != nil {
+					t.Fatal(op.Error)
+				}
+			}
+			c.ServerOnly, c.ServerUpdaterSupported = true, true
+			c.Manifest.Protocol = release.Range{Min: protocol.CurrentRunnerProtocol, Max: protocol.CurrentRunnerProtocol + 1}
+			c.ServerCapabilities = []string{release.ServerCapabilityRunnerJournals, release.ServerCapabilityIndependentServerUpgrade, release.ServerCapabilityWindowMaintenance}
+			if op := startTestUpgrade(h, "ordinary", c); op.Error == nil {
+				t.Fatal("ordinary upgrade passed sole incompatible instance")
+			}
+			c.ForceMaintenance = true
+			if op := startTestUpgrade(h, "emergency", c); op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			batch := upgradeRead(h)
+			if len(batch.View.WindowStops) != 1 || !batch.View.WindowStops[0].Primary || upgradeCtl(h, host).Mode != protocol.RunnerMaintenance {
+				t.Fatal(batch.View)
+			}
+			process := protocol.RecoveryIdentity{PID: 84, StartTicks: 100, SHA256: rt.Build.BinarySHA256, LaunchID: rt.InstanceID}
+			id, err := h.app.PrimaryWindowTarget(ctx, runner(host), process)
+			if err != nil || id != "emergency" {
+				t.Fatal(id, err)
+			}
+			if id, err := h.app.PrimaryWindowTarget(ctx, runner("linux-2"), process); err != nil || id != "" {
+				t.Fatal("foreign host discovery", id, err)
+			}
+			req := protocol.RunnerRetirement{WindowID: id, UpgradeID: id, Process: process}
+			retire := func(req protocol.RunnerRetirement) protocol.RunnerRetirementResult {
+				t.Helper()
+				op := h.exec(runner(host), h.env("runner.rolling_retire", protocol.Target{Type: "host", ID: host}, req, nil), RetireRollingRunner{})
+				var out protocol.RunnerRetirementResult
+				if op.Error != nil || json.Unmarshal(op.Result, &out) != nil {
+					t.Fatal(op)
+				}
+				return out
+			}
+			grant := retire(req)
+			if !grant.Allowed || grant.RemainingMillis <= 0 {
+				t.Fatal(grant)
+			}
+			if v := upgradeTick(h, ServerObservation{MainDrained: true}); v.Phase != windowMaintenance {
+				t.Fatal(v)
+			}
+			req.AuthorizationID = grant.AuthorizationID
+			for range 2 {
+				if !retire(req).Confirmed {
+					t.Fatal("missing confirmation")
+				}
+			}
+			if busy && (h.run(ref.RunID).ObservedState != protocol.RunUnknown || h.lease(ref.RunID).Status != store.LeaseLapsed) {
+				t.Fatal("original work not reconciled")
+			}
+			if op := h.versionedHello(host, &rt); op.Error == nil {
+				t.Fatal("retired instance re-registered")
+			}
+			if ctl := upgradeCtl(h, host); ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != "" {
+				t.Fatal(ctl)
+			}
+			if v := upgradeTick(h, ServerObservation{}); v.Phase != "preparing" {
+				t.Fatal(v)
+			}
+		})
+	}
 }
