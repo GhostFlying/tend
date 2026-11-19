@@ -2,6 +2,7 @@ import type { IssueConversationItem, IssueTranscriptBlock } from "../api/generat
 import type { Reader } from "../live/data.ts";
 
 export interface ProcessDetails {
+  source: IssueTranscriptBlock;
   items: IssueConversationItem[];
   publicOrder: string[];
   depth: number;
@@ -14,6 +15,7 @@ interface ProcessRequest {
   block: IssueTranscriptBlock;
   controller: AbortController;
   depth: number;
+  pending: boolean;
   promise: Promise<ProcessDetails>;
 }
 
@@ -62,6 +64,7 @@ export class IssueProcessReads {
       );
     }
     return {
+      source: block,
       items: [
         ...[...publicOrder].map((id) => items.get(id)!),
         ...[...items.values()].filter((item) => !publicOrder.has(item.message_id)),
@@ -81,9 +84,10 @@ export class IssueProcessReads {
   ): Promise<ProcessDetails> {
     const id = block.trigger.message_id;
     const previous = this.first.get(id);
+    // Deliver the running response before refreshing a turn changed in flight.
+    if (previous?.pending) return previous.promise;
     const same = previous?.block === block ? previous : undefined;
     if (same && same.depth >= depth) return same.promise;
-    if (!same) previous?.controller.abort();
     const controller = same?.controller ?? new AbortController();
     const fetchThroughDepth = async () => {
       let details = same ? await same.promise : await this.page(block, controller, priority);
@@ -92,11 +96,18 @@ export class IssueProcessReads {
       }
       return details;
     };
-    const promise = fetchThroughDepth().catch((error: unknown) => {
-      if (this.first.get(id)?.promise === promise) this.first.delete(id);
-      throw error;
-    });
-    this.first.set(id, { block, controller, depth, promise });
+    const promise = fetchThroughDepth().then(
+      (value) => {
+        request.pending = false;
+        return value;
+      },
+      (error: unknown) => {
+        if (this.first.get(id) === request) this.first.delete(id);
+        throw error;
+      },
+    );
+    const request: ProcessRequest = { block, controller, depth, pending: true, promise };
+    this.first.set(id, request);
     return promise;
   }
 

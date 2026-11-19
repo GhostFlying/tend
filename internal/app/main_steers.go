@@ -403,7 +403,17 @@ func (a *App) BindMainToolSource(ctx context.Context, native, messageID, request
 			return err
 		}
 		changed = true
-		return a.insertToolUseEvent(ctx, tx, id, protocol.ToolStatus(status), a.now().UnixMilli())
+		now := a.now().UnixMilli()
+		if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolStatus(status), now); err != nil {
+			return err
+		}
+		// The tool event resolves to the new source. Refresh the old turn after
+		// the same binding change so it also drops the tool from its process.
+		if previous == "" {
+			return nil
+		}
+		_, err = tx.InsertEvent(ctx, store.EventRow{ObjectType: "message", ObjectID: previous, Kind: "conversation.process_changed", CreatedAt: now})
+		return err
 	})
 	if err == nil && changed {
 		a.notifyChange()
