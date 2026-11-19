@@ -16,8 +16,8 @@ import tempfile
 import time
 
 
-def eventually(label, read, processes):
-    deadline = time.monotonic() + 60
+def eventually(label, read, processes, timeout=60):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for process in processes:
             if process.poll() is not None:

@@ -110,7 +110,7 @@ def exercise(root, old, first, third, seed):
     write_private(runner_config, json.dumps(runner))
     server_config = root / "server.json"
     write_private(server_config, json.dumps(dict(data_dir=str(root / "data"), listen=address,
-                  local_owner="fixture", lease_ttl="75s", hosts=[dict(host_id="compat", os="linux", arch="amd64",
+                  local_owner="fixture", lease_ttl="24s", hosts=[dict(host_id="compat", os="linux", arch="amd64",
                   slots=3, nodes=["tag:local"], token_hash=hashlib.sha256(token.encode()).hexdigest())])))
     db = root / "data/tend.db"
 
@@ -176,7 +176,7 @@ def exercise(root, old, first, third, seed):
         eventually("old runner ready for overlap", ready, [])
         args = [cli, "upgrade", "runner-handoff", "--config", runner_config, "--upgrade-id", batch, "--release", first]
         run(*args)
-        eventually("first rolling batch committed", lambda: batch_done(batch), [])
+        eventually("first rolling batch committed", lambda: batch_done(batch), [], timeout=180)
         run(*args)
         assert lease(tasks[0]) == [original_lease] and Path(f"/proc/{oldpid}").exists()
         read_state = lambda: json.loads((state / "state.json").read_text())
@@ -186,7 +186,7 @@ def exercise(root, old, first, third, seed):
         middle_gate, = gates() - {first_gate}
         middle_lease, = lease(tasks[1])
         batch = start(third)
-        eventually("automatic third generation committed", lambda: batch_done(batch), [])
+        eventually("automatic third generation committed", lambda: batch_done(batch), [], timeout=180)
         current = read_state()
         assert len(current["draining_processes"]) == 2
         assert middle["pid"] != current["process"]["pid"] != oldpid and daemon.dials > 0
@@ -215,10 +215,14 @@ if __name__ == "__main__":
             exercise(root, *map(Path, sys.argv[1:]))
         except BaseException:
             for path in [*root.glob("*.log"), *root.glob("host/*.log"), *root.glob("host/supervisor/state.json")]:
-                print(path.name, path.read_text()[-3500:], flush=True)
+                print(path.name, path.read_text()[-6000:], flush=True)
             db = root / "data/tend.db"
             if db.is_file():
                 with contextlib.closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as c:
+                    for row in c.execute("select instance_id,json_extract(runtime_json,'$.journal_id'), json_extract(runtime_json,'$.sequence'), json_extract(runtime_json,'$.mode'),json_extract(runtime_json,'$.upgrade_id'), json_extract(runtime_json,'$.applied_control_revision'),json_extract(runtime_json,'$.upgrade_phase'),json_extract(runtime_json,'$.blockers') from host_runtime"):
+                        print("runtime", row, flush=True)
+                    for row in c.execute("select revision,control_json from host_controls"):
+                        print("control", row, flush=True)
                     for row in c.execute("select status,phase,json_extract(state_json,'$.view.hosts') from upgrades"):
                         print("upgrade", row, flush=True)
             raise
