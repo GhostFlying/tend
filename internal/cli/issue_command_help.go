@@ -81,10 +81,12 @@ Write: replace this Issue's progress assessment. Provide both summary and
 next_step as strings (up to %d and %d Unicode code points respectively).
 Use {"summary":"","next_step":""} to clear both. Omit delivery for an
 Issue-wide assessment. For a specific candidate, delivery includes delivery_id,
-provider, repository, number, head_sha and the observed baseline fields
-(base_sha and/or target_sha) from
-tend issue deliveries "$ISSUE_ID" --json. The assignee can also record
-conflict_action (seen or working) with conflict_revision from last_conflict.revision.
+provider, repository, and number from the linked delivery shown by
+tend issue deliveries "$ISSUE_ID" --json. Copy head_sha and all baseline fields
+from that same observation. Copy both base_sha and target_sha when both are
+present. Omit a baseline field only when the observation omits it.
+The assignee can also record conflict_action (seen or working) with
+conflict_revision from last_conflict.revision.
 
   %s | jq '.progress'
   tend issue update-progress "$ISSUE_ID" --data '{"summary":"Checks passed","next_step":"Review the PR"}' --dry-run
@@ -133,7 +135,13 @@ Use --reason to record a reason. The response is JSON with or without --json.
 --dry-run prints the complete Envelope without submitting the write. For a
 first write, omitting --revision reads current control_revision, including
 in dry-run. Supply --revision to pin the control_revision from host show.
-If the outcome is unknown, read control_mode and control_revision there first.
+An omitted control_revision represents the initial revision 0.
+If the outcome is unknown, read control_revision and, when present,
+maintenance.mode and maintenance.phase in host show --json. In normal
+operation the maintenance object can be absent. The view combines server
+control and the runner's last report. It can still display maintenance after
+the server has returned to normal. If the readback is inconclusive, keep the
+outcome unknown.
 Keep the original --request-id, --revision and payload. Resubmit only when
 reconciliation calls for it, using those original values or the saved Envelope
 with tend operation submit --file original-envelope.json.
