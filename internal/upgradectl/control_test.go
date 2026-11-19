@@ -554,3 +554,29 @@ func TestUpgradePassesOnlyVerifiedMaintenanceHandoffSupport(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalStartReturnsProtocolRefusalWithoutInternalErrors(t *testing.T) {
+	c, f := testController(t)
+	req := protocol.UpgradeStartRequest{RequestID: c.ids.New(protocol.PrefixRequest), UpgradeID: "target-window", Release: testBundle(t), ForceMaintenance: true}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []error{protocol.Errorf(protocol.CodeInvalidTransition, "host fixture runner old uses protocol 5 outside the target range [6,7]"), errors.New("private backend detail")} {
+		f.preflightErr = reason
+		w := httptest.NewRecorder()
+		c.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/upgrades/start", bytes.NewReader(raw)))
+		var result struct {
+			Error string `json:"error"`
+		}
+		if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &result) != nil {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if strings.Contains(result.Error, "private backend detail") {
+			t.Fatal("leaked internal error")
+		}
+		if e, ok := reason.(*protocol.Error); ok && result.Error != e.Message {
+			t.Fatal(result.Error)
+		}
+	}
+}

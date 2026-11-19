@@ -426,7 +426,12 @@ func (c *Controller) Handler() http.Handler {
 		if err != nil {
 			c.log.WarnContext(r.Context(), "local upgrade operation rejected", "path", r.URL.Path, "err", err)
 			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "upgrade operation rejected; inspect release status"})
+			message := "upgrade operation rejected; inspect release status"
+			var reason *protocol.Error
+			if r.URL.Path == "/upgrades/start" && errors.As(err, &reason) && reason.Code == protocol.CodeInvalidTransition {
+				message = reason.Message
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(value)

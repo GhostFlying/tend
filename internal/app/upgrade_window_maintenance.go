@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 
@@ -47,6 +48,13 @@ func captureWindowStops(ctx context.Context, q store.Querier, batch *store.Upgra
 			return err
 		}
 		if granted {
+			_, pending, err := windowForRetirement(ctx, q, host, protocol.RunnerRetirement{UpgradeID: drain.UpgradeID, Process: process})
+			if err != nil {
+				return err
+			}
+			if pending != nil {
+				return protocol.Errorf(protocol.CodeUnknownOutcome, "host %s runner %s has an unresolved stop from a prior maintenance window", host, id)
+			}
 			stop.State = "stop_authorized"
 		}
 		runs, err := store.ListOpenRunsInJournal(ctx, q, host, rt.JournalID)
@@ -89,19 +97,27 @@ func previouslyStoppedRun(ctx context.Context, q store.Querier, host, run string
 
 // Only the batch that pinned this exact handoff may change its retirement.
 func windowForRetirement(ctx context.Context, q store.Querier, host string, input protocol.RunnerRetirement) (store.UpgradeRow, *protocol.UpgradeWindowStop, error) {
-	batch, err := store.LatestUpgrade(ctx, q)
-	if errors.Is(err, store.ErrNotFound) {
-		return batch, nil, nil
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT u.upgrade_id FROM upgrades u JOIN json_each(u.state_json,'$.view.window_stops') s
+		WHERE json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.source_upgrade_id')=?
+		AND json_extract(s.value,'$.process.launch_id')=? AND (
+			json_extract(s.value,'$.state')='stop_authorized' OR
+			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state')='draining'))
+		ORDER BY u.created_at,u.rowid LIMIT 1`, host, input.UpgradeID, input.Process.LaunchID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.UpgradeRow{}, nil, nil
 	}
+	if err != nil {
+		return store.UpgradeRow{}, nil, err
+	}
+	batch, err := store.GetUpgrade(ctx, q, id)
 	if err != nil {
 		return batch, nil, err
 	}
-	if batch.View.Phase == windowMaintenance {
-		for i := range batch.View.WindowStops {
-			s := &batch.View.WindowStops[i]
-			if s.HostID == host && s.Process == input.Process && s.SourceUpgradeID == input.UpgradeID {
-				return batch, s, nil
-			}
+	for i := range batch.View.WindowStops {
+		stop := &batch.View.WindowStops[i]
+		if stop.HostID == host && stop.SourceUpgradeID == input.UpgradeID && stop.Process == input.Process {
+			return batch, stop, nil
 		}
 	}
 	return batch, nil, nil
