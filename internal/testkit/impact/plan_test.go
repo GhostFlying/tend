@@ -192,10 +192,13 @@ func TestGoExecutableChangeBuildsWebWithoutUnrelatedFrontendTests(t *testing.T) 
 
 func TestReleasedRunnerFollowsServerAndFixtureChanges(t *testing.T) {
 	packages := append(dependencyFixture(), Package{ImportPath: module + "cmd/tend-server", Dir: "cmd/tend-server", Imports: []string{module + "internal/app"}})
+	packages = append(packages, Package{ImportPath: module + "cmd/tend", Dir: "cmd/tend"}, Package{ImportPath: module + "cmd/tend-updater", Dir: "cmd/tend-updater"})
 	for _, tc := range []struct {
 		file string
 		want bool
 	}{
+		{"cmd/tend/main.go", true},
+		{"cmd/tend-updater/main.go", true},
 		{"internal/leaf/handler.go", true},
 		{"internal/e2e/testdata/rolling/model.py", true},
 		{"internal/protocol/request.go", true},

@@ -343,6 +343,15 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
+	if p.Runtime != nil {
+		registered, err := store.GetHostRuntime(ctx, q, host.HostID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if registered.Runtime.Protocol != p.Runtime.Protocol {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "new claim must use the registered wire protocol")
+		}
+	}
 	if prepared, err := archivePrepared(ctx, q); err != nil {
 		return Outcome{}, err
 	} else if prepared {
@@ -663,6 +672,9 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := decodePayload(x.Env, &p); err != nil {
 		return err
 	}
+	if _, probe := helloProtocolOffer(p.Runtime); probe {
+		return nil
+	}
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
 		return err
 	}
@@ -688,6 +700,11 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	host, err := requireActiveHost(ctx, x, q)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if selected, probe := helloProtocolOffer(p.Runtime); probe {
+		// Selection alone cannot transfer a journal or renew a lease. The runner
+		// repeats hello with the selected wire generation before reconciliation.
+		return Outcome{NoEffect: true, Result: protocol.HelloResult{ProtocolMax: selected}}, nil
 	}
 	if err := checkMaintenanceHello(ctx, q, host.HostID, p.Runtime); err != nil {
 		return Outcome{}, err

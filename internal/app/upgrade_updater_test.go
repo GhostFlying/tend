@@ -275,3 +275,130 @@ func TestSelfUpgradeConfigurationKeepsUntargetedHostsOutsideProofScope(t *testin
 		t.Fatal("pending runner supervisor was treated as cancelled", op, err)
 	}
 }
+
+func TestServerOnlyUpgradeRetainsLeasedWorkAndMaintenance(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	c.ServerOnly, c.ServerUpdaterSupported = true, true
+	c.ServerCapabilities = []string{release.ServerCapabilityIndependentServerUpgrade, release.ServerCapabilityMaintenanceHandoff}
+	previous := testRuntime("old-linux-1")
+	previous.Protocol, previous.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
+	previous.Sequence++
+	if op := h.versionedHello("linux-1", previous); op.Error != nil {
+		t.Fatal(op)
+	}
+	h.createTask(owner, createTaskPayload{Title: "original work", Spec: testSpec})
+	work, ok := h.claimInputRun(previous)
+	if !ok {
+		t.Fatal("expected live historical assignment")
+	}
+	enterUpgradeMaintenance(t, h, "linux-2", protocol.RunnerReady)
+	if op := startPreparedTestUpgrade(h, "server-only", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	row := upgradeRead(h)
+	if !row.View.ServerOnly || len(row.InstallationHosts()) != 0 || len(row.Hosts) != 2 {
+		t.Fatal("wrong installation or lease coverage set", row.View)
+	}
+	for _, host := range row.View.Hosts {
+		if host.Phase != "retained" || host.TargetVersion != "" || upgradeCtl(h, host.HostID).Upgrade != nil {
+			t.Fatal("published a runner installation target", host)
+		}
+	}
+	oldHash := strings.Repeat("a", 64)
+	original := ServerObservation{MainDrained: true, BinarySHA256: oldHash, ProcessInstanceID: "original", Updater: selfUpgradeObservation(row, "server", "original", oldHash)}
+	if phase := upgradeTick(h, original).Phase; phase != "server_draining" {
+		t.Fatal(phase)
+	}
+	if phase := upgradeTick(h, original).Phase; phase != "server_ready" {
+		t.Fatal(phase)
+	}
+	ctl := upgradeCtl(h, "linux-1")
+	if ctl.Authorization == nil || len(ctl.Authorization.RunIDs) != 1 || ctl.Authorization.RunIDs[0] != work.RunID {
+		t.Fatal("original run missing from restart coverage", ctl)
+	}
+	binding := protocol.UpgradeBinding{UpgradeID: row.View.UpgradeID, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: c.ServerHash, InstanceID: "server", ProcessInstanceID: "replacement"}
+	if g, _ := h.app.ServerUpgradeAuthorize(t.Context(), binding); g.Allowed {
+		t.Fatal("missing runner ACK allowed a restart")
+	}
+	for _, host := range row.Hosts {
+		upgradeAck(h, host.HostID, protocol.RunnerMaintenance)
+	}
+	if g, err := h.app.ServerUpgradeAuthorize(t.Context(), binding); err != nil || !g.Allowed {
+		t.Fatal("active work blocked a covered restart", g, err)
+	}
+	current := ServerObservation{Healthy: true, MainDrained: true, InstanceID: "server", BinarySHA256: c.ServerHash, ProcessInstanceID: "replacement", Updater: selfUpgradeObservation(row, "server", "replacement", c.ServerHash)}
+	if phase := upgradeTick(h, current).Phase; phase != "server_checking" {
+		t.Fatal("missing committed receipt accepted", phase)
+	}
+	current.UpdaterReceipt = committedServerForTest(binding)
+	upgradeTick(h, current)
+	if v := upgradeTick(h, current); v.Status != "completed" {
+		t.Fatal("retained runner blocked completion", v)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		proof, err := store.UpgradeInstallationEvidence(t.Context(), tx.Q(), row.View.UpgradeID, h.clock.Now().UnixMilli())
+		if err == nil && (len(proof.Hosts) != 0 || proof.ServerSHA256 != c.ServerHash) {
+			t.Fatal("retained runners incorrectly reported as installed", proof)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ctl := upgradeCtl(h, "linux-2"); ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != "" {
+		t.Fatal("standalone maintenance lost", ctl)
+	}
+	rt := upgradeAck(h, "linux-1", protocol.RunnerNormal)
+	rt.Sequence++
+	out, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &rt, Runs: []protocol.LeaseRef{{RunID: work.RunID, LeaseID: work.LeaseID}}})
+	if err != nil || len(out.Runs) != 1 || !out.Runs[0].Renewed {
+		t.Fatal("historical process could not renew its original lease", out, err)
+	}
+	upgradeAck(h, "linux-2", protocol.RunnerReady)
+	if op := startTestUpgrade(h, "next-fix", c); op.Error != nil {
+		t.Fatal("retained work blocked subsequent admission", op.Error)
+	}
+}
+
+func TestServerOnlyUpgradeRequiresCandidateCapability(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	c.ServerOnly, c.ServerUpdaterSupported = true, true
+	if op := startTestUpgrade(h, "old-candidate", c); op.Error == nil || h.count("upgrades") != 0 {
+		t.Fatal("admitted target that cannot reconcile retained hosts", op)
+	}
+}
+
+func TestServerOnlyCancellationRestoresOriginalMaintenance(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	c.ServerOnly, c.ServerUpdaterSupported = true, true
+	c.ServerCapabilities = []string{release.ServerCapabilityIndependentServerUpgrade, release.ServerCapabilityMaintenanceHandoff}
+	if op := startPreparedTestUpgrade(h, "cancel-server", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	// The owner can still change admission before the restart fence is acquired.
+	enterUpgradeMaintenance(t, h, "linux-1", protocol.RunnerReady)
+	row := upgradeRead(h)
+	oldHash := strings.Repeat("a", 64)
+	o := ServerObservation{MainDrained: true, BinarySHA256: oldHash, ProcessInstanceID: "original", Updater: selfUpgradeObservation(row, "server", "original", oldHash)}
+	upgradeTick(h, o)
+	v := upgradeTick(h, o)
+	if v.Phase != "server_ready" {
+		t.Fatal(v)
+	}
+	op := h.exec(owner, h.env("upgrades.control", protocol.Target{Type: "upgrade", ID: v.UpgradeID}, map[string]string{"action": "cancel"}, rev(v.Revision)), ControlUpgrade{})
+	if op.Error != nil {
+		t.Fatal(op)
+	}
+	row = upgradeRead(h)
+	if settledDeliveryUpgrade(row) {
+		t.Fatal("server cancellation still requires its supervisor receipt")
+	}
+	row.ServerCancellationConfirmed = true
+	if !settledDeliveryUpgrade(row) {
+		t.Fatal("retained runners cannot have installer cancellation receipts")
+	}
+	for host, mode := range map[string]string{"linux-1": protocol.RunnerMaintenance, "linux-2": protocol.RunnerNormal} {
+		if ctl := upgradeCtl(h, host); ctl.Mode != mode || ctl.UpgradeID != "" || ctl.Authorization != nil || ctl.CancelledUpgradeID != "" {
+			t.Fatal("cancellation changed original admission or retained a restart grant", host, ctl)
+		}
+	}
+}

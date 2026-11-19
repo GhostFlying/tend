@@ -91,10 +91,20 @@ jobs:
       - uses: ./.github/actions/setup-go
         with:
           role: quality
-      - name: exercise published runner across server cutover
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: build embedded assets for the isolated release
+        run: make web
+      - name: exercise published runner across controlled server cutover
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/released-runner.sh
+        run: bash .github/scripts/released-runner.sh --hosted-systemd
 
   race:
     name: race (${{ matrix.group }})

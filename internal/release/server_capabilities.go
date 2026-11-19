@@ -17,6 +17,7 @@ import (
 )
 
 const ServerCapabilityMaintenanceHandoff = "maintenance-upgrade-handoff-v1"
+const ServerCapabilityIndependentServerUpgrade = "independent-server-upgrade-v1"
 const ServerCapabilityManagerPark = "manager-upgrade-park-v1"
 const ServerCapabilityOperationRecovery = "unfinished-operation-recovery-v1"
 const MaxServerCapabilitiesBytes = 64 << 10
@@ -60,7 +61,7 @@ func CurrentServerCapabilities() (ServerCapabilities, error) {
 	if err != nil || n > MaxArtifactBytes {
 		return ServerCapabilities{}, errors.New("release: cannot hash the running executable")
 	}
-	return ServerCapabilities{BinarySHA256: hex.EncodeToString(hash.Sum(nil)), Capabilities: []string{ServerCapabilityManagerPark, ServerCapabilityOperationRecovery, ServerCapabilityMaintenanceHandoff}}, nil
+	return ServerCapabilities{BinarySHA256: hex.EncodeToString(hash.Sum(nil)), Capabilities: []string{ServerCapabilityIndependentServerUpgrade, ServerCapabilityManagerPark, ServerCapabilityOperationRecovery, ServerCapabilityMaintenanceHandoff}}, nil
 }
 
 // ProbeServerCapabilities never falls back to running a candidate normally.

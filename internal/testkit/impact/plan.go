@@ -245,7 +245,7 @@ func explain(p Plan) Plan {
 }
 
 func (p Plan) testReleasedRunner() bool {
-	return p.Full || slices.Contains(p.Packages, module+"cmd/tend-server")
+	return p.Full || slices.Contains(p.Packages, module+"cmd/tend-server") || slices.Contains(p.Packages, module+"cmd/tend-updater") || slices.Contains(p.Packages, module+"cmd/tend")
 }
 
 // Required maps stable aggregate job names to the current plan's requirements.

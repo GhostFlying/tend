@@ -87,7 +87,10 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		if err != nil {
 			return "", err
 		}
-		if h.MaintenanceHandoff && r.View.Status == "running" && ctl.UpgradeID == r.View.UpgradeID {
+		if r.View.ServerOnly && ctl.UpgradeID != r.View.UpgradeID {
+			continue
+		}
+		if !r.View.ServerOnly && h.MaintenanceHandoff && r.View.Status == "running" && ctl.UpgradeID == r.View.UpgradeID {
 			// The original maintenance host stays fenced until its own runner
 			// commits, is safely skipped, or the batch enters explicit recovery.
 			ctl.Revision++
@@ -104,6 +107,9 @@ func reconcileServerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 		}
 		ctl.Revision++
 		ctl.Mode = protocol.RunnerNormal
+		if r.View.ServerOnly && h.MaintenanceHandoff {
+			ctl.Mode = protocol.RunnerMaintenance
+		}
 		ctl.Authorization = nil
 		ctl.Upgrade = nil
 		ctl.UpgradeID = ""

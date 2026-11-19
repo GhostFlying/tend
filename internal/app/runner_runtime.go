@@ -14,6 +14,16 @@ import (
 
 const RunnerOfflineAfter = 60 * time.Second
 
+// A new runner sends its lowest usable encoding on its first hello. Released
+// servers that only know that generation can already decode the request.
+func helloProtocolOffer(r *protocol.RunnerRuntime) (int64, bool) {
+	if r == nil || r.Protocol != r.ProtocolMin || !slices.Contains(r.Capabilities, protocol.CapabilityProtocolNegotiation) {
+		return 0, false
+	}
+	selected, err := protocol.RuntimeRunnerProtocol(r)
+	return selected, err == nil && selected > r.Protocol
+}
+
 func validateRuntime(r *protocol.RunnerRuntime) error {
 	negotiated, err := protocol.RuntimeRunnerProtocol(r)
 	if err != nil || !protocol.RunnerProtocolSupported(negotiated) {
@@ -59,6 +69,16 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 			return protocol.Errorf(protocol.CodeConflictPayload, "runner runtime is required after versioned registration")
 		}
 		return nil
+	}
+	if hello && r.Protocol < protocol.CurrentRunnerProtocol {
+		var blocked bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades
+			WHERE status IN ('running','attention') AND json_extract(state_json,'$.manifest.protocol.min')>?)`, r.Protocol).Scan(&blocked); err != nil {
+			return err
+		}
+		if blocked {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "runner %s protocol %d is below the admitted release window", r.InstanceID, r.Protocol)
+		}
 	}
 	retired, e := store.HostInstanceRetired(ctx, q, host, r.InstanceID)
 	if e != nil {
@@ -118,6 +138,9 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 		return false, err
 	}
 	fresh := errors.Is(err, store.ErrNotFound)
+	if !fresh && !hello && old.Runtime.Protocol != r.Protocol {
+		return false, protocol.Errorf(protocol.CodeConflictPayload, "runner must negotiate a protocol change through hello")
+	}
 	if !fresh && old.Runtime.InstanceID == r.InstanceID && old.Runtime.Sequence >= r.Sequence {
 		return false, &protocol.Error{Code: protocol.CodeConflictPayload, Message: "runner observation sequence is stale", Details: json.RawMessage(`{"reason":"stale_sequence"}`)}
 	}

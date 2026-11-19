@@ -25,7 +25,7 @@ type Registry struct {
 	Adapters []Adapter `json:"adapters"`
 }
 
-func Check(root string, current int64) error {
+func Check(root string, current, minimum int64) error {
 	data, err := os.ReadFile(filepath.Join(root, "internal/protocol/runner_compat.json"))
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func Check(root string, current int64) error {
 	if err := json.Unmarshal(data, &registry); err != nil {
 		return err
 	}
-	if registry.Current != current || registry.Minimum < current-1 || registry.Minimum > current {
+	if registry.Current != current || registry.Minimum != minimum || registry.Minimum < current-1 || registry.Minimum > current {
 		return fmt.Errorf("runner compatibility registry window differs from protocol constants")
 	}
 	declared := map[string]Adapter{}

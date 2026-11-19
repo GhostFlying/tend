@@ -26,6 +26,7 @@ type UpgradeManagerParkView struct {
 
 // UpgradeView remains visible after completion until the next batch starts.
 type UpgradeView struct {
+	ServerOnly            bool                     `json:"server_only,omitempty"`
 	ServerUpdater         *UpdaterSelfObservation  `json:"server_updater,omitempty"`
 	OverallDeadlineMillis int64                    `json:"overall_deadline_millis,omitempty"`
 	ManagerParks          []UpgradeManagerParkView `json:"manager_parks,omitempty"`

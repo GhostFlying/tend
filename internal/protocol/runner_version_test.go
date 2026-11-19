@@ -5,14 +5,17 @@ import (
 	"testing"
 )
 
-func TestRunnerProtocolRejectsRetiredGenerationsAfterColdCutover(t *testing.T) {
-	for version := int64(0); version < CurrentRunnerProtocol; version++ {
+func TestRunnerProtocolCompatibilityWindow(t *testing.T) {
+	for version := int64(0); version < MinimumRunnerProtocol; version++ {
 		if RunnerProtocolSupported(version) {
 			t.Fatalf("retired protocol %d accepted", version)
 		}
 		if _, err := NegotiatedRunnerProtocol(version, version); err == nil {
 			t.Fatalf("retired range %d accepted", version)
 		}
+	}
+	if got, err := NegotiatedRunnerProtocol(CurrentRunnerProtocol-1, CurrentRunnerProtocol-1); err != nil || got != CurrentRunnerProtocol-1 {
+		t.Fatalf("previous generation: %d, %v", got, err)
 	}
 	if got, err := NegotiatedRunnerProtocol(MinimumRunnerProtocol, CurrentRunnerProtocol); err != nil || got != CurrentRunnerProtocol {
 		t.Fatal(got, err)

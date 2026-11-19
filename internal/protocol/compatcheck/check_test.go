@@ -24,17 +24,20 @@ func fixture(t *testing.T) string {
 }
 func TestCompatibilityExpiryAndMarkers(t *testing.T) {
 	root := fixture(t)
-	if err := Check(root, 1); err != nil {
+	if err := Check(root, 1, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := Check(root, 2); err == nil {
+	if err := Check(root, 1, 1); err == nil {
+		t.Fatal("registry floor differs from the executable")
+	}
+	if err := Check(root, 2, 1); err == nil {
 		t.Fatal("bumped version retained registry")
 	}
 	path := filepath.Join(root, "internal/protocol/runner_compat.json")
 	body, _ := os.ReadFile(path)
 	body = []byte(strings.ReplaceAll(strings.ReplaceAll(string(body), `"current":1`, `"current":2`), `"minimum":0`, `"minimum":1`))
 	os.WriteFile(path, body, 0600)
-	if err := Check(root, 2); err == nil {
+	if err := Check(root, 2, 1); err == nil {
 		t.Fatal("expired adapter accepted")
 	}
 }
@@ -43,14 +46,14 @@ func TestCompatibilityRequiresCodeAndTests(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := fixture(t)
 			os.Remove(filepath.Join(root, "internal/protocol", name))
-			if err := Check(root, 1); err == nil {
+			if err := Check(root, 1, 0); err == nil {
 				t.Fatal("missing evidence accepted")
 			}
 		})
 	}
 	root := fixture(t)
 	os.WriteFile(filepath.Join(root, "internal/extra.go"), []byte("// tend:compat unknown protocol=0 remove=2\n"), 0600)
-	if err := Check(root, 1); err == nil {
+	if err := Check(root, 1, 0); err == nil {
 		t.Fatal("undeclared adapter accepted")
 	}
 }

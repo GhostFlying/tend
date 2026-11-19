@@ -186,7 +186,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `webhooks.rotate` | `webhook rotate` | 完整 JSON；原 request_id | API | CLI 分发与 Envelope |
 | `webhooks.update` | `webhook update` | 完整 JSON；原 request_id | API | CLI 分发与 Envelope |
 | `work_item_choices.respond` | `choice respond` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
-| `local GET /agents/status` | `agents local status` | --socket；原 request_id/revision | 本机管理 | CLI/真实 Unix socket |
+| `local GET /agents/status` | `agents local status` | --socket、--server-only；原 request_id/revision | 本机管理 | CLI/真实 Unix socket |
 | `local GET /archive/status` | `archive status` | --socket；原 request_id/revision | 本机管理 | CLI/真实 Unix socket |
 | `local GET /upgrades/status` | `upgrade status` | --socket；原 request_id/revision | 本机管理 | CLI/真实 Unix socket |
 | `local POST /agents/reconcile` | `agents local reconcile` | --socket；原 request_id/revision | 本机管理 | CLI/真实 Unix socket |

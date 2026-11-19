@@ -592,3 +592,59 @@ func TestUpgradeRunnerDrainTimeoutReleasesOnlyUnswitchedHost(t *testing.T) {
 		t.Fatal("runner timeout paused main", paused, err)
 	}
 }
+
+func TestRollingUpgradeProtocolWindowSerializesRegistrationAndAdmission(t *testing.T) {
+	for _, registerFirst := range []bool{true, false} {
+		t.Run(map[bool]string{true: "idle older runner first", false: "upgrade first"}[registerFirst], func(t *testing.T) {
+			h, c := upgradeHarness(t)
+			c.Manifest.Protocol = release.Range{Min: protocol.CurrentRunnerProtocol, Max: protocol.CurrentRunnerProtocol + 1}
+			older := testRuntime("previous-window")
+			older.Protocol, older.ProtocolMin, older.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
+			older.Capabilities = append(older.Capabilities, capabilityUpdater)
+			older.JournalVersion = 9
+			if registerFirst {
+				if op := h.versionedHello("linux-1", older); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+				op := startTestUpgrade(h, "window-upgrade", c)
+				if op.Status != protocol.OpFailed || op.Error == nil || !strings.Contains(op.Error.Message, older.InstanceID) || h.count("upgrades") != 0 {
+					t.Fatalf("live idle instance must block an incompatible target: %+v", op)
+				}
+				return
+			}
+			if op := startTestUpgrade(h, "window-upgrade", c); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if op := h.versionedHello("linux-1", older); op.Status != protocol.OpFailed {
+				t.Fatal("late registration entered an admitted incompatible window", op)
+			}
+			primary := upgradeAck(h, "linux-1", protocol.RunnerNormal)
+			if primary.InstanceID != "old-linux-1" {
+				t.Fatal("rejected registration displaced the admitted runner", primary)
+			}
+			primary.Protocol, primary.ProtocolMin, primary.ProtocolMax = older.Protocol, older.Protocol, older.Protocol
+			if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &primary}); err == nil {
+				t.Fatal("heartbeat silently downgraded the admitted instance")
+			}
+		})
+	}
+}
+
+func TestHelloSelectsWireVersionBeforeReplacingInstance(t *testing.T) {
+	h, _ := upgradeHarness(t)
+	offer := testRuntime("new-process")
+	offer.Capabilities = append(offer.Capabilities, protocol.CapabilityProtocolNegotiation)
+	offer.Protocol = protocol.MinimumRunnerProtocol
+	op := h.versionedHello("linux-1", offer)
+	var reply protocol.HelloResult
+	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &reply) != nil || reply.ProtocolMax != protocol.CurrentRunnerProtocol || reply.Control != nil {
+		t.Fatalf("negotiation must precede reconciliation: %+v", op)
+	}
+	if old := upgradeAck(h, "linux-1", protocol.RunnerNormal); old.InstanceID != "old-linux-1" {
+		t.Fatal("negotiation alone replaced the original journal", old)
+	}
+	offer.Protocol, offer.ProtocolMin = reply.ProtocolMax, reply.ProtocolMax
+	if op := h.versionedHello("linux-1", offer); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+}
