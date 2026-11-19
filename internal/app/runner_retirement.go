@@ -32,6 +32,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "exact retirement identity required")
 	}
 	result := protocol.RunnerRetirementResult{RunnerRetirement: input}
+	result.WindowID = "" // The response names a window only for its bounded stop.
 	raw, err := json.Marshal(process)
 	if err != nil {
 		return Outcome{}, err
