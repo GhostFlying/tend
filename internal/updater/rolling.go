@@ -44,15 +44,19 @@ func JournalSocket(original, journal string) string {
 // The configured runner journal denotes the original generation. Maintenance
 // of a committed successor must snapshot and validate its actual writer.
 func (s *Supervisor) serviceDataConfig() Config {
-	cfg := s.cfg
-	if cfg.Role != "runner" || s.state.CurrentJournal == "" {
+	return dataConfigForJournal(s.cfg, s.state.CurrentJournal)
+}
+
+func dataConfigForJournal(cfg Config, id string) Config {
+
+	if cfg.Role != "runner" || id == "" {
 		return cfg
 	}
 	cfg.DataFiles = slices.Clone(cfg.DataFiles)
 	for i, path := range cfg.DataFiles {
 		name := filepath.Base(path)
 		if name == "journal.db" || name == "journal.db.incarnation" {
-			cfg.DataFiles[i] = filepath.Join(filepath.Dir(path), "generations", s.state.CurrentJournal, name)
+			cfg.DataFiles[i] = filepath.Join(filepath.Dir(path), "generations", id, name)
 		}
 	}
 	return cfg

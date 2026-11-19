@@ -529,6 +529,11 @@ func TestBoundedRunnerReconcilesOriginalBackupWithoutOverwritingIt(t *testing.T)
 }
 
 func TestBoundedStartupAfterRollingCommitKeepsIndependentJournal(t *testing.T) {
+	for _, committed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "candidate checking", true: "candidate committed"}[committed], func(t *testing.T) { testBoundedRollingJournal(t, committed) })
+	}
+}
+func testBoundedRollingJournal(t *testing.T, committed bool) {
 	h, grant := boundedRunnerFixture(t)
 	if err := h.s.criticalState(); err != nil {
 		t.Fatal(err)
@@ -561,6 +566,27 @@ func TestBoundedStartupAfterRollingCommitKeepsIndependentJournal(t *testing.T) {
 	if err := h.s.save(); err != nil {
 		t.Fatal(err)
 	}
+	if !committed {
+		predecessor := Identity{PID: 311, StartTicks: 111, LaunchID: "busy-first", SHA256: h.s.state.Current.Artifact.SHA256}
+		h.p.live[predecessor.PID] = predecessor
+		candidate := grant.Plan.Source
+		candidate.LaunchID = "accepting-journal"
+		grant.Plan.Source = candidate
+		grant.Plan.Authorization.Source = candidate
+		h.p.live[candidate.PID] = candidate
+		h.s.state.CurrentJournal = ""
+		h.s.state.Process = candidate
+		h.s.state.Operation = &Operation{ID: "prior", LaunchID: candidate.LaunchID, Phase: "checking", Candidate: h.s.state.Current, CandidateProcess: candidate, PreviousProcess: predecessor, Rolling: &RollingLaunch{Predecessor: predecessor}}
+		grant.Plan.Authorization.ExpectedPhase = "checking"
+		hash, err := protocol.RunnerBoundedMaintenancePlanSHA256(grant.Plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		grant.Plan.Authorization.PlanSHA256 = hash
+		if err := h.s.save(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	grant.Plan.Authorization.ExpectedGeneration = h.s.Status().Generation
 	if err := h.s.AuthorizeBoundedRunnerMaintenance(t.Context(), grant, "force"); err != nil {
 		t.Fatal(err)
@@ -574,6 +600,9 @@ func TestBoundedStartupAfterRollingCommitKeepsIndependentJournal(t *testing.T) {
 		}
 	}
 	state := h.s.Status()
+	if !committed && state.DrainingProcesses["busy-first"].Process.PID != 311 {
+		t.Fatal("lost incumbent during bounded takeover")
+	}
 	if state.Operation.Phase != "checking" || state.Format != rollingStateFormat || len(h.p.journalIDs) != 1 || h.p.journalIDs[0] != state.CurrentJournal {
 		t.Fatal("recovery launched against a different journal", state.Operation, h.p.journalIDs)
 	}
