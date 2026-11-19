@@ -771,6 +771,7 @@ function ActivityBlock({
                     readable && row === firstReply
                       ? {
                           open: traceOpen,
+                          ready: !!process.value,
                           toggle: () => {
                             if (!traceOpen) requestProcess();
                             setTraceOpen(!traceOpen);

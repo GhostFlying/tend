@@ -176,7 +176,7 @@ export function AgentTurn({
   processUnavailable = false,
   process,
 }: {
-  process?: { open: boolean; toggle(): void; footer: React.ReactNode } | undefined;
+  process?: { open: boolean; ready: boolean; toggle(): void; footer: React.ReactNode } | undefined;
   processUnavailable?: boolean;
   entry: Extract<Entry, { kind: "agent" }>;
   proseClassName?: string | undefined;
@@ -212,8 +212,16 @@ export function AgentTurn({
     wasActive.current = status.active;
   }, [process, status.active]);
   const prefix = useId();
-  const [earlierSteps, setEarlierSteps] = useState(0);
-  const visibleStart = Math.max(0, tools.length - 12 - earlierSteps);
+  const [visibleStart, setVisibleStart] = useState(Math.max(0, tools.length - 12));
+  const waitingForTools = useRef(false);
+  const ready = process?.ready;
+  useLayoutEffect(() => {
+    if (traceOpen && ready === false) waitingForTools.current = true;
+    if (ready && waitingForTools.current) {
+      waitingForTools.current = false;
+      setVisibleStart(Math.max(0, tools.length - 12));
+    }
+  }, [ready, tools.length, traceOpen]);
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
@@ -225,7 +233,7 @@ export function AgentTurn({
           aria-controls={`${prefix}-trace`}
           onClick={(event) => {
             event.currentTarget.focus();
-            if (!traceOpen && !process) setEarlierSteps(0);
+            if (!traceOpen && !process) setVisibleStart(Math.max(0, tools.length - 12));
             if (process) process.toggle();
             else setTraceOpen(!traceOpen);
           }}
@@ -253,7 +261,7 @@ export function AgentTurn({
           <button
             type="button"
             className={styles.traceTrigger}
-            onClick={() => setEarlierSteps((count) => count + 12)}
+            onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
           >
             显示更早 {visibleStart} 步
           </button>
