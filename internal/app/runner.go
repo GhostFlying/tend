@@ -331,6 +331,15 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if prior.HostID != host.HostID {
 			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "execution identity belongs to another host")
 		}
+		if p.Runtime != nil {
+			journal, err := store.RunJournal(ctx, q, prior.RunID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if journal != p.Runtime.JournalID {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "original claim belongs to another runner journal")
+			}
+		}
 		lease, err := store.GetLeaseByRun(ctx, q, prior.RunID)
 		if err != nil {
 			return Outcome{}, err
@@ -344,12 +353,15 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	if p.Runtime != nil {
-		registered, err := store.GetHostRuntime(ctx, q, host.HostID)
+		confirmed, err := store.GetHostRuntime(ctx, q, host.HostID)
 		if err != nil {
 			return Outcome{}, err
 		}
-		if registered.Runtime.Protocol != p.Runtime.Protocol {
-			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "new claim must use the registered wire protocol")
+		if confirmed.Runtime.InstanceID != p.Runtime.InstanceID {
+			return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
+		}
+		if confirmed.Runtime.Protocol != p.Runtime.Protocol {
+			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "new claim must use the negotiated runner protocol")
 		}
 	}
 	if prepared, err := archivePrepared(ctx, q); err != nil {
@@ -500,6 +512,11 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	}
 	if err := tx.InsertRun(ctx, run); err != nil {
 		return Outcome{}, err
+	}
+	if p.Runtime != nil && p.Runtime.JournalID != "" {
+		if _, err := tx.Exec(ctx, `INSERT INTO runner_journal_runs(run_id,journal_id) VALUES(?,?)`, run.RunID, p.Runtime.JournalID); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE run_external_waits SET successor_run_id=? WHERE continuation_action_id=? AND successor_run_id IS NULL`, run.RunID, run.ActionID); err != nil {
 		return Outcome{}, err
@@ -728,7 +745,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		return Outcome{}, err
 	}
 	if p.Runtime != nil {
-		c, err := runnerControl(ctx, q, host.HostID, now)
+		c, err := instanceControl(ctx, q, host.HostID, p.Runtime, now)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -777,7 +794,11 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if run.HostID != host.HostID {
+		journal, err := store.RunJournal(ctx, q, run.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if run.HostID != host.HostID || p.Runtime != nil && journal != p.Runtime.JournalID {
 			stop(h.RunID, "the run belongs to another host")
 			continue
 		}
@@ -851,7 +872,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictContinue, Desired: desired, PauseHandoff: pause, ExternalWait: externalWait})
 	}
 
-	open, err := store.ListOpenRunsOnHost(ctx, q, host.HostID)
+	open, err := store.ListOpenRunsInJournal(ctx, q, host.HostID, p.Runtime.LocalJournal())
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -1216,12 +1237,12 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 		if err != nil {
 			return err
 		}
-		res.HistoryReads, res.HistoryAcknowledged, err = a.managerHistoryExchange(ctx, q, host.HostID, payload.HistoryReplies)
+		res.HistoryReads, res.HistoryAcknowledged, err = a.managerHistoryExchange(ctx, q, host.HostID, payload.Runtime.LocalJournal(), payload.HistoryReplies)
 		if err != nil {
 			return err
 		}
 		if payload.Runtime != nil {
-			c, err := runnerControl(ctx, q, host.HostID, now.UnixMilli())
+			c, err := instanceControl(ctx, q, host.HostID, payload.Runtime, now.UnixMilli())
 			if err != nil {
 				return err
 			}
@@ -1254,6 +1275,15 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 			lease, err := store.GetLeaseByRun(ctx, q, ref.RunID)
 			if err != nil && !errors.Is(err, store.ErrNotFound) {
 				return err
+			}
+			if err == nil && payload.Runtime != nil {
+				journal, readErr := store.RunJournal(ctx, q, ref.RunID)
+				if readErr != nil {
+					return readErr
+				}
+				if journal != payload.Runtime.JournalID {
+					return protocol.Errorf(protocol.CodeForbidden, "lease belongs to another runner journal")
+				}
 			}
 			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status == store.LeaseActive {
 				if runtimeSupportsRetainedReconciliation(payload.Runtime) {

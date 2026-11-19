@@ -114,6 +114,10 @@ if __name__ == "__main__":
     initial, config, env_file = map(Path, sys.argv[1:])
     root = config.parent
     # Start the initial server in the same private unit as the supervisor.
+    if (root / "initial.pid").exists():
+        # Self-update restarts the manager with KillMode=process. The retained
+        # service already owns its PID, sockets and journal.
+        sys.exit(0)
     launch = "fixture-initial"
     service_env = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
     with (root / "initial.log").open("a") as log:

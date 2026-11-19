@@ -123,6 +123,18 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if c.DrainMillis < 1000 || c.RestartMillis < 1000 || c.GrantMillis < 2*c.RestartMillis || c.GrantMillis > (15*time.Minute).Milliseconds() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid bounded upgrade timeouts")
 	}
+	if !slices.Contains(c.ServerCapabilities, release.ServerCapabilityRunnerJournals) {
+		var journals bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM draining_runners UNION ALL SELECT 1 FROM host_runtime WHERE json_extract(runtime_json,'$.journal_id') <> '')`).Scan(&journals); err != nil {
+			return Outcome{}, err
+		}
+		if journals {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "target server cannot route independent runner journals")
+		}
+	}
+	if err := checkDrainingWindow(ctx, tx.Q(), c.Manifest.Protocol); err != nil {
+		return Outcome{}, err
+	}
 	retiredRuns, err := store.CountOpenRunsOnRetiredHosts(ctx, tx.Q())
 	if err != nil {
 		return Outcome{}, err
@@ -514,27 +526,16 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						if r.View.ServerOnly && ctl.UpgradeID != r.View.UpgradeID {
 							h.MaintenanceHandoff = ctl.Mode == protocol.RunnerMaintenance
 						}
-						runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
+						runtime, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 						if err != nil {
 							return Outcome{}, err
 						}
-						// Coverage includes the separate restart reserve. The server
-						// installation grant is still clipped to the runner's actual,
-						// conservative ACK and never renews this issued deadline.
-						coverage := min(r.GrantMillis+r.RestartMillis, (15 * time.Minute).Milliseconds())
-						grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(&r, now+coverage), RunIDs: []string{}}
-						for _, run := range runs {
-							lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
-							if err != nil {
-								return Outcome{}, err
-							}
-							if lease.Status != store.LeaseActive || run.ObservedState == protocol.RunUnknown {
-								return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run %s must reconcile before server restart", run.RunID)
-							}
-							grant.RunIDs = append(grant.RunIDs, run.RunID)
-							if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(lease.ExpiresAt, grant.DeadlineMillis), now); err != nil {
-								return Outcome{}, err
-							}
+						grant, err := issueJournalCoverage(ctx, x, tx, &r, h.HostID, runtime.Runtime.JournalID)
+						if err != nil {
+							return Outcome{}, err
+						}
+						if err := coverDrainingJournals(ctx, x, tx, &r, h.HostID); err != nil {
+							return Outcome{}, err
 						}
 						ctl.Revision++
 						ctl.Mode = protocol.RunnerMaintenance
@@ -635,7 +636,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 		if err != nil {
 			return err
 		}
-		runs, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+		runs, err := store.CountJournalRuns(ctx, tx.Q(), h.HostID, rt.Runtime.JournalID)
 		if err != nil {
 			return err
 		}
@@ -747,6 +748,16 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
 				return err
+			}
+			return nil
+		}
+		if v.Phase == "draining" && rt.Runtime.JournalID != "" && h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) {
+			if ctl.Upgrade == nil && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.Mode != protocol.RunnerNormal {
+				ctl.Revision++
+				ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
+				ctl.Upgrade.Rolling = true
+				ctl.Upgrade.Updater.Authorized = true
+				return tx.PutHostControl(ctx, h.HostID, ctl, now)
 			}
 			return nil
 		}

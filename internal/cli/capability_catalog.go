@@ -325,6 +325,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("local POST /archive/prepare", "archive prepare", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/cancel", "archive cancel", "--socket", "{socket}", "--revision", "2", "--json"),
 		binding("local POST /archive/host", "archive host", "--socket", "{socket}", "--revision", "2", "--host", "sample", "--json"),
+		binding("local EXEC upgrade runner-handoff", "upgrade runner-handoff", "--release", "{release}", "--config", "{config}", "--upgrade-id", "batch", "--dry-run"),
 		binding("local EXEC upgrade recover", "upgrade recover", "--release", "{release}", "--config", "{config}", "--force", "--dry-run"),
 		binding("local GET /upgrades/recovery/status", "upgrade recover status", "--socket", "{socket}", "--ledger-socket", "{socket}", "--recovery-id", "forward", "--json"),
 		binding("local GET /status", "upgrade recover status", "--socket", "{socket}", "--json"),
@@ -365,6 +366,7 @@ func commandUsage(prefix []string) string {
 	slices.Sort(names)
 	var out strings.Builder
 	if name == "upgrade" || name == "upgrade recover" {
+		out.WriteString("\nUse tend upgrade runner-handoff --release <bundle> --config <runner-config> --upgrade-id <id> for the first overlapping runner installation on a host. --dry-run prints the pinned invocation.\n")
 		out.WriteString("\nIndependent local recovery: tend upgrade recover --release <complete-bundle> --config <fixed-updater-config> --force [--unit <service>] [--request-id <original-id>]. Uses the selected release's installer and does not require the old service or updater socket. --status reads the same durable recovery record; --dry-run prints the pinned invocation. Keep identical release, config and request identity after an interrupted reply.\n")
 	}
 	if name == "message" || name == "message associate" {

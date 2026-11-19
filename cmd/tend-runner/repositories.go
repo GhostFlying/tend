@@ -18,7 +18,9 @@ import (
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/runner/gitws"
+	"github.com/GhostFlying/tend/internal/updater"
 )
 
 type repositoryStatus = protocol.LocalRepositoryStatus
@@ -46,6 +48,46 @@ func repositorySocketPath(home string) (string, error) {
 	return locator.Socket, nil
 }
 
+// The original socket stays with the process that owns its journal. Once
+// generations exist, local administration follows the committed supervisor.
+func currentRunnerDirectory(ctx context.Context, home string, cfg config) (string, error) {
+	base := filepath.Join(home, "runner")
+	if _, err := os.Stat(filepath.Join(base, "generations")); errors.Is(err, os.ErrNotExist) {
+		return base, nil
+	} else if err != nil {
+		return "", err
+	}
+	socket, err := cfgfile.Path(cfg.UpdaterControlSocket)
+	if err != nil {
+		return "", err
+	}
+	state, err := updater.CallSocket(ctx, socket, "status", updater.ControlRequest{})
+	if err != nil {
+		return "", err
+	}
+	if state.InstanceID != cfg.HostID {
+		return "", errors.New("runner supervisor belongs to another host")
+	}
+	if state.CurrentJournal == "" {
+		return base, nil
+	}
+	if !release.ValidID(state.CurrentJournal) {
+		return "", errors.New("invalid committed runner journal")
+	}
+	return filepath.Join(base, "generations", state.CurrentJournal), nil
+}
+func currentRepositorySocket(home string, cfg config) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	state, err := currentRunnerDirectory(ctx, home, cfg)
+	if err != nil {
+		return "", err
+	}
+	if state == filepath.Join(home, "runner") {
+		return repositorySocketPath(home)
+	}
+	return repositorySocketPath(state)
+}
 func saveRepositorySocket(home, path string) error {
 	raw, err := json.Marshal(struct {
 		Socket string `json:"socket"`
@@ -229,7 +271,7 @@ func runRepositoryCommand(args []string) int {
 		}
 		home = filepath.Join(dir, ".tend")
 	}
-	socket, err := repositorySocketPath(home)
+	socket, err := currentRepositorySocket(home, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "local runner control unavailable:", err)
 		return 1

@@ -15,7 +15,7 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-func seed(path string) error {
+func seed(path string, count int) error {
 	ctx := context.Background()
 	db, err := store.Open(ctx, path, time.Now)
 	if err != nil {
@@ -31,7 +31,7 @@ func seed(path string) error {
 	if err != nil {
 		return err
 	}
-	for range 2 {
+	for range count {
 		env := &protocol.Envelope{RequestID: ids.New(protocol.PrefixRequest), Operation: "tasks.create", Target: protocol.Target{Type: "task", ID: ids.New(protocol.PrefixTask)}, Payload: payload}
 		out, err := service.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "fixture", Client: "compatibility-test"}, env, app.CreateTask{})
 		if err != nil {
@@ -46,7 +46,11 @@ func seed(path string) error {
 }
 
 func main() {
-	if err := seed(os.Args[1]); err != nil {
+	count := 2
+	if len(os.Args) == 3 && os.Args[2] == "rolling" {
+		count = 4
+	}
+	if err := seed(os.Args[1], count); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

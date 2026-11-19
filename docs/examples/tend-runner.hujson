@@ -8,6 +8,10 @@
   "home": "~/.tend",
   "tailnet": {"hostname": "tend-runner-linux-1"},
 
+  // Optional transport for independently supervised rolling instances. The
+  // host daemon's node must match this host's server-side nodes list.
+  // "side_channel": {"kind": "tailscaled"},
+
   // Workers use this machine's traex and its own configuration. kind must
   // be the worker the server configures for this host.
   "worker": {"kind": "appserver", "traex_bin": "traex"},

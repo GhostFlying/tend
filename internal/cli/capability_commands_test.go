@@ -160,7 +160,7 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	installerSum := sha256.Sum256(installerBytes)
-	releaseSet, _ := json.Marshal(map[string]any{"format": 2, "artifacts": []map[string]string{{"role": "updater", "os": runtime.GOOS, "arch": runtime.GOARCH, "path": "installer", "sha256": hex.EncodeToString(installerSum[:])}}})
+	releaseSet, _ := json.Marshal(map[string]any{"format": 2, "artifacts": []map[string]string{{"role": "updater", "os": runtime.GOOS, "arch": runtime.GOARCH, "path": "installer", "sha256": hex.EncodeToString(installerSum[:])}, {"role": "runner", "os": runtime.GOOS, "arch": runtime.GOARCH, "path": "fixture-runner", "sha256": hex.EncodeToString(installerSum[:])}}})
 	if err := os.WriteFile(filepath.Join(dir, "release-set.json"), releaseSet, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -245,6 +245,9 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 			seen := append([]recorded(nil), calls...)
 			mu.Unlock()
 			matched := entry.Capability == protocol.LocalServerCapabilities && strings.Contains(env.out.String(), "manager-upgrade-park-v1")
+			if entry.Capability == "local EXEC upgrade runner-handoff" {
+				matched = strings.Contains(env.out.String(), "rolling-bootstrap") && strings.Contains(env.out.String(), "fixture-runner") && len(seen) == 0
+			}
 			if entry.Capability == "local EXEC upgrade recover" {
 				matched = strings.Contains(env.out.String(), "external-recover") && strings.Contains(env.out.String(), "--force") && len(seen) == 0
 			}

@@ -38,6 +38,9 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if h.HostID != b.InstanceID {
 			continue
 		}
+		if h.RollingFrom != "" {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "rolling launch does not authorize a stop or replacement")
+		}
 		if b.ArtifactSHA256 != h.TargetHash || (h.CandidateInstance != "" && h.CandidateInstance != b.ProcessInstanceID) {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "candidate identity changed")
 		}
@@ -52,7 +55,7 @@ func (AuthorizeRunnerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		n, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+		n, err := store.CountJournalRuns(ctx, tx.Q(), h.HostID, rt.Runtime.JournalID)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -125,7 +128,7 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 			}
 			health.ServerRevision = r.View.Revision
 			health.ControlRevision = ctl.Revision
-			runs, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+			runs, err := store.CountJournalRuns(ctx, tx.Q(), h.HostID, rt.Runtime.JournalID)
 			if err != nil {
 				return err
 			}
@@ -176,14 +179,15 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 		if err != nil {
 			return Outcome{}, err
 		}
-		if ctl.Authorization == nil || rt.Runtime.AuthorizationID != ctl.Authorization.ID || rt.Runtime.AppliedControlRevision != ctl.Revision || !rt.Online || x.Now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || ctl.Authorization.DeadlineMillis-x.Now.UnixMilli() < 2*r.RestartMillis {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "runner restart coverage is not confirmed or too short")
+		covered, err := confirmedRestartCutoff(ctl, rt, x.Now, r.RestartMillis)
+		if err != nil {
+			return Outcome{}, err
 		}
-		// The runner reports a server-time lower bound for its conservative
-		// local deadline, accounting for the full grant response RTT. Reserve
-		// the entire restart budget before allowing the old process to stop.
-		coveredUntil := min(ctl.Authorization.DeadlineMillis, rt.Runtime.AuthorizationDeadlineMillis)
-		cutoff = min(cutoff, coveredUntil-r.RestartMillis)
+		cutoff = min(cutoff, covered)
+		cutoff, err = drainingRestartCutoff(ctx, tx.Q(), r, h.HostID, x.Now, cutoff)
+		if err != nil {
+			return Outcome{}, err
+		}
 	}
 	if cutoff <= x.Now.UnixMilli() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")

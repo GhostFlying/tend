@@ -8,6 +8,7 @@ const (
 
 // WorkspaceRelease confirms that a task's local processes have stopped.
 type WorkspaceRelease struct {
+	JournalID   string `json:"journal_id,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	TaskID      string `json:"task_id"`
 }

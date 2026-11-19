@@ -160,7 +160,7 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	}
 	fresh := rt.Online && now-rt.LastHeartbeatAt < RunnerOfflineAfter.Milliseconds() && rt.Runtime.AppliedControlRevision == ctl.Revision
 	if v.Phase != "restored" {
-		runs, err := store.CountOpenRuns(ctx, tx.Q(), h.HostID)
+		runs, err := store.CountJournalRuns(ctx, tx.Q(), h.HostID, rt.Runtime.JournalID)
 		if err != nil {
 			return false, "", err
 		}

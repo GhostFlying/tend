@@ -17653,6 +17653,9 @@
         "instance_id": {
           "type": "string"
         },
+        "journal_id": {
+          "type": "string"
+        },
         "journal_version": {
           "type": "integer"
         },
@@ -17739,6 +17742,9 @@
         },
         "release_set": {
           "$ref": "#/definitions/ReleaseSetTarget"
+        },
+        "rolling": {
+          "type": "boolean"
         },
         "updater": {
           "$ref": "#/definitions/UpdaterSelfTarget"

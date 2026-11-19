@@ -193,7 +193,7 @@ func checkQuestionRunRecovery(ctx context.Context, q store.Querier, host string,
 	if supportsQuestions && supportsContext && supportsSupervisor && supportsHandoffs {
 		return nil
 	}
-	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
+	runs, err := store.ListOpenRunsInJournal(ctx, q, host, runtime.LocalJournal())
 	if err != nil {
 		return err
 	}

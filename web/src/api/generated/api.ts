@@ -2155,6 +2155,7 @@ export interface RunnerUpgradeTarget {
   manifest_size: number;
   prepare_only?: boolean;
   release_set?: ReleaseSetTarget;
+  rolling?: boolean;
   updater?: UpdaterSelfTarget;
 }
 /**
@@ -2219,6 +2220,7 @@ export interface RunnerRuntime {
   extensions?: ExtensionHostStatus;
   generation: number;
   instance_id: string;
+  journal_id?: string;
   journal_version?: number;
   mode: string;
   pending_claims: number;

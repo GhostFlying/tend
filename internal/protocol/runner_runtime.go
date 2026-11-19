@@ -36,6 +36,9 @@ type RunnerBuild struct {
 // Sequence is monotonic within InstanceID. Replayed claims retain their original
 // runtime observation and must still return their original assignment.
 type RunnerRuntime struct {
+	// JournalID identifies the supervisor-owned data directory across process restarts.
+	// An empty ID is the original journal used before rolling generations.
+	JournalID                      string                  `json:"journal_id,omitempty"`
 	Updater                        *UpdaterSelfObservation `json:"updater,omitempty"`
 	Extensions                     *ExtensionHostStatus    `json:"extensions,omitempty"`
 	BoundedRecoveryAuthorizationID string                  `json:"bounded_recovery_authorization_id,omitempty"`
@@ -67,6 +70,14 @@ type RunnerRuntime struct {
 	PendingOperations      int64       `json:"pending_operations"`
 	Blockers               []string    `json:"blockers,omitempty"`
 	AuthorizationID        string      `json:"authorization_id,omitempty"`
+}
+
+// LocalJournal returns the persistent owner of run state on a physical host.
+func (r *RunnerRuntime) LocalJournal() string {
+	if r == nil {
+		return ""
+	}
+	return r.JournalID
 }
 
 // MaintenanceAuthorization is issued once for a fixed server deadline.

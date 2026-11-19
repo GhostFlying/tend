@@ -62,6 +62,9 @@ func (r UpgradeRow) InstallationHosts() []UpgradeHost {
 }
 
 type UpgradeHost struct {
+	RollingProcess protocol.RecoveryIdentity `json:"rolling_process,omitzero"`
+	// RollingFrom is the exact process allowed to finish its already-owned runs.
+	RollingFrom           string                        `json:"rolling_from,omitempty"`
 	MaintenanceHandoff    bool                          `json:"maintenance_handoff,omitempty"`
 	CancellationConfirmed bool                          `json:"cancellation_confirmed,omitempty"`
 	Configuration         *protocol.RunnerConfiguration `json:"configuration,omitempty"`

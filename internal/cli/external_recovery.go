@@ -37,32 +37,9 @@ func runExternalRecovery(ctx context.Context, e *Env, args []string) error {
 	// The installer verifies the complete manifest before stopping anything.
 	// The CLI pins the selected executable bytes using the same launcher as
 	// other local installer operations, without importing server code.
-	raw, err := os.ReadFile(filepath.Join(directory, "release-set.json"))
+	installer, sum, err := localReleaseExecutable(directory, "updater")
 	if err != nil {
 		return err
-	}
-	var set struct {
-		Format    int                                             `json:"format"`
-		Artifacts []struct{ Role, OS, Arch, Path, SHA256 string } `json:"artifacts"`
-	}
-	if err := json.Unmarshal(raw, &set); err != nil {
-		return err
-	}
-	if set.Format < 2 {
-		return usagef("external recovery requires a complete format 2 release")
-	}
-	installer, sum := "", ""
-	for _, artifact := range set.Artifacts {
-		if artifact.Role != "updater" || artifact.OS != runtime.GOOS || artifact.Arch != runtime.GOARCH {
-			continue
-		}
-		if installer != "" || artifact.Path == "" || filepath.IsAbs(artifact.Path) || filepath.Clean(artifact.Path) != artifact.Path || artifact.Path == ".." || strings.HasPrefix(artifact.Path, ".."+string(filepath.Separator)) {
-			return usagef("invalid installer selection")
-		}
-		installer, sum = filepath.Join(directory, artifact.Path), artifact.SHA256
-	}
-	if installer == "" {
-		return usagef("release has no installer for this platform")
 	}
 	arguments := []string{"external-recover", "--release", directory, "--config", configuration}
 	if *unit != "" {
@@ -82,4 +59,35 @@ func runExternalRecovery(ctx context.Context, e *Env, args []string) error {
 		return json.NewEncoder(e.Stdout).Encode(map[string]any{"installer": installer, "sha256": sum, "arguments": arguments})
 	}
 	return runPinnedBoundedInstaller(ctx, e, boundedInstallerInvocation{Installer: installer, InstallerSHA256: sum, Arguments: arguments, Action: "external-recover", Mutating: !*status, RequestID: *id, Timeout: 4 * time.Minute, NextCommand: next})
+}
+
+func localReleaseExecutable(directory, role string) (string, string, error) {
+	raw, err := os.ReadFile(filepath.Join(directory, "release-set.json"))
+	if err != nil {
+		return "", "", err
+	}
+	var set struct {
+		Format    int                                             `json:"format"`
+		Artifacts []struct{ Role, OS, Arch, Path, SHA256 string } `json:"artifacts"`
+	}
+	if err := json.Unmarshal(raw, &set); err != nil {
+		return "", "", err
+	}
+	if set.Format != 2 {
+		return "", "", usagef("external recovery requires a complete format 2 release")
+	}
+	installer, sum := "", ""
+	for _, artifact := range set.Artifacts {
+		if artifact.Role != role || artifact.OS != runtime.GOOS || artifact.Arch != runtime.GOARCH {
+			continue
+		}
+		if installer != "" || artifact.Path == "" || filepath.IsAbs(artifact.Path) || filepath.Clean(artifact.Path) != artifact.Path || artifact.Path == ".." || strings.HasPrefix(artifact.Path, ".."+string(filepath.Separator)) {
+			return "", "", usagef("invalid installer selection")
+		}
+		installer, sum = filepath.Join(directory, artifact.Path), artifact.SHA256
+	}
+	if installer == "" {
+		return "", "", usagef("release has no installer for this platform")
+	}
+	return installer, sum, nil
 }

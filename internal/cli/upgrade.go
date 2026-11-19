@@ -20,6 +20,9 @@ import (
 )
 
 func runUpgrade(ctx context.Context, e *Env, args []string) error {
+	if len(args) > 0 && args[0] == "runner-handoff" {
+		return runRunnerHandoff(ctx, e, args[1:])
+	}
 	if len(args) > 0 && args[0] == "capabilities" {
 		return runServerCapabilities(ctx, e, args[1:])
 	}
@@ -247,4 +250,36 @@ func localUpgradeRequest(ctx context.Context, socket, method, path string, input
 		return fmt.Errorf("local control service returned HTTP %d", response.StatusCode)
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(out)
+}
+
+func runRunnerHandoff(ctx context.Context, e *Env, args []string) error {
+	fs := newFlags(e, "upgrade runner-handoff")
+	release := fs.String("release", "", "complete local release directory")
+	config := fs.String("config", "", "local runner configuration")
+	id := fs.String("upgrade-id", "", "original fleet upgrade ID")
+	dry := fs.Bool("dry-run", false, "print pinned invocation")
+	rest, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 0 || *release == "" || *config == "" || *id == "" {
+		return usagef("runner-handoff requires --release, --config and --upgrade-id")
+	}
+	dir, err := filepath.Abs(*release)
+	if err != nil {
+		return err
+	}
+	path, err := filepath.Abs(*config)
+	if err != nil {
+		return err
+	}
+	binary, sum, err := localReleaseExecutable(dir, "runner")
+	if err != nil {
+		return err
+	}
+	invocation := []string{"rolling-bootstrap", "--release", dir, "--config", path, "--upgrade-id", *id}
+	if *dry {
+		return json.NewEncoder(e.Stdout).Encode(map[string]any{"runner": binary, "sha256": sum, "arguments": invocation})
+	}
+	return runPinnedBoundedInstaller(ctx, e, boundedInstallerInvocation{Installer: binary, InstallerSHA256: sum, Arguments: invocation, Action: "runner-handoff", Mutating: true, RequestID: *id, Timeout: 4 * time.Minute, NextCommand: append([]string{"tend", "upgrade", "runner-handoff"}, invocation[1:]...)})
 }

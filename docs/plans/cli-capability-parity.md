@@ -328,3 +328,5 @@ merge-only 执行省略 upgrade_id；部署执行可省略该字段以沿用原�
 变化不重写原事实；无显式同 PR 贡献关联、未接受或未结清执行不能使用。
 保存 dry-run 原 Envelope，以 `issue replay --file` 提交；unknown 按原 request_id
 读取 `issue request`，不重建请求或复发升级。
+
+本机 `upgrade runner-handoff --release <dir> --config <runner-config> --upgrade-id <id>` 以选定完整包、原 host 身份及原批次引导首次并存；支持 `--dry-run` 核对固定的 runner 程序和参数。

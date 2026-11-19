@@ -35,7 +35,7 @@ func checkNamedRunRecovery(ctx context.Context, q store.Querier, host string, ru
 			return nil
 		}
 		var count int
-		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_capability_bindings b JOIN runs r USING(run_id) WHERE r.host_id=? AND r.observed_state NOT IN ('finished','failed')`, host).Scan(&count); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_capability_bindings b JOIN runs r USING(run_id) WHERE r.host_id=? AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=r.run_id),'')=? AND r.observed_state NOT IN ('finished','failed')`, host, runtime.LocalJournal()).Scan(&count); err != nil {
 			return err
 		}
 		if count > 0 {
@@ -43,7 +43,7 @@ func checkNamedRunRecovery(ctx context.Context, q store.Querier, host string, ru
 		}
 		return nil
 	}
-	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
+	runs, err := store.ListOpenRunsInJournal(ctx, q, host, runtime.LocalJournal())
 	if err != nil {
 		return err
 	}

@@ -23,7 +23,9 @@ type workspaceProcessReconciliation struct {
 }
 
 func (r *Runner) reconcileWorkspaceProcesses(ctx context.Context) (workspaceProcessReconciliation, error) {
-	env, err := r.newEnvelope(protocol.OpWorkspaceReconcile, protocol.Target{Type: "host", ID: r.cfg.HostID}, struct{}{})
+	env, err := r.newEnvelope(protocol.OpWorkspaceReconcile, protocol.Target{Type: "host", ID: r.cfg.HostID}, struct {
+		JournalID string `json:"journal_id,omitempty"`
+	}{r.cfg.JournalID})
 	if err != nil {
 		return workspaceProcessReconciliation{}, err
 	}

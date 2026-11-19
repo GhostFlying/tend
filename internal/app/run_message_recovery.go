@@ -14,8 +14,8 @@ func checkRunMessageRecovery(ctx context.Context, q store.Querier, host string, 
 	}
 	var pending int
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_messages m JOIN runs r ON r.run_id=m.run_id
-	 WHERE r.host_id=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')
-	 AND m.status IN ('queued','dispatching','unknown')`, host).Scan(&pending)
+	 WHERE r.host_id=? AND COALESCE((SELECT journal_id FROM runner_journal_runs j WHERE j.run_id=r.run_id),'')=? AND r.observed_state IN ('starting','running','waiting','interrupted','unknown')
+	 AND m.status IN ('queued','dispatching','unknown')`, host, runtime.LocalJournal()).Scan(&pending)
 	if err != nil {
 		return err
 	}

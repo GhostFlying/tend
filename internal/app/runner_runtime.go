@@ -48,7 +48,7 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}
-	if r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Generation < 1 || r.Protocol < protocol.MinimumRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
+	if len(r.JournalID) > 128 || r.JournalID != "" && r.Protocol < 6 || r.InstanceID == "" || len(r.InstanceID) > 128 || r.Sequence < 1 || r.Generation < 1 || r.Protocol < protocol.MinimumRunnerProtocol || r.Protocol > protocol.CurrentRunnerProtocol || r.ProtocolMin > r.Protocol || r.ProtocolMax < r.Protocol || r.ProtocolMin < 0 || r.PendingClaims < 0 || r.PendingOperations < 0 || !slices.Contains([]string{protocol.RunnerNormal, protocol.RunnerMaintenance, protocol.RunnerReady}, r.Mode) {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "invalid or unsupported runner runtime")
 	}
 	return nil
@@ -70,6 +70,8 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 		}
 		return nil
 	}
+	// Preflight and registration serialize on the same writer. Cover both
+	// orderings when an older runner connects while a newer window is admitted.
 	if hello && r.Protocol < protocol.CurrentRunnerProtocol {
 		var blocked bool
 		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades
@@ -88,6 +90,25 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 		return protocol.Errorf(protocol.CodeConflictPayload, "runner instance has been superseded")
 	}
 	if err == nil {
+		if old.Runtime.InstanceID != r.InstanceID {
+			draining, e := store.GetDrainingRunner(ctx, q, host, r.InstanceID)
+			switch {
+			case e == nil:
+				if draining.Runtime.Generation != r.Generation || draining.Runtime.JournalID != r.JournalID || draining.Runtime.Protocol != r.Protocol {
+					return protocol.Errorf(protocol.CodeConflictPayload, "draining runner identity changed")
+				}
+				return nil
+			case !errors.Is(e, store.ErrNotFound):
+				return e
+			}
+		}
+		if old.Runtime.JournalID != r.JournalID {
+			if !hello {
+				return protocol.Errorf(protocol.CodeConflictPayload, "runner journal is not registered")
+			}
+			_, err := rollingAdmission(ctx, q, host, old.Runtime, r)
+			return err
+		}
 		if old.Runtime.InstanceID == r.InstanceID && old.Runtime.Generation != r.Generation {
 			return protocol.Errorf(protocol.CodeConflictPayload, "runner instance generation changed")
 		}
@@ -99,6 +120,42 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 		return protocol.Errorf(protocol.CodeConflictPayload, "runner must reconcile through hello")
 	}
 	return nil
+}
+
+// Only the candidate bound by the supervisor's authorized upgrade may open
+// an independent journal. A higher generation alone proves no such handoff.
+func rollingAdmission(ctx context.Context, q store.Querier, host string, old protocol.RunnerRuntime, next *protocol.RunnerRuntime) (int64, error) {
+	if next.InstanceID != old.InstanceID && next.JournalID == next.InstanceID && next.UpgradeID != "" {
+		batch, err := store.GetUpgrade(ctx, q, next.UpgradeID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return 0, err
+		}
+		if err == nil && batch.View.Status == "running" && batch.View.Phase == "runners" {
+			for _, target := range batch.Hosts {
+				if target.HostID == host && target.RollingFrom == old.InstanceID && target.CandidateInstance == next.InstanceID && target.TargetHash == next.Build.BinarySHA256 && target.GrantDeadline > 0 {
+					return target.GrantDeadline, nil
+				}
+			}
+		}
+	}
+	return 0, protocol.Errorf(protocol.CodeConflictPayload, "independent runner journal requires an authorized handoff")
+}
+
+func instanceControl(ctx context.Context, q store.Querier, host string, runtime *protocol.RunnerRuntime, now int64) (protocol.RunnerControl, error) {
+	if runtime != nil {
+		drain, err := store.GetDrainingRunner(ctx, q, host, runtime.InstanceID)
+		if err == nil {
+			control := drain.Control
+			if control.Authorization != nil {
+				control.Authorization.RemainingMillis = max(0, control.Authorization.DeadlineMillis-now)
+			}
+			return control, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return protocol.RunnerControl{}, err
+		}
+	}
+	return runnerControl(ctx, q, host, now)
 }
 
 func runnerControl(ctx context.Context, q store.Querier, host string, now int64) (protocol.RunnerControl, error) {
@@ -138,6 +195,18 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 		return false, err
 	}
 	fresh := errors.Is(err, store.ErrNotFound)
+	if !fresh && old.Runtime.InstanceID != r.InstanceID {
+		drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, r.InstanceID)
+		if err == nil {
+			if drain.Runtime.Sequence >= r.Sequence {
+				return false, &protocol.Error{Code: protocol.CodeConflictPayload, Message: "runner observation sequence is stale", Details: json.RawMessage(`{"reason":"stale_sequence"}`)}
+			}
+			return false, tx.ObserveDrainingRunner(ctx, host, *r, now)
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return false, err
+		}
+	}
 	if !fresh && !hello && old.Runtime.Protocol != r.Protocol {
 		return false, protocol.Errorf(protocol.CodeConflictPayload, "runner must negotiate a protocol change through hello")
 	}
@@ -145,7 +214,23 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 		return false, &protocol.Error{Code: protocol.CodeConflictPayload, Message: "runner observation sequence is stale", Details: json.RawMessage(`{"reason":"stale_sequence"}`)}
 	}
 	if !fresh && old.Runtime.InstanceID != r.InstanceID {
-		if err := tx.RetireHostInstance(ctx, host, old.Runtime.InstanceID); err != nil {
+		if old.Runtime.JournalID != r.JournalID {
+			deadline, err := rollingAdmission(ctx, tx.Q(), host, old.Runtime, r)
+			if err != nil {
+				return false, err
+			}
+			if now >= deadline {
+				return false, protocol.Errorf(protocol.CodeInvalidTransition, "runner handoff grant expired")
+			}
+			control, err := store.GetHostControl(ctx, tx.Q(), host)
+			if err != nil {
+				return false, err
+			}
+			drain := protocol.RunnerControl{Mode: protocol.RunnerMaintenance, Revision: control.Revision + 1}
+			if err := tx.PreserveDrainingRunner(ctx, host, r.UpgradeID, old, drain); err != nil {
+				return false, err
+			}
+		} else if err := tx.RetireHostInstance(ctx, host, old.Runtime.InstanceID); err != nil {
 			return false, err
 		}
 	}
