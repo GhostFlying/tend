@@ -931,10 +931,11 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		}
 		endTurns := tx.ObserveCountedPhase(store.WriteSettleTurns)
 		ids, err := tx.SettleOpenTurns(ctx, threadID, now)
-		defer endTurns(len(ids))
 		if err != nil {
+			endTurns(-1)
 			return err
 		}
+		defer endTurns(len(ids))
 		for _, turn := range ids {
 			if turn.TurnID != "" {
 				if err := a.markMainSteersUncertain(ctx, tx, threadID, turn.TurnID, now); err != nil {
@@ -967,10 +968,11 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		endTurns(len(ids))
 		endTools := tx.ObserveCountedPhase(store.WriteSettleTools)
 		uses, err := tx.SettleToolUses(ctx, threadID, now)
-		defer endTools(len(uses))
 		if err != nil {
+			endTools(-1)
 			return err
 		}
+		defer endTools(len(uses))
 		for _, id := range uses {
 			if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolInterrupted, now); err != nil {
 				return err
@@ -979,10 +981,11 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		endTools(len(uses))
 		endMessages := tx.ObserveCountedPhase(store.WriteSettleMessages)
 		messages, err := tx.SettleAgentMessages(ctx, threadID)
-		defer endMessages(len(messages))
 		if err != nil {
+			endMessages(-1)
 			return err
 		}
+		defer endMessages(len(messages))
 		for _, id := range messages {
 			seq, err := store.GetConversationSeq(ctx, tx.Q(), id)
 			if err != nil {
@@ -995,10 +998,11 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		endMessages(len(messages))
 		endLogicalTurns := tx.ObserveCountedPhase(store.WriteSettleLogicalTurns)
 		requests, err := store.FollowupIDs(ctx, tx.Q(), `SELECT e.request_id FROM logical_turn_executions e JOIN main_turns t ON t.request_id=e.request_id JOIN logical_turns l ON l.logical_turn_id=e.logical_turn_id WHERE t.thread_id=? AND t.status='interrupted' AND l.status IN ('processing','recovering') AND e.settled=0 AND NOT EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)`, threadID)
-		defer endLogicalTurns(len(requests))
 		if err != nil {
+			endLogicalTurns(-1)
 			return err
 		}
+		defer endLogicalTurns(len(requests))
 		for _, request := range requests {
 			rec, err := store.GetMainTurn(ctx, tx.Q(), request)
 			if err != nil {

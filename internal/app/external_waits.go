@@ -355,11 +355,14 @@ func refreshExternalWaits(ctx context.Context, x *Exec, tx *store.Tx) error {
 func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end func(int)) (bool, error) {
 	changed := false
 	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM run_external_waits WHERE status='waiting' AND next_check_at<=? ORDER BY next_check_at,run_id LIMIT 100`, x.Now.UnixMilli())
+	if err != nil {
+		if end != nil {
+			end(-1)
+		}
+		return false, err
+	}
 	if end != nil {
 		defer end(len(ids))
-	}
-	if err != nil {
-		return false, err
 	}
 	for _, id := range ids {
 		v, err := store.GetExternalWait(ctx, tx.Q(), id)

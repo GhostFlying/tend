@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,6 +170,66 @@ func TestSettledTurnInterruptsItsMessage(t *testing.T) {
 	if !woken(changed) {
 		t.Error("settling turns did not notify changes")
 	}
+}
+
+func TestSettleOpenTurnsDistinguishesQueryFailureFromEmptySelection(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	id, delivery := h.say("hello")
+	turn := store.MainTurn{
+		RequestID: delivery.RequestID, MessageID: id,
+		ThreadID: "th-1", TurnID: "turn-1", Status: store.TurnStarted,
+	}
+	if err := h.app.PutMainTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `CREATE TRIGGER fail_turn_settlement
+			BEFORE UPDATE OF status ON main_turns WHEN NEW.status = 'interrupted'
+			BEGIN SELECT RAISE(ABORT, 'fixture prevented settlement'); END`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var observation store.WriteObservation
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) { observation = o })(h.store)
+	settlementPhase := func() store.WritePhaseDuration {
+		t.Helper()
+		for _, phase := range observation.Phases {
+			if phase.Phase == store.WriteSettleTurns {
+				return phase
+			}
+		}
+		t.Fatalf("missing open turn phase in %+v", observation.Phases)
+		return store.WritePhaseDuration{}
+	}
+
+	err := h.app.SettleOpenTurns(ctx, turn.ThreadID)
+	if err == nil || !strings.Contains(err.Error(), "fixture prevented settlement") {
+		t.Fatalf("expected injected query failure, got %v", err)
+	}
+	current, found, err := h.app.TurnDelivery(ctx, turn.ThreadID, turn.TurnID)
+	if err != nil || !found || current.Status != store.TurnStarted {
+		t.Fatalf("failing write changed the open turn: found=%v status=%q err=%v", found, current.Status, err)
+	}
+	if observation.Outcome != "error" || observation.Stage != "callback" {
+		t.Fatalf("expected callback error, got outcome=%q stage=%q", observation.Outcome, observation.Stage)
+	}
+	failed := settlementPhase()
+	if failed.Items != nil {
+		t.Fatalf("failed selection reported %d items, want omitted count", *failed.Items)
+	}
+	t.Logf("failed selection rolled back, stage=%s duration=%s, count omitted", observation.Stage, failed.Duration)
+
+	observation = store.WriteObservation{}
+	if err := h.app.SettleOpenTurns(ctx, "empty-thread"); err != nil {
+		t.Fatal(err)
+	}
+	empty := settlementPhase()
+	if empty.Items == nil || *empty.Items != 0 {
+		t.Fatalf("empty selection phase = %+v, want zero items", empty)
+	}
+	t.Logf("successful empty selection counted %d items, duration=%s", *empty.Items, empty.Duration)
 }
 
 func TestUndeliveredMessageStates(t *testing.T) {

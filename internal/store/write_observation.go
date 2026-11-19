@@ -364,6 +364,7 @@ func (t *Tx) ObservePhase(phase WritePhase) func() {
 
 // ObserveCountedPhase also records the number of items selected for the stage.
 // Selection can include items that need no change or were not reached on error.
+// Pass -1 when selection did not complete and the count is unknown.
 func (t *Tx) ObserveCountedPhase(phase WritePhase) func(int) {
 	return t.observePhase(phase)
 }
