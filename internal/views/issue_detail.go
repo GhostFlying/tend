@@ -368,119 +368,120 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
 			if err != nil {
 				return out, err
 			}
-			var facts struct {
-				Delivery   *protocol.IssueDeliveryView `json:"delivery_progress"`
-				Kind       string                      `json:"kind"`
-				Status     string                      `json:"status"`
-				State      string                      `json:"state"`
-				ArtifactID string                      `json:"artifact_id"`
-				TaskID     string                      `json:"task_id"`
-			}
-			if err := json.Unmarshal([]byte(body), &facts); err != nil {
-				return out, err
-			}
-			switch r.kind {
-			case "work_item.delivery_changed":
-				entry.Delivery, entry.Title = facts.Delivery, "记录了交付候选观察"
-			case "work_item.delivery_candidate_retired":
-				if facts.Delivery != nil {
-					facts.Delivery.Delivery.DeliveryID = r.id
-					facts.Delivery.Observation.IssueID = id
-					facts.Delivery.Observation.DeliveryID = r.id
-				}
-				entry.Delivery, entry.Title = facts.Delivery, "保留了被替换的候选观察"
-			}
-			if r.kind == "issue.progress_updated" {
-				p, err := store.IssueProgress(ctx, q, r.id, revision)
-				if err != nil {
-					return out, err
-				}
-				if p != nil && p.IssueRevision == revision {
-					entry.Progress = p
-				}
-			}
-			if r.kind == "issue.manager_claimed" {
-				var task string
-				if err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(c.reason_json,'$.manager_task'),'') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version WHERE e.event_seq=?`, r.seq).Scan(&task); err != nil {
-					return out, err
-				}
-				if task != "" {
-					var run string
-					err := q.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE task_id=? AND role='issue_manager' ORDER BY created_at,run_id LIMIT 1`, task).Scan(&run)
-					if err != nil && !errors.Is(err, sql.ErrNoRows) {
-						return out, err
-					}
-					if run != "" {
-						name, e := runActivityAuthor(ctx, q, run, "Agent 身份未记录")
-						if e != nil {
-							return out, e
-						}
-						entry.Title = name + " 已接手"
-					}
-				}
-			}
-			if r.kind == "run.recovery" {
-				entry.Title = recoveryActivityTitle(facts.Kind)
-			}
-			if r.kind == "issue.status_changed" {
-				switch facts.State {
-				case "closed":
-					entry.Title = "关闭了 Issue"
-				case "cancelled":
-					entry.Title = "取消了 Issue"
-				}
-			}
 			if r.kind == "task.completed" {
 				entry.IssueID, entry.TaskID, entry.Title = id, r.id, "任务结果已返回"
-			}
-			if r.id == issue.IssueID {
-				entry.IssueID = id
 			} else {
-				var childTitle string
-				e := q.QueryRowContext(ctx, `SELECT json_extract(w.body_json,'$.title') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version JOIN work_item_revisions w ON w.work_item_id=c.issue_id AND w.revision=c.revision WHERE e.event_seq=? AND e.object_type='issue' AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?`, r.seq, id).Scan(&childTitle)
-				if e == nil {
-					entry.IssueID = r.id
-					entry.Title = childTitle + " · " + entry.Title
-				} else if !errors.Is(e, sql.ErrNoRows) {
-					return out, e
+				var facts struct {
+					Delivery   *protocol.IssueDeliveryView `json:"delivery_progress"`
+					Kind       string                      `json:"kind"`
+					Status     string                      `json:"status"`
+					State      string                      `json:"state"`
+					ArtifactID string                      `json:"artifact_id"`
+					TaskID     string                      `json:"task_id"`
 				}
-			}
-			if r.kind == "attention.changed" {
-				var snapshot string
-				err := q.QueryRowContext(ctx, `SELECT ar.body_json FROM attention_revisions ar JOIN events e ON e.object_id=ar.attention_id AND e.object_version=ar.revision WHERE e.event_seq=?`, r.seq).Scan(&snapshot)
-				if err != nil {
+				if err := json.Unmarshal([]byte(body), &facts); err != nil {
 					return out, err
 				}
-				var attention protocol.Attention
-				if err := json.Unmarshal([]byte(snapshot), &attention); err != nil {
-					return out, err
+				switch r.kind {
+				case "work_item.delivery_changed":
+					entry.Delivery, entry.Title = facts.Delivery, "记录了交付候选观察"
+				case "work_item.delivery_candidate_retired":
+					if facts.Delivery != nil {
+						facts.Delivery.Delivery.DeliveryID = r.id
+						facts.Delivery.Observation.IssueID = id
+						facts.Delivery.Observation.DeliveryID = r.id
+					}
+					entry.Delivery, entry.Title = facts.Delivery, "保留了被替换的候选观察"
 				}
-				switch facts.Status {
-				case "open":
-					entry.Title = "新增或更新了待处理事项"
-				case "responded":
-					entry.Title = "已回应待处理事项"
-				case "resolved":
-					entry.Title = "待处理事项已解决"
-				case "cancelled", "withdrawn":
-					entry.Title = "待处理事项已取消"
+				if r.kind == "issue.progress_updated" {
+					p, err := store.IssueProgress(ctx, q, r.id, revision)
+					if err != nil {
+						return out, err
+					}
+					if p != nil && p.IssueRevision == revision {
+						entry.Progress = p
+					}
 				}
-				if attention.Kind == "information" {
-					entry.Title = "通知"
+				if r.kind == "issue.manager_claimed" {
+					var task string
+					if err := q.QueryRowContext(ctx, `SELECT COALESCE(json_extract(c.reason_json,'$.manager_task'),'') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version WHERE e.event_seq=?`, r.seq).Scan(&task); err != nil {
+						return out, err
+					}
+					if task != "" {
+						var run string
+						err := q.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE task_id=? AND role='issue_manager' ORDER BY created_at,run_id LIMIT 1`, task).Scan(&run)
+						if err != nil && !errors.Is(err, sql.ErrNoRows) {
+							return out, err
+						}
+						if run != "" {
+							name, e := runActivityAuthor(ctx, q, run, "Agent 身份未记录")
+							if e != nil {
+								return out, e
+							}
+							entry.Title = name + " 已接手"
+						}
+					}
 				}
-				entry.Title += "：" + attention.Title
-			}
-			entry.TaskID = facts.TaskID
-			entry.ArtifactID = facts.ArtifactID
-			if entry.TaskID == "" {
-				_ = q.QueryRowContext(ctx, `SELECT task_id FROM tasks WHERE task_id=? UNION ALL SELECT task_id FROM runs WHERE run_id=? LIMIT 1`, r.id, r.id).Scan(&entry.TaskID)
-			}
-			if r.kind == "artifact.submitted" {
-				entry.Title = "已交付成果"
-				if entry.ArtifactID == "" {
-					entry.ArtifactID = r.id
+				if r.kind == "run.recovery" {
+					entry.Title = recoveryActivityTitle(facts.Kind)
 				}
-				entry.ID = "result:" + entry.ArtifactID
+				if r.kind == "issue.status_changed" {
+					switch facts.State {
+					case "closed":
+						entry.Title = "关闭了 Issue"
+					case "cancelled":
+						entry.Title = "取消了 Issue"
+					}
+				}
+				if r.id == issue.IssueID {
+					entry.IssueID = id
+				} else {
+					var childTitle string
+					e := q.QueryRowContext(ctx, `SELECT json_extract(w.body_json,'$.title') FROM events e JOIN issue_control_revisions c ON c.issue_id=e.object_id AND c.revision=e.object_version JOIN work_item_revisions w ON w.work_item_id=c.issue_id AND w.revision=c.revision WHERE e.event_seq=? AND e.object_type='issue' AND json_extract(c.snapshot_json,'$.control.parent_issue_id')=?`, r.seq, id).Scan(&childTitle)
+					if e == nil {
+						entry.IssueID = r.id
+						entry.Title = childTitle + " · " + entry.Title
+					} else if !errors.Is(e, sql.ErrNoRows) {
+						return out, e
+					}
+				}
+				if r.kind == "attention.changed" {
+					var snapshot string
+					err := q.QueryRowContext(ctx, `SELECT ar.body_json FROM attention_revisions ar JOIN events e ON e.object_id=ar.attention_id AND e.object_version=ar.revision WHERE e.event_seq=?`, r.seq).Scan(&snapshot)
+					if err != nil {
+						return out, err
+					}
+					var attention protocol.Attention
+					if err := json.Unmarshal([]byte(snapshot), &attention); err != nil {
+						return out, err
+					}
+					switch facts.Status {
+					case "open":
+						entry.Title = "新增或更新了待处理事项"
+					case "responded":
+						entry.Title = "已回应待处理事项"
+					case "resolved":
+						entry.Title = "待处理事项已解决"
+					case "cancelled", "withdrawn":
+						entry.Title = "待处理事项已取消"
+					}
+					if attention.Kind == "information" {
+						entry.Title = "通知"
+					}
+					entry.Title += "：" + attention.Title
+				}
+				entry.TaskID = facts.TaskID
+				entry.ArtifactID = facts.ArtifactID
+				if entry.TaskID == "" {
+					_ = q.QueryRowContext(ctx, `SELECT task_id FROM tasks WHERE task_id=? UNION ALL SELECT task_id FROM runs WHERE run_id=? LIMIT 1`, r.id, r.id).Scan(&entry.TaskID)
+				}
+				if r.kind == "artifact.submitted" {
+					entry.Title = "已交付成果"
+					if entry.ArtifactID == "" {
+						entry.ArtifactID = r.id
+					}
+					entry.ID = "result:" + entry.ArtifactID
+				}
 			}
 		}
 		if query.Readable {
