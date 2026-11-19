@@ -172,8 +172,10 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 				}
 			}
 			req.AuthorizationID = grant.AuthorizationID
-			if !retire(req).Confirmed || !retire(req).Confirmed {
-				t.Fatal("lost receipt could not reconcile")
+			for attempt := 1; attempt <= 2; attempt++ {
+				if !retire(req).Confirmed {
+					t.Fatalf("original stop receipt was unconfirmed on attempt %d", attempt)
+				}
 			}
 			stopped := upgradeRead(h).View.WindowStops[0]
 			if stopped.State != "stopped" {

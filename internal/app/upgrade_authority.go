@@ -364,6 +364,9 @@ func (ControlUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 
 		for _, h := range r.Hosts {
+			if r.View.Phase == windowMaintenance {
+				break
+			} // No installation was prepared on these hosts.
 			rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
 			if err != nil {
 				return Outcome{}, err

@@ -136,6 +136,6 @@ func ListCancelledUpgradeIDs(ctx context.Context, q Querier) ([]string, error) {
 // historical row cannot hide an earlier attention window's durable fence.
 func ManagerUpgradeParked(ctx context.Context, q Querier) (bool, error) {
 	var parked bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades WHERE status IN ('running','attention') AND json_extract(state_json,'$.park_idle_managers')=1)`).Scan(&parked)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM upgrades WHERE status IN ('running','attention') AND phase <> 'window_maintenance' AND json_extract(state_json,'$.park_idle_managers')=1)`).Scan(&parked)
 	return parked, err
 }
