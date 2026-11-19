@@ -12,6 +12,7 @@ import (
 
 type retirementAuthority struct {
 	*fakeAuthority
+	sequence  int64
 	ready     map[string]bool
 	loseAck   bool
 	confirmed map[string]int
@@ -26,6 +27,7 @@ func (a *retirementAuthority) Retire(_ context.Context, _ string, in protocol.Ru
 		return result, nil
 	}
 	result.Allowed = true
+	result.ReadySequence = a.sequence
 	result.AuthorizationID = "stop-" + in.Process.LaunchID
 	if in.AuthorizationID != "" {
 		if in.AuthorizationID != result.AuthorizationID {
@@ -81,13 +83,32 @@ func TestRollingRetirementResumesLostAckWithoutStoppingAnotherProcess(t *testing
 	if h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 1 || auth.confirmed["first"] != 2 {
 		t.Fatal("stopped predecessor was not reconciled exactly once")
 	}
+	// A durable intent can precede signal dispatch. Reopening retains that
+	// uncertainty until a newer ready heartbeat from the same live runner.
+	third := Identity{PID: 13, StartTicks: 103, LaunchID: "interrupted", SHA256: h.s.state.Process.SHA256}
+	h.p.live[third.PID] = third
+	auth.ready[third.LaunchID] = true
+	h.s.state.DrainingProcesses[third.LaunchID] = DrainingProcess{Process: third, UpgradeID: "replace-interrupted", AuthorizationID: "stop-interrupted", StopRequested: true, StopSequence: 4}
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	h.reopen(t)
+	auth.sequence = 4
+	if err := h.s.Step(t.Context()); !errors.Is(err, ErrUnknown) || h.p.stops != 1 {
+		t.Fatal("ambiguous signal repeated", err)
+	}
+	auth.sequence = 5
+	h.step(t)
+	if h.p.stops != 2 || h.p.live[13].PID != 0 || auth.confirmed["interrupted"] != 1 {
+		t.Fatal("verified live predecessor failed to retire")
+	}
 	// Its PID was subsequently reused. No signal may reach the newer process.
 	replaced := h.p.live[12]
 	replaced.StartTicks++
 	h.p.live[12] = replaced
 	auth.ready["middle"] = true
 	h.step(t)
-	if h.p.live[12] != replaced || h.p.stops != 1 || len(h.s.Status().DrainingProcesses) != 0 {
+	if h.p.live[12] != replaced || h.p.stops != 2 || len(h.s.Status().DrainingProcesses) != 0 {
 		t.Fatal("PID reuse affected another process")
 	}
 }

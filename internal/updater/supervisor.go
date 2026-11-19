@@ -98,7 +98,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	} else if err != nil {
 		return fail(err)
 	}
-	if (state.Format < 1 || state.Format > 6) || state.InstanceID != cfg.InstanceID {
+	if (state.Format < 1 || state.Format > rollingStateFormat) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
@@ -141,7 +141,7 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 			}
 		}
 	}
-	if state.Format >= 6 && s.opts.RollingAuthority == nil {
+	if state.Format >= rollingStateFormat && s.opts.RollingAuthority == nil {
 		return fail(errors.New("updater: rolling runner transport is required"))
 	}
 	s.durable = cloneState(state)
@@ -178,7 +178,7 @@ func (s *Supervisor) save() error {
 	if err := s.durabilityError(); err != nil {
 		return err
 	}
-	if s.durable.Format >= 6 {
+	if s.durable.Format >= rollingStateFormat {
 		s.state.Format = max(s.state.Format, s.durable.Format)
 	}
 	s.observeOperationPhase()
@@ -402,7 +402,7 @@ func (s *Supervisor) stageUpgrade(ctx context.Context, id, dir string, configura
 		if err := s.criticalState(); err != nil {
 			return err
 		}
-		s.state.Format = 6
+		s.state.Format = rollingStateFormat
 	}
 	s.state.Operation = &Operation{Rolling: rolling, Configuration: staged, ID: id, Kind: "upgrade", Binding: b, Previous: s.state.Current, Candidate: candidate, PreviousProcess: s.state.Process, LaunchID: processID, Phase: "staged", StartedAt: s.opts.Now()}
 	return s.save()

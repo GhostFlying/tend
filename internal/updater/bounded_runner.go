@@ -652,6 +652,9 @@ func (s *Supervisor) startBoundedRunner(ctx context.Context, recovering bool) er
 		startCtx, cancel := context.WithTimeout(ctx, remaining)
 		defer cancel()
 		extra := map[string]string{"TEND_UPDATER_INSTANCE_ID": s.cfg.InstanceID, "TEND_UPDATER_PROCESS_INSTANCE_ID": op.LaunchID, "TEND_UPDATER_LAUNCH_ID": op.LaunchID, "TEND_RELEASE_SHA256": op.Candidate.Artifact.SHA256, "TEND_UPDATER_RELEASE_ID": op.Candidate.ReleaseID, "TEND_UPGRADE_ID": op.ID, "TEND_UPDATER_MAINTENANCE": "1", "TEND_BOUNDED_RECOVERY_REQUEST_ID": boundedRunnerRecoveryID(b)}
+		if s.state.CurrentJournal != "" {
+			extra["TEND_RUNNER_JOURNAL_ID"] = s.state.CurrentJournal
+		}
 		identity, err = s.opts.Process.Start(startCtx, op.Candidate.Binary, s.cfg, extra)
 		if err != nil {
 			var exited *launchExitedError

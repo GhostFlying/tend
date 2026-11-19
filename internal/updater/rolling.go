@@ -18,6 +18,7 @@ type RollingLaunch struct {
 
 type DrainingProcess struct {
 	AuthorizationID string   `json:"authorization_id,omitempty"`
+	StopSequence    int64    `json:"stop_sequence,omitempty"`
 	StopRequested   bool     `json:"stop_requested,omitempty"`
 	Stopped         bool     `json:"stopped,omitempty"`
 	Process         Identity `json:"process"`
@@ -89,6 +90,7 @@ func (s *Supervisor) retireDrained(ctx context.Context) error {
 				continue
 			}
 			drain.AuthorizationID = result.AuthorizationID
+			drain.StopSequence = result.ReadySequence
 			s.state.DrainingProcesses[key] = drain
 			if err := s.save(); err != nil {
 				return err
@@ -96,7 +98,22 @@ func (s *Supervisor) retireDrained(ctx context.Context) error {
 		}
 		if !drain.Stopped {
 			got, err := s.opts.Process.Inspect(ctx, drain.Process.PID)
-			if err == nil && got == drain.Process && !drain.StopRequested {
+			if err == nil && got == drain.Process && drain.StopRequested {
+				// A lost acknowledgement alone cannot repeat a signal. A newer
+				// ready heartbeat and the same exact live process reconcile an
+				// interrupted attempt, including a crash before signal dispatch.
+				observed, e := s.opts.RollingAuthority.Retire(ctx, s.state.CurrentJournal, req)
+				if e != nil {
+					failures = append(failures, e)
+					continue
+				}
+				if !observed.Allowed || observed.AuthorizationID != drain.AuthorizationID || observed.ReadySequence <= drain.StopSequence {
+					failures = append(failures, ErrUnknown)
+					continue
+				}
+				drain.StopSequence = observed.ReadySequence
+			}
+			if err == nil && got == drain.Process {
 				drain.StopRequested = true
 				s.state.DrainingProcesses[key] = drain
 				if err := s.save(); err != nil {

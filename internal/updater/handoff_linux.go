@@ -473,7 +473,7 @@ func HandoffStatus(ctx context.Context, cfg Config) (HandoffJournal, error) {
 	if err != nil {
 		return j, err
 	}
-	if state.Recovery != nil && digest(state.Recovery.Plan) == digest(j.Plan.Recovery) && state.Format >= 2 && state.Format <= 5 && state.UpdaterEpoch != "" {
+	if state.Recovery != nil && digest(state.Recovery.Plan) == digest(j.Plan.Recovery) && state.Format >= 2 && state.Format <= rollingStateFormat && state.UpdaterEpoch != "" {
 		if err := retainedChild(ctx, j.Plan); err != nil && state.Recovery.Phase == "updater_adopted" {
 			return j, err
 		}
