@@ -184,31 +184,35 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				waitingEvidence = last.ReviewerRole == protocol.RoleAccept && last.TaskID == round.TaskID && last.ArtifactID == round.ArtifactID && (last.AcceptanceVerdict == protocol.VerdictBlocked || last.AcceptanceVerdict == protocol.VerdictInconclusive)
 			}
 			for _, previous := range r.Rounds {
-				sameTask := previous.TaskID == round.TaskID || previous.SupplementTaskID != "" && previous.SupplementTaskID == round.TaskID
+				previousReport := previous
+				if previous.SupplementTaskID != "" && previous.SupplementTaskID == round.TaskID {
+					previousReport = protocol.SharedReviewInputRound(previous)
+				}
+				sameTask := previousReport.TaskID == round.TaskID
 				accept := round.ReviewerRole == protocol.RoleAccept
-				previousGeneration := previous.ImplementGeneration
-				if previous.SupplementTaskID == round.TaskID {
-					previousGeneration = previous.SupplementGeneration
-				}
-				if sameTask && !accept && previousGeneration == 0 {
-					previousRun := previous.RunID
-					if previous.SupplementTaskID == round.TaskID {
-						previousRun = previous.SupplementRunID
+				if sameTask && !accept && previousReport.RunID != "" &&
+					(previousReport.SpecVersion == 0 || previousReport.ImplementGeneration == 0) {
+					oldRun, err := store.GetRun(ctx, tx.Q(), previousReport.RunID)
+					if err != nil {
+						return Outcome{}, err
 					}
-					if previousRun != "" {
-						oldRun, err := store.GetRun(ctx, tx.Q(), previousRun)
-						if err != nil {
-							return Outcome{}, err
-						}
-						oldAction, err := store.GetAction(ctx, tx.Q(), oldRun.ActionID)
-						if err != nil {
-							return Outcome{}, err
-						}
-						previousGeneration = oldAction.Generation
+					oldAction, err := store.GetAction(ctx, tx.Q(), oldRun.ActionID)
+					if err != nil {
+						return Outcome{}, err
+					}
+					if previousReport.SpecVersion == 0 {
+						previousReport.SpecVersion = oldAction.TargetSpecVersion
+					}
+					if previousReport.ImplementGeneration == 0 {
+						previousReport.ImplementGeneration = oldAction.Generation
 					}
 				}
-				sameReport := sameTask && !accept && (previousGeneration == 0 || previousGeneration == round.ImplementGeneration)
-				if sameReport || sameTask && accept && previous.ArtifactID == round.ArtifactID && !waitingEvidence || round.RunID != "" && previous.RunID == round.RunID || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
+				// Implement generations restart when a new Task spec becomes active.
+				sameSpec := previousReport.SpecVersion == 0 || previousReport.SpecVersion == round.SpecVersion
+				sameGeneration := previousReport.ImplementGeneration == 0 || previousReport.ImplementGeneration == round.ImplementGeneration
+				sameReport := sameTask && !accept && sameSpec && sameGeneration
+				sameRun := round.RunID != "" && (previous.RunID == round.RunID || previous.SupplementRunID == round.RunID)
+				if sameReport || sameTask && accept && previous.ArtifactID == round.ArtifactID && !waitingEvidence || sameRun || round.AcceptanceID != "" && previous.AcceptanceID == round.AcceptanceID {
 					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "a focused review requires a new real run/result on the sustained Task; earlier runs or acceptances cannot be recounted")
 				}
 			}

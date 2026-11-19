@@ -64,6 +64,51 @@ func TestFrozenSharedReviewVerdictSurvivesTaskContinuationBeforeRecord(t *testin
 	}
 }
 
+func TestSharedReviewRecheckAllowsSameGenerationInNewSpec(t *testing.T) {
+	for _, source := range []string{"report", "supplement"} {
+		t.Run(source, func(t *testing.T) {
+			h, runtime, issue, review, task := frozenSharedReportForTest(t, source)
+			executeSharedReviewForTest(t, h, runtime, review, task, "changes_requested")
+			releaseSharedReviewerForTest(t, h, task)
+			review = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+			original := protocol.SharedReviewInputRound(review.Rounds[0])
+			sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{
+				Action: "resolve", DeliveryID: "pr",
+				Dispositions: []protocol.SharedReviewDisposition{{FindingID: "F1", Action: "fixed", Reason: "Consolidated correction"}},
+			}))
+			recheck := protocol.UpdateSharedDeliveryReviewPayload{Action: "recheck", DeliveryID: "pr", ReviewerTaskID: task}
+			expectWorkCode(t, sharedReviewAction(t, h, issue.IssueID, recheck), protocol.CodeInvalidTransition)
+
+			if op := continueTaskForTest(t, h, task, "Repeat the independent check under the updated instructions"); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			current := h.task(task)
+			spec := h.storedSpec(task, current.SpecVersion)
+			spec.Goal += "; verify the corrected candidate"
+			if op := h.exec(owner, h.env("tasks.update_intent", taskTarget(task), updateIntentPayload{Spec: &spec}, rev(current.ControlRevision)), UpdateIntent{}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			executeSharedReviewForTest(t, h, runtime, review, task, "passed")
+			newer := h.task(task)
+			if newer.SpecVersion <= original.SpecVersion || newer.ImplementGeneration != original.ImplementGeneration {
+				t.Fatal("expected a new spec with the same generation", original, newer)
+			}
+
+			review = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, recheck))
+			review = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+			if !review.Valid || review.Status != "passed" || len(review.Rounds) != 2 {
+				t.Fatal("the new execution did not produce an independent formal review round", review)
+			}
+			old, next := protocol.SharedReviewInputRound(review.Rounds[0]), review.Rounds[1]
+			if old.RunID == "" || old.RunID != original.RunID || old.ArtifactID != original.ArtifactID ||
+				next.RunID == "" || next.RunID == old.RunID || next.TaskID != task || next.SpecVersion != newer.SpecVersion ||
+				next.ImplementGeneration != old.ImplementGeneration || next.ArtifactID != newer.CurrentArtifactID {
+				t.Fatal("original or new execution identity was not preserved", old, next)
+			}
+		})
+	}
+}
+
 func sharedRoundArtifactForTest(source string, round protocol.SharedDeliveryReviewRound) string {
 	if source == "supplement" {
 		return round.SupplementArtifactID
