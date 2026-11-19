@@ -341,7 +341,7 @@ func TestPauseManagerFlushesRetainedEventsBeforeYield(t *testing.T) {
 	}))
 	defer server.Close()
 	r := New(Config{Journal: j, Worker: protocol.WorkerAppServer, Now: clock.Now, IDs: testkit.NewIDGen(clock, 3), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), ServerURL: server.URL, HTTPClient: server.Client(), RetryDelay: time.Millisecond})
-	if err := r.finishPause(t.Context(), as); err != nil {
+	if err := r.finishPause(t.Context(), as, &active{desired: protocol.DesiredPaused}); err != nil {
 		t.Fatal(err)
 	}
 	if len(operations) < 2 || operations[0] != protocol.OpManagerNativeEvent {
@@ -403,5 +403,112 @@ func TestPauseHandoffFinishesAfterExplicitHandback(t *testing.T) {
 	if reports.Load() != 1 {
 		saved, _ := j.Run(t.Context(), as.RunID)
 		t.Fatalf("no pause handoff after explicit handback; reports=%d phase=%s held=%v", reports.Load(), saved.Phase, saved.Held)
+	}
+}
+
+func TestRetainedPausingHeartbeatKeepsControlReachable(t *testing.T) {
+	ctx := t.Context()
+	r, as, _, _ := retainedRunnerFixture(t)
+	if err := r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhasePausing); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.retainRun(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+			t.Error(err)
+			return
+		}
+		var heartbeat protocol.HeartbeatPayload
+		if err := json.Unmarshal(env.Payload, &heartbeat); err != nil || len(heartbeat.Runs) != 0 {
+			t.Error("heartbeat tried to renew the maintenance-retained Run", heartbeat.Runs, err)
+		}
+		result, _ := json.Marshal(protocol.HeartbeatResult{LeaseTTLMillis: 60000})
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: result}})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	r.heartbeat(ctx)
+	select {
+	case <-r.reconcile:
+	default:
+		t.Fatal("retained pause cannot receive later Hello control")
+	}
+	retained, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err != nil || !retained.Fenced || retained.Phase != journal.PhasePausing {
+		t.Fatal("Hello wake released maintenance isolation", retained, err)
+	}
+}
+
+type timeoutPauseObserver struct{ ownedRecoveryWorker }
+
+func (*timeoutPauseObserver) ObserveOwnedWorkerStop(context.Context, harness.WorkerSpec) error {
+	return context.DeadlineExceeded
+}
+
+func TestBlockedPauseObservationAllowsAuthoritativeStop(t *testing.T) {
+	ctx := t.Context()
+	r, _, _, _ := retainedRunnerFixture(t)
+	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "paused-run", LeaseID: "lease", TaskID: "task", Role: protocol.RoleImplement, Desired: protocol.DesiredPaused, PauseHandoffs: true}
+	if err := r.cfg.Journal.AcceptAssignmentFromWorker(ctx, as, "", protocol.WorkerAppServer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.cfg.Journal.NextAttempt(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhasePausing); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.SetThread(ctx, as.RunID, "original-thread"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cfg.Journal.RecordPause(ctx, as.RunID, &protocol.PauseHandoff{RequestID: "pause", IssueID: "issue", IssueRevision: 1, ControlRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	worker := &timeoutPauseObserver{}
+	r.cfg.Workers = worker
+	r.cfg.Workspaces = &ownedRecoveryWorkspace{prepared: Prepared{Dir: t.TempDir(), StateDir: t.TempDir()}}
+	run, err := r.cfg.Journal.Run(ctx, as.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = r.recoverPauseStop(ctx, &active{desired: protocol.DesiredPaused}, run)
+	pending, ok := errors.AsType[*pauseStopPending](err)
+	if !ok || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.deferPauseRetry(as.RunID, pending)
+	r.mu.Unlock()
+	var releases atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+			t.Error(err)
+			return
+		}
+		var result any = map[string]any{}
+		switch env.Operation {
+		case protocol.OpRunnerHello:
+			result = protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{{RunID: as.RunID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped}}}
+		case protocol.OpRunsRelease:
+			releases.Add(1)
+		case protocol.OpRunsYieldPause:
+			t.Error("authoritative Stop was relabelled as a pause receipt")
+		}
+		raw, _ := json.Marshal(result)
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	if err := r.hello(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.wg.Wait()
+	if len(worker.stops) != 1 || worker.stops[0].RunID != as.RunID || worker.stops[0].Thread != run.Thread ||
+		worker.starts != 0 || releases.Load() != 1 {
+		t.Fatalf("Stop did not finalize the original attempt once: stops=%+v starts=%d releases=%d", worker.stops, worker.starts, releases.Load())
 	}
 }

@@ -63,7 +63,7 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 		if ready, e := r.pauseReceiptReady(lifetime, run); e != nil {
 			return e
 		} else if ready {
-			return r.reportPause(lifetime, as)
+			return r.reportPause(lifetime, as, a)
 		}
 		return r.reportManagerStopped(lifetime, as)
 	}
@@ -121,7 +121,7 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	if p, e := r.cfg.Journal.Pause(receiptCtx, as.RunID); e != nil {
 		return e
 	} else if p != nil && as.PauseHandoffs && !run.Held {
-		return r.finishPause(receiptCtx, as)
+		return r.finishPause(receiptCtx, as, a)
 	}
 	last, readErr := r.cfg.Journal.LastManagerEvent(receiptCtx, as.RunID)
 	if readErr != nil {

@@ -94,7 +94,7 @@ func TestAcceptanceEvidenceLegacyWriterRejectsJournal18BeforeBusinessRead(t *tes
 }
 
 func TestAcceptanceEvidenceWriterMigrationPreservesHistoricalPendingWork(t *testing.T) {
-	for _, version := range []int{15, 16, 17, 18} {
+	for _, version := range []int{15, 16, 17, 18, 27} {
 		t.Run(fmt.Sprintf("journal%d", version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "journal.db")
 			db, err := sql.Open("sqlite", path)

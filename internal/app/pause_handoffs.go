@@ -61,6 +61,11 @@ func (YieldPause) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, er
 	if expected == nil || *expected != p.PauseHandoff {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run has no matching negotiated pause handoff")
 	}
+	// Serialize the first stop receipt with takeover. The committed receipt
+	// path above remains available after its lease has already been released.
+	if desiredFor(rc.run, rc.action, rc.task) == protocol.DesiredHeld {
+		return Outcome{}, commandDiagnostic(protocol.CodeInvalidTransition, "pause receipt awaits the owner's handback", map[string]any{"desired_state": protocol.DesiredHeld})
+	}
 	if err := endRun(ctx, x, tx, rc.run, protocol.RunFinished); err != nil {
 		return Outcome{}, err
 	}

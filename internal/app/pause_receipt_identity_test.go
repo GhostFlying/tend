@@ -52,3 +52,45 @@ func TestCommittedPauseReceiptRejectsChangedScope(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstPauseReceiptWaitsForOwnerHandback(t *testing.T) {
+	h, runtime := pendingIssueOwnerHarness(t)
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityPauseHandoffs)
+	issue := issueAdmissionStatus(t, h, createBacklogTestIssue(t, h), protocol.IssueTodo, &protocol.IssueOwnerRequest{CategoryID: "implementer"})
+	as := admissionClaim(t, h, runtime)
+	if as == nil {
+		t.Fatal("execution was not assigned")
+	}
+	issueAdmissionStatus(t, h, admissionCurrent(t, h, issue.IssueID), protocol.IssueBacklog, nil)
+	run := h.run(as.RunID)
+	if run.PauseHandoff == nil {
+		t.Fatal("pause handoff was not recorded")
+	}
+	env := h.env(protocol.OpRunsYieldPause, runTarget(as.RunID), protocol.YieldPausePayload{PauseHandoff: *run.PauseHandoff, ThreadID: "original-native-thread"}, nil)
+	setControl := func(mode protocol.ControlMode) {
+		t.Helper()
+		task := h.task(as.TaskID)
+		op := h.exec(owner, h.env("control.set_mode", taskTarget(as.TaskID), protocol.SetControlModePayload{Mode: mode}, rev(task.ControlRevision)), SetControlMode{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	setControl(protocol.ControlHumanControl)
+	heldRun, heldLease := h.run(as.RunID), h.lease(as.RunID)
+	principal := runPrincipal(as.RunID, as.Role)
+	rejected := h.exec(principal, env, YieldPause{})
+	if rejected.Status != protocol.OpFailed || rejected.Error == nil ||
+		rejected.Error.Code != protocol.CodeInvalidTransition ||
+		!reflect.DeepEqual(h.run(as.RunID), heldRun) || h.lease(as.RunID) != heldLease {
+		t.Fatal("first receipt changed the Run during owner control", rejected)
+	}
+	setControl(protocol.ControlManaged)
+	if op := h.exec(principal, env, YieldPause{}); op.Status != protocol.OpSucceeded {
+		t.Fatal("handback did not admit the original receipt", op)
+	}
+	setControl(protocol.ControlHumanControl)
+	if op := h.exec(principal, env, YieldPause{}); op.Status != protocol.OpSucceeded ||
+		h.lease(as.RunID).Status != store.LeaseReleased {
+		t.Fatal("owner control hid the acknowledgement of a prior commit", op)
+	}
+}
