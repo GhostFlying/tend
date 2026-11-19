@@ -72,7 +72,7 @@ func hashEvidence(ctx context.Context, path string) (int64, string, error) {
 
 func hashEvidenceBytes(ctx context.Context, f *os.File, st os.FileInfo) (int64, string, error) {
 	sum := sha256.New()
-	n, err := io.Copy(sum, transferReader{ctx: ctx, r: f})
+	n, err := io.Copy(sum, newTransferReader(ctx, f))
 	if err != nil {
 		return 0, "", err
 	}
@@ -207,7 +207,7 @@ func (e *acceptanceEvidence) seal(ctx context.Context, binding string, input jso
 				}
 				defer src.Close()
 				sum := sha256.New()
-				n, err := io.Copy(io.MultiWriter(dst, sum), transferReader{ctx: ctx, r: src})
+				n, err := io.Copy(io.MultiWriter(dst, sum), newTransferReader(ctx, src))
 				if err != nil {
 					return err
 				}

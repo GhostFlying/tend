@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -23,6 +24,47 @@ func (e *pauseStopPending) Error() string { return e.err.Error() }
 func (e *pauseStopPending) Unwrap() error { return e.err }
 
 var errPauseResultTimeout = errors.New("runner: paused result reconciliation timed out")
+
+type pauseResultActivityKey struct{}
+
+type pauseResultActivity struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (a *pauseResultActivity) record() {
+	a.mu.Lock()
+	a.last = time.Now()
+	a.mu.Unlock()
+}
+
+// boundPauseResultIdle limits time without forward progress. The same attempt
+// may take longer when evidence is still being read or transmitted.
+func boundPauseResultIdle(ctx context.Context, timeout time.Duration) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	activity := &pauseResultActivity{last: time.Now()}
+	var timer *time.Timer
+	activity.mu.Lock()
+	timer = time.AfterFunc(timeout, func() {
+		activity.mu.Lock()
+		defer activity.mu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		if remaining := timeout - time.Since(activity.last); remaining > 0 {
+			timer.Reset(remaining)
+			return
+		}
+		cancel(errPauseResultTimeout)
+	})
+	activity.mu.Unlock()
+	return context.WithValue(ctx, pauseResultActivityKey{}, activity), func() {
+		cancel(nil)
+		activity.mu.Lock()
+		timer.Stop()
+		activity.mu.Unlock()
+	}
+}
 
 func (r *Runner) deferOwnedPauseStop(ctx context.Context, a *active, run journal.Run, stopErr error) error {
 	as := run.Assignment
@@ -95,11 +137,12 @@ func (r *Runner) recoverPauseStop(ctx, runCtx context.Context, a *active, run jo
 	}
 	// A native result may already be durable even though closure previously
 	// prevented it from entering worker_done. Settle it before yielding.
-	// Stop can interrupt result reconciliation without cancelling the
+	// Stop and takeover can interrupt this check without cancelling the
 	// physical-stop checkpoint above or the eventual terminal receipt.
-	// Pause observers do not renew leases, so bound this attempt separately.
-	resultCtx, cancel := context.WithTimeoutCause(runCtx, r.cfg.RequestTimeout, errPauseResultTimeout)
-	defer cancel()
+	controlCtx, release := r.withResultControl(runCtx, a)
+	defer release()
+	resultCtx, stopIdle := boundPauseResultIdle(controlCtx, r.cfg.RequestTimeout)
+	defer stopIdle()
 	recovered, err := r.reconcileAcceptanceVerdict(resultCtx, as)
 	if !recovered {
 		recovered, err = r.reconcileImplementationResult(resultCtx, as)
@@ -110,8 +153,8 @@ func (r *Runner) recoverPauseStop(ctx, runCtx context.Context, a *active, run jo
 	if r.stopRequested(runCtx, a) {
 		return false, nil
 	}
-	if errors.Is(context.Cause(resultCtx), errPauseResultTimeout) {
-		return false, &pauseStopPending{errPauseResultTimeout}
+	if cause := context.Cause(resultCtx); errors.Is(cause, errPauseResultTimeout) || errors.Is(cause, errHeld) {
+		return false, &pauseStopPending{cause}
 	}
 	if err != nil {
 		if _, failedTurn := errors.AsType[*stepError](err); !failedTurn {

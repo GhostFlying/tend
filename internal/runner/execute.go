@@ -781,6 +781,24 @@ func (r *Runner) deferPauseCompletion(a *active) bool {
 	return a.pauseOnly
 }
 
+// withResultControl extends takeover cancellation to result recovery and
+// workspace collection. Stop already cancels the parent Run context.
+func (r *Runner) withResultControl(ctx context.Context, a *active) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	r.mu.Lock()
+	a.stopCollection = cancel
+	if a.desired == protocol.DesiredHeld {
+		cancel(errHeld)
+	}
+	r.mu.Unlock()
+	return ctx, func() {
+		cancel(nil)
+		r.mu.Lock()
+		a.stopCollection = nil
+		r.mu.Unlock()
+	}
+}
+
 // completeWork resumes a known outcome after the owner returns control.
 func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignment, a *active, body json.RawMessage) error {
 	execution, resolveErr := r.resolveExecution(ctx, as)
@@ -813,24 +831,12 @@ func (r *Runner) completeWork(ctx, runCtx context.Context, as protocol.Assignmen
 		return r.finish(ctx, as, journal.PhaseSubmitting, protocol.OpAcceptancesSubmit, verdict)
 	}
 	if needsWorkspaceCollection(as) {
-		collectCtx, cancel := context.WithCancelCause(runCtx)
-		defer func() {
-			cancel(nil)
-			r.mu.Lock()
-			a.stopCollection = nil
-			r.mu.Unlock()
-		}()
-		r.mu.Lock()
-		a.stopCollection = cancel
-		held := a.desired == protocol.DesiredHeld
-		r.mu.Unlock()
-		if held {
-			return errHeld
-		}
-		if cause := context.Cause(collectCtx); cause != nil {
+		var release func()
+		runCtx, release = r.withResultControl(runCtx, a)
+		defer release()
+		if cause := context.Cause(runCtx); cause != nil {
 			return cause
 		}
-		runCtx = collectCtx
 	}
 	artifact := protocol.ArtifactPayload{}
 	if res.Result != nil {

@@ -46,7 +46,7 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 	}
 	defer f.Close()
 	sum := sha256.New()
-	if _, err := io.Copy(sum, transferReader{ctx: ctx, r: f}); err != nil {
+	if _, err := io.Copy(sum, newTransferReader(ctx, f)); err != nil {
 		return protocol.ArtifactFile{}, err
 	}
 	digest := hex.EncodeToString(sum.Sum(nil))
@@ -85,6 +85,14 @@ func (r *Runner) uploadFile(ctx context.Context, as protocol.Assignment, p Prepa
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, f)
 	if err != nil {
 		return protocol.ArtifactFile{}, err
+	}
+	// Count reads made by the transport as it consumes the sealed body.
+	// Ordinary uploads keep the existing context and request body.
+	if reader := newTransferReader(ctx, f); reader.activity != nil {
+		req.Body = struct {
+			io.Reader
+			io.Closer
+		}{reader, f}
 	}
 	req.Header.Set("Authorization", "Bearer "+as.RunToken)
 	req.Header.Set(headerRun, as.RunID)
@@ -233,7 +241,7 @@ func (r *Runner) downloadRetainedFileFrom(ctx context.Context, as protocol.Assig
 	}
 	defer os.Remove(f.Name())
 	digest := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(f, digest), io.LimitReader(transferReader{ctx: ctx, r: resp.Body}, file.Size+1))
+	n, copyErr := io.Copy(io.MultiWriter(f, digest), io.LimitReader(newTransferReader(ctx, resp.Body), file.Size+1))
 	if copyErr == nil {
 		copyErr = f.Sync()
 	}
@@ -295,13 +303,23 @@ func assignmentFile(as protocol.Assignment, id string) (protocol.ArtifactFile, s
 // File transfers follow the caller's run lifetime rather than the short RPC
 // deadline. Check cancellation during local hashing as well as network IO.
 type transferReader struct {
-	ctx context.Context
-	r   io.Reader
+	ctx      context.Context
+	r        io.Reader
+	activity *pauseResultActivity
+}
+
+func newTransferReader(ctx context.Context, r io.Reader) transferReader {
+	activity, _ := ctx.Value(pauseResultActivityKey{}).(*pauseResultActivity)
+	return transferReader{ctx: ctx, r: r, activity: activity}
 }
 
 func (r transferReader) Read(p []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return r.r.Read(p)
+	n, err := r.r.Read(p)
+	if n > 0 && r.activity != nil {
+		r.activity.record()
+	}
+	return n, err
 }
