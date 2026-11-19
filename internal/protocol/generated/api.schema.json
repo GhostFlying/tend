@@ -12038,6 +12038,9 @@
     "IssueTurnProcess": {
       "additionalProperties": false,
       "properties": {
+        "active_tool": {
+          "type": "string"
+        },
         "ended_at": {
           "type": "integer"
         },
@@ -12068,6 +12071,9 @@
         },
         "started_at": {
           "type": "integer"
+        },
+        "state": {
+          "$ref": "#/definitions/MessageState"
         }
       },
       "required": [

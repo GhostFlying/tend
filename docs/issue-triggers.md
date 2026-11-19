@@ -49,6 +49,8 @@ tend event watch --issue "$ISSUE_ID" --json
 tend schedule show "$RULE_ID" --json
 ```
 
+`--view readable` 保留过程的已知状态、时间和正在运行的工具名称。按需通过 `tend conversation block` 查看工具详情。活动游标被拒绝时，省略 `--since`、`--from` 和 `--through` 重新读取当前首屏。
+
 `--notification` 使用活动条目的 `position` 查询交付观察、共享审阅或任务完成事件关联的通知。
 输出包含原始事件 ID、已有批次、接收与开始证据、结算及记录的等待原因。
 合并窗口使用该事件的显式关联。缺少关联或回执时显示未知。

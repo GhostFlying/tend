@@ -111,10 +111,14 @@ export function IssueDetails({
           void reads.activity.refresh();
       } else reads.refresh();
     });
-    const reset = live.snapshot.subscribe(() => reads.refresh());
+    const refreshSnapshot = live.snapshot.subscribe(() => reads.refresh());
+    const reset = live.subscribeReload((mode) => {
+      if (mode === "all") void reads.activity.rebuild();
+    });
     return () => {
       stop();
       reset();
+      refreshSnapshot();
       remember();
       stopActivity();
       reads.stop();

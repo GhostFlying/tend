@@ -225,9 +225,13 @@ try {
   ledgerSeq++;
   issueTitle = "Issue rebuilt after reset";
   const fresh = page.waitForResponse(origin + "/api/v1/events");
+  const history = page.waitForResponse((response) =>
+    response.url().startsWith(origin + historyPath),
+  );
   for (const stream of streams) stream.end(`event: reset\ndata: {"event_seq":${ledgerSeq}}\n\n`);
-  await fresh;
+  const [, rebuiltHistory] = await Promise.all([fresh, history]);
   await board.getByRole("button", { name: issueTitle, exact: true }).waitFor();
+  assert.equal(rebuiltHistory.status(), 200);
   assert(count(historyPath) > quietReads[1], "reset rebuilds the conversation from its source");
 
   await navigate(page, "/diagnostics/main");

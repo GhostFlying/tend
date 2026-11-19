@@ -4498,6 +4498,7 @@ export interface ToolUseView {
  * via the `definition` "IssueTurnProcess".
  */
 export interface IssueTurnProcess {
+  active_tool?: string;
   ended_at?: number;
   error?: string;
   has_tools?: boolean;
@@ -4505,6 +4506,7 @@ export interface IssueTurnProcess {
   more: boolean;
   next?: number;
   started_at?: number;
+  state?: MessageState;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

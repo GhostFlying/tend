@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { ApiError } from "../api/client.ts";
 import type { IssueActivityPage, IssueActivityEntry } from "../api/generated/api.ts";
 import { IssueActivityRead } from "./activity.ts";
 const entry = (id: string, position: number, title = id): IssueActivityEntry => ({
@@ -14,6 +15,61 @@ const page = (items: IssueActivityEntry[], more = false, next_before = 0): Issue
   more,
   next_before,
   event_seq: 10,
+});
+
+test("a rejected activity cursor rebuilds from the authoritative head and fences old history", async () => {
+  const requests: URLSearchParams[] = [];
+  let ledger = 300;
+  let finishEarlier: (value: IssueActivityPage) => void = () => {};
+  const read = new IssueActivityRead({
+    get: async <T>(path: string) => {
+      const query = new URL(path, "https://example.test").searchParams;
+      requests.push(query);
+      if (query.has("before"))
+        return (await new Promise<IssueActivityPage>((resolve) => {
+          finishEarlier = resolve;
+        })) as T;
+      if (Number(query.get("since")) > ledger)
+        throw new ApiError(400, { code: "invalid_request", message: "invalid activity cursor" });
+      return {
+        ...page([entry(String(ledger), ledger)], ledger === 300, ledger),
+        readable: true,
+        event_seq: ledger,
+      } as T;
+    },
+  });
+  try {
+    await read.open("one");
+    const history = read.earlier();
+    ledger = 100;
+    await read.refresh();
+    finishEarlier(page([entry("stale", 99)]));
+    await history;
+    expect(requests.map((query) => query.get("since"))).toEqual([null, null, "300", null]);
+    expect(read.state.get().value?.items?.map((row) => row.id)).toEqual(["100"]);
+    expect(read.state.get().value?.event_seq).toBe(100);
+  } finally {
+    read.close();
+  }
+});
+
+test("an authoritative reset requests a fresh head even when the old cursor is valid", async () => {
+  let latest = "old";
+  const read = new IssueActivityRead({
+    get: async <T>(path: string) =>
+      ({
+        ...page(path.includes("since=") ? [] : [entry(latest, 1)]),
+        readable: true,
+      }) as T,
+  });
+  try {
+    await read.open("one");
+    latest = "rebuilt";
+    await read.rebuild();
+    expect(read.state.get().value?.items?.map((row) => row.id)).toEqual(["rebuilt"]);
+  } finally {
+    read.close();
+  }
 });
 
 test("new activity retains loaded older records and replaces an existing streamed row", async () => {
