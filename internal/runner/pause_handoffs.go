@@ -91,7 +91,7 @@ func (r *Runner) recoverPauseStop(ctx context.Context, a *active, run journal.Ru
 	} else if wait != nil {
 		return r.finishExternalWait(ctx, as)
 	}
-	return r.finishPause(ctx, as)
+	return r.finishPause(ctx, as, a)
 }
 
 func (r *Runner) pauseStopDesired(a *active) protocol.RunDesired {
@@ -166,7 +166,7 @@ func (r *Runner) consumePauseRetries() {
 	}
 }
 
-func (r *Runner) finishPause(ctx context.Context, as protocol.Assignment) error {
+func (r *Runner) finishPause(ctx context.Context, as protocol.Assignment, a *active) error {
 	p, err := r.cfg.Journal.Pause(ctx, as.RunID)
 	if err != nil {
 		return err
@@ -188,12 +188,15 @@ func (r *Runner) finishPause(ctx context.Context, as protocol.Assignment) error 
 	if err := r.cfg.Journal.Finish(ctx, as.RunID, journal.PhaseReleasing, journal.Request{RunID: as.RunID, Envelope: *env}); err != nil {
 		return err
 	}
-	return r.reportPause(ctx, as)
+	return r.reportPause(ctx, as, a)
 }
 
 // reportPause retains every original receipt until it has its own ACK. A pause
 // never runs workspace completion/cleanup and never replaces unknown work.
-func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error {
+func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment, a *active) error {
+	if r.pauseStopDesired(a) == protocol.DesiredHeld {
+		return &pauseStopPending{errHeld}
+	}
 	requests, err := r.cfg.Journal.Requests(ctx)
 	if err != nil {
 		return err
@@ -218,7 +221,21 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 		}
 		return &completionPending{err}
 	}
-	op, err := r.send(ctx, runCredential(as), &pause.Envelope)
+	var op protocol.Operation
+	err = r.retry(ctx, func() error {
+		switch r.pauseStopDesired(a) {
+		case "":
+			return errFenced
+		case protocol.DesiredHeld:
+			return errHeld
+		}
+		var sendErr error
+		op, sendErr = r.sendOnce(ctx, runCredential(as), &pause.Envelope)
+		return sendErr
+	})
+	if errors.Is(err, errHeld) || pauseReceiptAwaitingHandback(err) {
+		return &pauseStopPending{errHeld}
+	}
 	if err != nil || op.Status != protocol.OpSucceeded {
 		return &completionPending{errors.Join(err, errors.New("runner: pause receipt awaits settlement"))}
 	}
@@ -241,8 +258,19 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment) error 
 	return r.finishJournal(ctx, as.RunID)
 }
 
+// A takeover can race the network request even after the last local control
+// check. The server can defer the first receipt without consuming its identity.
+func pauseReceiptAwaitingHandback(err error) bool {
+	var details struct {
+		Desired protocol.RunDesired `json:"desired_state"`
+	}
+	pe, ok := errors.AsType[*protocol.Error](err)
+	return ok && pe.Code == protocol.CodeInvalidTransition &&
+		json.Unmarshal(pe.Details, &details) == nil && details.Desired == protocol.DesiredHeld
+}
+
 func (r *Runner) pauseReceiptReady(ctx context.Context, run journal.Run) (bool, error) {
-	if !run.Assignment.PauseHandoffs || run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed || run.Held {
+	if !run.Assignment.PauseHandoffs || run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed {
 		return false, nil
 	}
 	p, err := r.cfg.Journal.Pause(ctx, run.Assignment.RunID)

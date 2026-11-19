@@ -778,15 +778,22 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 			r.start(ctx, as, sent)
 		case v.Verdict == protocol.VerdictContinue:
-			if run.Phase == journal.PhasePausing && (v.PauseHandoff == nil || v.Desired != protocol.DesiredPaused) {
-				if v.Desired == protocol.DesiredHeld {
+			if v.Desired == protocol.DesiredHeld {
+				pauseReporting, err := r.pauseReceiptReady(ctx, run)
+				if err != nil {
+					return err
+				}
+				if run.Phase == journal.PhasePausing || pauseReporting {
 					if a := r.lookup(v.RunID); a != nil {
 						r.applyDesired(ctx, a, v.Desired, sent)
 					}
 					r.mu.Lock()
 					r.schedulePauseRetry(v.RunID)
 					r.mu.Unlock()
+					continue
 				}
+			}
+			if run.Phase == journal.PhasePausing && (v.PauseHandoff == nil || v.Desired != protocol.DesiredPaused) {
 				continue
 			}
 			if err := r.authorizeRetainedSettlement(ctx, v.RunID, true); err != nil {
@@ -802,7 +809,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			if run.Phase == journal.PhaseWorkerDone || run.Phase == journal.PhaseSubmitting || run.Phase == journal.PhaseReleasing {
 				r.start(ctx, as, sent)
 			} else if a := r.lookup(v.RunID); a != nil {
-				a.cancel(errStopped)
+				r.applyDesired(ctx, a, protocol.DesiredStopped, sent)
 			} else if err := r.dropOrRelease(ctx, run, "stopped by tend: "+v.Reason); err != nil {
 				return err
 			}
@@ -923,7 +930,8 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 	}
 	pauseOnly := journaled.Phase == journal.PhasePausing
 	retry := r.pauseRetries[runID]
-	if retry.blocked || retry.due.After(r.cfg.Now()) || pauseOnly && as.Desired != protocol.DesiredPaused {
+	if pauseOnly && (retry.blocked || as.Desired != protocol.DesiredPaused) ||
+		as.Desired != protocol.DesiredStopped && retry.due.After(r.cfg.Now()) {
 		r.mu.Unlock()
 		return
 	}
@@ -1080,7 +1088,10 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	// reachable through Hello even after the original executor has exited.
 	if held, err := r.cfg.Journal.Runs(ctx); err == nil {
 		for _, run := range held {
-			if run.Fenced && run.Phase != journal.PhasePausing {
+			r.mu.Lock()
+			pauseBlocked := run.Phase == journal.PhasePausing && r.pauseRetries[run.Assignment.RunID].blocked
+			r.mu.Unlock()
+			if run.Fenced || pauseBlocked {
 				r.requestReconcile()
 				break
 			}

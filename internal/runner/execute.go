@@ -93,7 +93,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 			if ready, e := r.pauseReceiptReady(ctx, run); e != nil {
 				return e
 			} else if ready {
-				return r.reportPause(ctx, as)
+				return r.reportPause(ctx, as, a)
 			}
 			err = r.awaitCompletedStop(ctx, runCtx, as, a)
 			if err == nil {
@@ -193,7 +193,7 @@ func (r *Runner) execute(ctx, runCtx context.Context, runID string, a *active) e
 						continue
 					}
 				}
-				return r.finishPause(ctx, as)
+				return r.finishPause(ctx, as, a)
 			}
 			// The worker was stopped for a pause or a takeover; the next
 			// attempt waits until tend wants the run again.

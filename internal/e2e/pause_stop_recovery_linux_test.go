@@ -78,7 +78,10 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 
 	var mu sync.Mutex
 	var envelopes []protocol.Envelope
-	var holdReplay, failNextEventUpload, eventUploadFailed atomic.Bool
+	var holdReplay, failNextEventUpload, eventUploadFailed, holdBeforeReceipt atomic.Bool
+	var receiptHoldHellos atomic.Int64
+	firstUpload := make(chan struct{})
+	releaseUpload := make(chan struct{})
 	holdReplay.Store(restart)
 	net := &network{before: func(req *http.Request) error {
 		if req.Body == nil {
@@ -94,7 +97,18 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return err
 		}
+		if env.Operation == protocol.OpRunnerHello && holdBeforeReceipt.Load() {
+			receiptHoldHellos.Add(1)
+		}
 		if env.Operation == protocol.OpRunnerEvents && failNextEventUpload.CompareAndSwap(true, false) {
+			close(firstUpload)
+			if !restart {
+				select {
+				case <-releaseUpload:
+				case <-req.Context().Done():
+					return req.Context().Err()
+				}
+			}
 			eventUploadFailed.Store(true)
 			return errors.New("injected disconnect while flushing original Run events")
 		}
@@ -226,19 +240,19 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		t.Error("sent physical stop while the original child was alive", envelopes)
 	}
 	mu.Unlock()
-	if !restart {
-		setControl := func(mode protocol.ControlMode) {
-			t.Helper()
-			task := srv.task(taskID)
-			raw, err := json.Marshal(protocol.SetControlModePayload{Mode: mode})
-			if err != nil {
-				t.Fatal(err)
-			}
-			env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "control.set_mode", Target: protocol.Target{Type: "task", ID: taskID}, Payload: raw, ExpectedControlRevision: &task.ControlRevision}
-			if op, err := srv.app.Execute(ctx, owner, env, app.SetControlMode{}); err != nil || op.Status != protocol.OpSucceeded {
-				t.Fatal(op, err)
-			}
+	setControl := func(mode protocol.ControlMode) {
+		t.Helper()
+		task := srv.task(taskID)
+		raw, err := json.Marshal(protocol.SetControlModePayload{Mode: mode})
+		if err != nil {
+			t.Fatal(err)
 		}
+		env := &protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "control.set_mode", Target: protocol.Target{Type: "task", ID: taskID}, Payload: raw, ExpectedControlRevision: &task.ControlRevision}
+		if op, err := srv.app.Execute(ctx, owner, env, app.SetControlMode{}); err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal(op, err)
+		}
+	}
+	if !restart {
 		setControl(protocol.ControlHumanControl)
 		eventually(t, "pause reconciliation sees the owner's hold", func() bool {
 			clock.Advance(25 * time.Millisecond)
@@ -272,6 +286,37 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		reaped, err := unix.Wait4(pid, &status, unix.WNOHANG, nil)
 		return err == nil && reaped == pid
 	})
+	if !restart {
+		eventually(t, "the original event upload reaches the transport after physical close", func() bool {
+			clock.Advance(25 * time.Millisecond)
+			select {
+			case <-firstUpload:
+				return true
+			default:
+				return false
+			}
+		})
+		setControl(protocol.ControlHumanControl)
+		holdBeforeReceipt.Store(true)
+		close(releaseUpload)
+		eventually(t, "the releasing Run reconciles through repeated Hello during takeover", func() bool {
+			clock.Advance(25 * time.Millisecond)
+			progress := readIssue().Pause
+			if progress == nil || progress.Pending != 1 || progress.Stopped != 0 ||
+				workerQuestionLease(t, srv, as.RunID).Status == store.LeaseReleased {
+				t.Fatal("the first pause receipt settled during owner control", progress)
+			}
+			return eventUploadFailed.Load() && receiptHoldHellos.Load() >= 2
+		})
+		mu.Lock()
+		sent := len(envelopes)
+		mu.Unlock()
+		if sent != 0 {
+			t.Fatalf("runner submitted the first pause receipt during takeover: %d requests", sent)
+		}
+		holdBeforeReceipt.Store(false)
+		setControl(protocol.ControlManaged)
+	}
 	eventually(t, "the first event upload fails after physical closure", func() bool {
 		clock.Advance(25 * time.Millisecond)
 		return eventUploadFailed.Load()
