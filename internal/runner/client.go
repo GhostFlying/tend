@@ -125,6 +125,10 @@ func (c *client) do(ctx context.Context, cred credential, env *protocol.Envelope
 	}
 	defer resp.Body.Close()
 	c.reached(ctx)
+	return decodeRPCResponse(resp)
+}
+
+func decodeRPCResponse(resp *http.Response) (protocol.Operation, error) {
 	var out rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return protocol.Operation{}, &transportError{fmt.Errorf("decode response (status %d): %w", resp.StatusCode, err)}

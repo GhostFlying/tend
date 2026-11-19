@@ -442,6 +442,151 @@ func TestRetainedPausingHeartbeatKeepsControlReachable(t *testing.T) {
 	}
 }
 
+type blockingPauseObserver struct {
+	ownedRecoveryWorker
+	entered, proceed chan struct{}
+}
+
+func (w *blockingPauseObserver) ObserveOwnedWorkerStop(ctx context.Context, _ harness.WorkerSpec) error {
+	close(w.entered)
+	select {
+	case <-w.proceed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestPauseSettlesStopFromPreviousExecutorHeartbeat(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		observing bool
+	}{
+		{name: "during pause observation", observing: true},
+		{name: "between executors"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+			defer cancel()
+			r, as, _, _, _ := implementationReconcileFixture(t)
+			worker := &blockingPauseObserver{entered: make(chan struct{}), proceed: make(chan struct{})}
+			r.cfg.Workers = worker
+			pause := &protocol.PauseHandoff{RequestID: "pause", IssueID: "issue", IssueRevision: 2, ControlRevision: 1}
+			if err := r.cfg.Journal.RecordPause(ctx, as.RunID, pause); err != nil {
+				t.Fatal(err)
+			}
+			requested, deliver, received := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			finals := make(chan protocol.Envelope, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+				var env protocol.Envelope
+				if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+					t.Error(err)
+					return
+				}
+				var result any
+				switch env.Operation {
+				case protocol.OpRunnerHeartbeat:
+					var hb protocol.HeartbeatPayload
+					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
+						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						t.Error("previous executor heartbeat lost the original lease", hb.Runs, err)
+						return
+					}
+					close(requested)
+					select {
+					case <-deliver:
+					case <-q.Context().Done():
+						return
+					}
+					result = protocol.HeartbeatResult{LeaseTTLMillis: 60000, Runs: []protocol.LeaseState{
+						{RunID: as.RunID, Desired: protocol.DesiredStopped},
+					}}
+				case protocol.OpRunnerHello:
+					var hello protocol.HelloPayload
+					if err := json.Unmarshal(env.Payload, &hello); err != nil || len(hello.Held) != 1 ||
+						hello.Held[0].RunID != as.RunID || hello.Held[0].LeaseID != as.LeaseID {
+						t.Error("Stop reconciliation lost the original lease", hello.Held, err)
+						return
+					}
+					result = protocol.HelloResult{LeaseTTLMillis: 60000, Runs: []protocol.RunVerdict{
+						{RunID: as.RunID, Verdict: protocol.VerdictStop, Desired: protocol.DesiredStopped},
+					}}
+				case protocol.OpRunsYieldPause, protocol.OpRunsRelease, protocol.OpRunsSubmitArtifact:
+					finals <- env
+				}
+				raw, _ := json.Marshal(result)
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: raw}})
+			}))
+			defer func() {
+				cancel()
+				server.Close()
+				r.wg.Wait()
+			}()
+			r.c.base, r.c.http = server.URL, server.Client()
+
+			previousCtx, previousCancel := context.WithCancelCause(ctx)
+			defer previousCancel(nil)
+			r.active[as.RunID] = &active{as: as, ctx: previousCtx, cancel: previousCancel, desired: protocol.DesiredPaused}
+			go func() { r.heartbeat(ctx); close(received) }()
+			select {
+			case <-requested:
+			case <-ctx.Done():
+				t.Fatal("previous executor did not send its heartbeat")
+			}
+			r.mu.Lock()
+			delete(r.active, as.RunID)
+			r.mu.Unlock()
+			if parked, err := r.cfg.Journal.TryBeginPauseStop(ctx, as.RunID, 1); err != nil || !parked {
+				t.Fatal("original attempt did not park", parked, err)
+			}
+			if tc.observing {
+				paused := as
+				paused.Desired = protocol.DesiredPaused
+				r.start(ctx, paused, r.cfg.Now())
+				select {
+				case <-worker.entered:
+				case <-ctx.Done():
+					t.Fatal("pause observer did not start")
+				}
+			}
+			close(deliver)
+			select {
+			case <-received:
+			case <-ctx.Done():
+				t.Fatal("Stop did not reach the runner")
+			}
+			close(worker.proceed)
+			r.wg.Wait()
+			select {
+			case <-r.reconcile:
+			default:
+				t.Fatal("in-flight Stop did not request authoritative reconciliation")
+			}
+			if len(finals) != 0 {
+				t.Fatal("created a final request before reconciling Stop")
+			}
+			if err := r.hello(ctx); err != nil {
+				t.Fatal(err)
+			}
+			r.wg.Wait()
+			if worker.starts != 0 || len(finals) != 1 {
+				t.Fatal("Stop did not settle the original Run exactly once", worker.starts, len(finals))
+			}
+			env := <-finals
+			if env.Operation != protocol.OpRunsRelease || env.Target.ID != as.RunID {
+				t.Fatal("Stop did not follow the original Run release path", env)
+			}
+			wantStops := 1
+			if tc.observing {
+				wantStops = 0
+			}
+			if len(worker.stops) != wantStops {
+				t.Fatal("Stop did not preserve existing physical proof", worker.stops)
+			}
+		})
+	}
+}
+
 type timeoutPauseObserver struct{ ownedRecoveryWorker }
 
 func (*timeoutPauseObserver) ObserveOwnedWorkerStop(context.Context, harness.WorkerSpec) error {

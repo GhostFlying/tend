@@ -1156,15 +1156,28 @@ func (r *Runner) heartbeat(ctx context.Context) {
 			r.cfg.Log.ErrorContext(ctx, "pause control not journaled", "run_id", s.RunID, "err", err)
 			continue
 		}
+		if s.Desired == protocol.DesiredStopped {
+			// This response can outlive the executor that sent the lease
+			// reference. Preserve Stop even if its replacement exits before
+			// settlement or there is no executor during the handoff.
+			r.mu.Lock()
+			a := r.active[s.RunID]
+			if a != nil {
+				a.reconcileOnExit = true
+			}
+			r.mu.Unlock()
+			if a == nil {
+				r.requestReconcile()
+			} else {
+				r.applyDesired(ctx, a, s.Desired, sent)
+			}
+			continue
+		}
 		a := r.lookup(s.RunID)
 		if a == nil {
 			continue
 		}
 		if !s.Renewed {
-			if s.Desired == protocol.DesiredStopped {
-				r.applyDesired(ctx, a, s.Desired, sent)
-				continue
-			}
 			if r.authorizedDeadline(s.RunID, time.Time{}).After(r.cfg.Now()) {
 				continue
 			}
