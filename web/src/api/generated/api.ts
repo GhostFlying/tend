@@ -4283,6 +4283,8 @@ export interface IssueActivityPage {
   items: IssueActivityEntry[] | null;
   more: boolean;
   next_before?: number;
+  readable?: boolean;
+  removed?: string[];
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4498,6 +4500,7 @@ export interface ToolUseView {
 export interface IssueTurnProcess {
   ended_at?: number;
   error?: string;
+  has_tools?: boolean;
   items: IssueConversationItem[] | null;
   more: boolean;
   next?: number;

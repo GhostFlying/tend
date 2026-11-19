@@ -2623,6 +2623,8 @@ Issue block 的 `process` 是原 background batch/thread/turn 的只读公开工
 
 公开 process 的继续读取仅由实现其独立 cursor 的 Issue activity 消费者提供；通用会话继续使用普通回复分页，不暴露无法推进的 process-only 按钮。整轮结束取本次处理区间首个已确认的持久消息终态转换，不使用可重复写入的 `main_turns.updated_at`。新处理或不确定状态开启新区间；恢复等待、仍有活跃 native turn 或缺少终态事实时不推测结束。重复/晚到终态和历史重读不改变已确认用时。此节原编号与既有 D249 冲突，同步最新 main 后独立编号为 D256，既有 D249、D254 和 D255 保持原义。
 
+Issue 讨论与进展可用 `view=readable` 读取最近 50 条活动，按 JSON 字节预算切页，并保留单条超预算活动的完整内容。该投影只读取正文、里程碑、成果入口和公开过程摘要。Web 在正文呈现后有限预取原详情，显式展开复用已有请求。回到已读范围时，按事件水位合并新增、变更与撤回，用原账本位置保留翻页及阅读锚点。详见 [实施计划](plans/issue-activity-first-paint.md)。
+
 ## D257：Issue 负责人当前回合的紧急投递
 
 `issues.steer_owner` 以明确的 Issue revision、assignment epoch、owner Run 和原始

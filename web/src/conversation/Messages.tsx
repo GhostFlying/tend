@@ -174,7 +174,9 @@ export function AgentTurn({
   proseClassName,
   currentIssueId,
   processUnavailable = false,
+  process,
 }: {
+  process?: { open: boolean; toggle(): void; footer: React.ReactNode } | undefined;
   processUnavailable?: boolean;
   entry: Extract<Entry, { kind: "agent" }>;
   proseClassName?: string | undefined;
@@ -195,10 +197,11 @@ export function AgentTurn({
   );
   const tools = entry.items.filter((item) => item.tool);
   const processing = groupedProcessing(entry.items);
-  const [traceOpen, setTraceOpen] = useState(false);
+  const [localTraceOpen, setTraceOpen] = useState(false);
+  const traceOpen = process?.open ?? localTraceOpen;
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
-    if (wasActive.current && !status.active) {
+    if (!process && wasActive.current && !status.active) {
       const trace = root.current?.querySelector("[data-trace]");
       if (trace?.contains(document.activeElement))
         root.current
@@ -207,9 +210,10 @@ export function AgentTurn({
       setTraceOpen(false);
     }
     wasActive.current = status.active;
-  }, [status.active]);
+  }, [process, status.active]);
   const prefix = useId();
-  const [visibleStart, setVisibleStart] = useState(Math.max(0, tools.length - 12));
+  const [earlierSteps, setEarlierSteps] = useState(0);
+  const visibleStart = Math.max(0, tools.length - 12 - earlierSteps);
   return (
     <div ref={root} className={styles.agent}>
       <LiveStatus status={status}>
@@ -221,8 +225,9 @@ export function AgentTurn({
           aria-controls={`${prefix}-trace`}
           onClick={(event) => {
             event.currentTarget.focus();
-            if (!traceOpen) setVisibleStart(Math.max(0, tools.length - 12));
-            setTraceOpen(!traceOpen);
+            if (!traceOpen && !process) setEarlierSteps(0);
+            if (process) process.toggle();
+            else setTraceOpen(!traceOpen);
           }}
         >
           查看过程{tools.length ? ` · ${tools.length} 步` : ""} <Chevron />
@@ -235,7 +240,7 @@ export function AgentTurn({
         ))}
       <div data-trace id={`${prefix}-trace`} hidden={!traceOpen} className={styles.trace}>
         <p>这里展示已公开的执行步骤和回复，不包含模型的隐藏推理。</p>
-        {!tools.length && (
+        {!process && !tools.length && (
           <p>
             {processUnavailable
               ? "公开过程暂不可读取，请使用上方的重读入口。"
@@ -248,7 +253,7 @@ export function AgentTurn({
           <button
             type="button"
             className={styles.traceTrigger}
-            onClick={() => setVisibleStart((start) => Math.max(0, start - 12))}
+            onClick={() => setEarlierSteps((count) => count + 12)}
           >
             显示更早 {visibleStart} 步
           </button>
@@ -263,6 +268,7 @@ export function AgentTurn({
             onToolOpenChange={() => {}}
           />
         ))}
+        {process?.footer}
       </div>
       {entry.items
         .filter((item) => !item.tool)

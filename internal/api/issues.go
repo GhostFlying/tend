@@ -72,13 +72,22 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) issueActivity(w http.ResponseWriter, r *http.Request) {
-	before, err := intParam(r.URL.Query().Get("before"))
-	if err != nil || before < 0 {
-		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid activity cursor"))
+	values := r.URL.Query()
+	query := views.IssueActivityQuery{Readable: values.Get("view") == "readable"}
+	if values.Get("view") != "" && !query.Readable {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "unknown activity view"))
 		return
 	}
+	for key, dest := range map[string]*int64{"before": &query.Before, "since": &query.Since, "through": &query.Through, "from": &query.From} {
+		n, err := intParam(values.Get(key))
+		if err != nil || n < 0 {
+			s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid activity cursor %s", key))
+			return
+		}
+		*dest = n
+	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.IssueActivity(r.Context(), q, r.PathValue("id"), before)
+		return views.ReadIssueActivity(r.Context(), q, r.PathValue("id"), query)
 	})
 }
 func (s *Server) issueActivityNotification(w http.ResponseWriter, r *http.Request) {

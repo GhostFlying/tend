@@ -188,8 +188,8 @@ export class ApiClient {
   }
 
   /** Reads an owner API view. */
-  async get<T>(path: string, signal?: AbortSignal): Promise<T> {
-    return this.request<T>("GET", path, undefined, signal);
+  async get<T>(path: string, signal?: AbortSignal, priority?: RequestPriority): Promise<T> {
+    return this.request<T>("GET", path, undefined, signal, priority);
   }
 
   /** Uploads original bytes without imposing a total transfer time limit. */
@@ -237,13 +237,21 @@ export class ApiClient {
   }
 
   /** Sends an authenticated request, signing in again once on 401. */
-  async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    priority?: RequestPriority,
+  ): Promise<T> {
     return this.answer<T>(
       await this.authorized(
         method,
         path,
         body,
         signal ? AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]) : undefined,
+        undefined,
+        priority,
       ),
       signal,
       path === "/api/v1/session",
@@ -285,14 +293,15 @@ export class ApiClient {
     body?: unknown,
     signal?: AbortSignal,
     accept?: string,
+    priority?: RequestPriority,
   ): Promise<Response> {
     if (this.deploymentChanged) throw new Error("Tend 实例已变更，请刷新");
     let token = this.storage.getItem(tokenKey) ?? (await this.signIn());
-    let res = await this.send(method, path, body, token, signal, accept);
+    let res = await this.send(method, path, body, token, signal, accept, priority);
     if (res.status === 401) {
       this.storage.removeItem(tokenKey);
       token = await this.signIn();
-      res = await this.send(method, path, body, token, signal, accept);
+      res = await this.send(method, path, body, token, signal, accept, priority);
     }
     return res;
   }
@@ -326,6 +335,7 @@ export class ApiClient {
     token?: string,
     signal?: AbortSignal,
     accept = "application/json",
+    priority?: RequestPriority,
   ): Promise<Response> {
     const headers: Record<string, string> = { Accept: accept };
     if (this.deploymentChanged) throw new Error("Tend 实例已变更，请刷新");
@@ -343,6 +353,7 @@ export class ApiClient {
         headers,
         ...(body === undefined ? {} : { body: body instanceof Blob ? body : JSON.stringify(body) }),
         cache: "no-store",
+        ...(priority ? { priority } : {}),
         signal: signal ?? AbortSignal.timeout(this.timeoutMs),
       });
       const identity = response.headers.get("X-Tend-Deployment-ID");

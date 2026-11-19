@@ -57,6 +57,10 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 }
 
 func TranscriptBlock(ctx context.Context, q store.Querier, id string, after int64, limit int) (protocol.TranscriptBlock, error) {
+	return transcriptBlock(ctx, q, id, after, limit, false)
+}
+
+func transcriptBlock(ctx context.Context, q store.Querier, id string, after int64, limit int, readable bool) (protocol.TranscriptBlock, error) {
 	out := protocol.TranscriptBlock{Items: []protocol.ConversationItem{}}
 	if err := q.QueryRowContext(ctx, `SELECT position,notice_only FROM conversation_blocks WHERE message_id=? ORDER BY notice_only LIMIT 1`, id).Scan(&out.Position, &out.NoticeOnly); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -75,7 +79,11 @@ func TranscriptBlock(ctx context.Context, q store.Querier, id string, after int6
 	if out.NoticeOnly {
 		return out, nil
 	}
-	rows, err := store.TranscriptReplies(ctx, q, id, after, limit+1)
+	replies := store.TranscriptReplies
+	if readable {
+		replies = store.ReadableTranscriptReplies
+	}
+	rows, err := replies(ctx, q, id, after, limit+1)
 	if err != nil {
 		return out, err
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 func TestIssueProgressHTTPHistoryReplayAndActivity(t *testing.T) {
@@ -298,5 +299,137 @@ func TestIssueChildActivityRetainsHistoricalParent(t *testing.T) {
 	current := read(b.IssueID)
 	if len(current) != 1 || current[0].Title != plan.Title+" · 关闭了 Issue" || current[0].ID == beforeA[0].ID || current[0].Position <= beforeA[0].Position {
 		t.Fatal(current)
+	}
+}
+
+func TestIssueActivityReadableProjectsAndRefreshesChangedTurns(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	conversation := issueDetailHTTP(t, e, token, issue.IssueID).Conversation.ConversationID
+	ctx := t.Context()
+	write := func(fn func(*store.Tx) error) {
+		t.Helper()
+		if err := e.store.Write(ctx, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := func(tx *store.Tx, id, kind, body string) error {
+		_, err := tx.InsertEvent(ctx, store.EventRow{
+			EventID: e.ids.New(protocol.PrefixEvent), Source: "test", ObjectType: "message",
+			ObjectID: id, Kind: kind, BodyJSON: body, CreatedAt: e.clock.Now().UnixMilli(),
+		})
+		return err
+	}
+	insert := func(tx *store.Tx, id, author, kind, replyTo, body string) error {
+		_, err := tx.InsertMessage(ctx, store.MessageRow{
+			ConversationID: conversation, MessageID: id, Author: author, Kind: kind,
+			ReplyTo: replyTo, Body: body, CreatedAt: e.clock.Now().UnixMilli(),
+		})
+		if err != nil {
+			return err
+		}
+		return event(tx, id, "conversation.message", "{}")
+	}
+	admit := func(tx *store.Tx, id string) error {
+		return event(tx, id, "conversation.message_state", `{"state":"processing"}`)
+	}
+	write(func(tx *store.Tx) error {
+		for i := range 55 {
+			id := fmt.Sprintf("owner-%02d", i)
+			if err := insert(tx, id, "owner", "", "", id); err != nil {
+				return err
+			}
+			if i != 54 {
+				if err := admit(tx, id); err != nil {
+					return err
+				}
+			}
+		}
+		for i := range 51 {
+			id := fmt.Sprintf("tool-%02d", i)
+			if err := insert(tx, id, "main_agent", store.KindToolUse, "owner-53", ""); err != nil {
+				return err
+			}
+			if err := tx.PutToolUse(ctx, store.ToolUseRow{
+				MessageID: id, ThreadID: "test-thread", TurnID: "test-turn", ItemID: id,
+				Tool: "exec_command", Input: "actual input", Output: strings.Repeat("actual output", 2000),
+				Status: "completed", UpdatedAt: e.clock.Now().UnixMilli(),
+			}); err != nil {
+				return err
+			}
+		}
+		return insert(tx, "last-reply", "main_agent", "", "owner-53", "正文可见")
+	})
+	path := "/api/v1/issues/" + issue.IssueID + "/activity?view=readable"
+	read := func(query string) protocol.IssueActivityPage {
+		t.Helper()
+		var page protocol.IssueActivityPage
+		if status := e.do("GET", path+query, token, nil, &page); status != http.StatusOK {
+			t.Fatal(status)
+		}
+		return page
+	}
+	first := read("")
+	if !first.Readable || len(first.Items) != 50 || !first.More {
+		t.Fatalf("head length=%d more=%t readable=%t", len(first.Items), first.More, first.Readable)
+	}
+	last := first.Items[len(first.Items)-1].Block
+	if last == nil || last.Trigger.MessageID != "owner-53" || last.Process == nil ||
+		!last.Process.HasTools || len(last.Process.Items) != 0 ||
+		len(last.Items) != 1 || last.Items[0].Body != "正文可见" {
+		t.Fatal("tool detail displaced readable prose", last)
+	}
+	var detail protocol.IssueTranscriptBlock
+	if status := e.do("GET", "/api/v1/conversation/blocks/owner-53?projection=issues", token, nil, &detail); status != http.StatusOK ||
+		len(detail.Items) != 50 || detail.Items[0].Tool == nil || !strings.HasPrefix(detail.Items[0].Tool.Output, "actual output") {
+		t.Fatal("detail lost original tool output", status)
+	}
+	old := read(fmt.Sprintf("&before=%d", first.NextBefore))
+	if old.More || len(old.Items) == 0 {
+		t.Fatal(old)
+	}
+	write(func(tx *store.Tx) error {
+		if err := admit(tx, "owner-54"); err != nil {
+			return err
+		}
+		if err := insert(tx, "old-turn-reply", "main_agent", "", "owner-00", "新的历史回复"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "UPDATE conversation_message_controls SET withdrawn_at=1 WHERE message_id='owner-01'"); err != nil {
+			return err
+		}
+		return event(tx, "owner-01", "conversation.message_state", `{"state":"interrupted","withdrawn":true}`)
+	})
+	delta := read(fmt.Sprintf("&since=%d", first.EventSeq))
+	if len(delta.Items) != 2 || !reflect.DeepEqual(delta.Removed, []string{"block:owner-01"}) ||
+		delta.Items[0].Block.Items[0].Body != "新的历史回复" ||
+		delta.Items[1].Block.Trigger.MessageID != "owner-54" {
+		t.Fatalf("unexpected delta: %+v", delta)
+	}
+	idle := read(fmt.Sprintf("&since=%d", delta.EventSeq))
+	if len(idle.Items) != 0 || len(idle.Removed) != 0 {
+		t.Fatal("unchanged pages were retransmitted", idle)
+	}
+
+	write(func(tx *store.Tx) error {
+		for _, id := range []string{"large-1", "large-2"} {
+			if err := insert(tx, id, "owner", "", "", strings.Repeat("z", 300<<10)); err != nil {
+				return err
+			}
+			if err := admit(tx, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	large := read("")
+	if len(large.Items) != 1 || !large.More || large.Items[0].Block.Trigger.MessageID != "large-2" {
+		t.Fatal("page did not stop at byte budget")
+	}
+	largeEarlier := read(fmt.Sprintf("&before=%d", large.NextBefore))
+	if len(largeEarlier.Items) == 0 || largeEarlier.Items[len(largeEarlier.Items)-1].Block.Trigger.MessageID != "large-1" {
+		t.Fatal("byte budget skipped the next activity")
 	}
 }

@@ -95,6 +95,18 @@ func OwnerIssueQueue(ctx context.Context, q store.Querier, v protocol.Conversati
 	return out, nil
 }
 func OwnerIssueTranscriptBlock(ctx context.Context, q store.Querier, v protocol.TranscriptBlock) (protocol.IssueTranscriptBlock, error) {
+	return ownerIssueTranscriptBlock(ctx, q, v, 0, false)
+}
+
+func IssueBlock(ctx context.Context, q store.Querier, id string, after, processAfter int64, readable bool) (protocol.IssueTranscriptBlock, error) {
+	block, err := transcriptBlock(ctx, q, id, after, 50, readable)
+	if err != nil {
+		return protocol.IssueTranscriptBlock{}, err
+	}
+	return ownerIssueTranscriptBlock(ctx, q, block, processAfter, readable)
+}
+
+func ownerIssueTranscriptBlock(ctx context.Context, q store.Querier, v protocol.TranscriptBlock, processAfter int64, readable bool) (protocol.IssueTranscriptBlock, error) {
 	out := protocol.IssueTranscriptBlock{NoticeOnly: v.NoticeOnly, Position: v.Position, More: v.More, NextSeq: v.NextSeq}
 	trigger, err := OwnerIssueMessages(ctx, q, []protocol.ConversationItem{v.Trigger})
 	if err != nil {
@@ -103,7 +115,7 @@ func OwnerIssueTranscriptBlock(ctx context.Context, q store.Querier, v protocol.
 	out.Trigger = trigger[0]
 	out.Items, err = OwnerIssueMessages(ctx, q, v.Items)
 	if err == nil && !v.NoticeOnly {
-		out.Process, err = IssuePublicProcess(ctx, q, v.Trigger.MessageID, 0, 50)
+		out.Process, err = issueProcessProjection(ctx, q, v.Trigger.MessageID, processAfter, 50, readable)
 	}
 	return out, err
 }

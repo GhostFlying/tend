@@ -121,13 +121,31 @@ func TranscriptBlocks(ctx context.Context, q Querier, before int64, limit int, s
 	return out, rows.Err()
 }
 
-const transcriptRepliesQuery = `SELECT ` + conversationCols + ` WHERE m.message_id IN (
+const transcriptRepliesBase = `SELECT ` + conversationCols + ` WHERE m.message_id IN (
  SELECT message_id FROM conversation_messages WHERE reply_to=? AND seq>?
  UNION SELECT reply_id FROM conversation_reply_sources WHERE source_id=?)
- AND m.author='main_agent' AND m.seq>? ORDER BY m.seq LIMIT ?`
+ AND m.author='main_agent' AND m.seq>?`
+
+const transcriptRepliesOrder = ` ORDER BY m.seq LIMIT ?`
+const transcriptRepliesQuery = transcriptRepliesBase + transcriptRepliesOrder
+const readableTranscriptRepliesQuery = transcriptRepliesBase +
+	` AND (m.kind<>'tool_use' OR EXISTS(SELECT 1 FROM work_item_choices c WHERE c.message_id=m.message_id))` +
+	transcriptRepliesOrder
 
 func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, limit int) ([]ConversationRow, error) {
-	rows, err := q.QueryContext(ctx, transcriptRepliesQuery, id, after, id, after, limit)
+	return transcriptReplies(ctx, q, id, after, limit, false)
+}
+
+func ReadableTranscriptReplies(ctx context.Context, q Querier, id string, after int64, limit int) ([]ConversationRow, error) {
+	return transcriptReplies(ctx, q, id, after, limit, true)
+}
+
+func transcriptReplies(ctx context.Context, q Querier, id string, after int64, limit int, readable bool) ([]ConversationRow, error) {
+	query := transcriptRepliesQuery
+	if readable {
+		query = readableTranscriptRepliesQuery
+	}
+	rows, err := q.QueryContext(ctx, query, id, after, id, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: transcript replies: %w", err)
 	}
@@ -147,8 +165,12 @@ func TranscriptReplies(ctx context.Context, q Querier, id string, after int64, l
 		return nil, err
 	}
 	for i := range out {
-		if err := hydrateConversationTool(ctx, q, &out[i]); err != nil {
-			return nil, err
+		if !readable || out[i].Tool == nil {
+			if err := hydrateConversationTool(ctx, q, &out[i]); err != nil {
+				return nil, err
+			}
+		} else {
+			out[i].Tool.Input, out[i].Tool.Output = "", ""
 		}
 	}
 	return out, nil

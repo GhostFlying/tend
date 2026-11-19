@@ -39,6 +39,7 @@ import { Chevron } from "../shell/icons.tsx";
 import { clock } from "../conversation/model.ts";
 import { groupActivityEvents, identifyActivityGroups } from "./activity.ts";
 import { IssueTurnRead } from "./turn.ts";
+import { IssueProcessReads, type ProcessDetails } from "./process.ts";
 import { activityTurnRows } from "./turnRows.ts";
 import { ActivityResultCard } from "./Results.tsx";
 import type { IssueReadingState } from "./reading.ts";
@@ -64,7 +65,7 @@ export function IssueActivity({
   onTask(id: string): void;
   scroll: RefObject<HTMLDivElement | null>;
 }) {
-  const { queue, conversation, live } = useServices();
+  const { client, queue, conversation, live } = useServices();
   const canonical = useStore(live.conversation);
   const state = useStore(reads.activity.state);
   const pending = useStore(
@@ -164,19 +165,56 @@ export function IssueActivity({
   }, [scroll, reading, correctScroll]);
   const last = useRef(0);
   const previousPending = useRef(0);
-  useEffect(() => {
-    void reads.activity.open(issue.issue_id, reading.activity);
-    const remember = () => reading.saveActivity(reads.activity.state.get().value);
-    const stop = reads.activity.state.subscribe(remember);
-    return () => {
-      remember();
-      stop();
-      pagination.current = null;
-      reads.activity.close();
-    };
-  }, [reads, issue.issue_id, reading]);
   const rows = state.value?.items ?? emptyEntries;
   const activityRoot = useRef<HTMLDivElement>(null);
+  const readable = state.value?.readable === true;
+  const processReads = useMemo(() => new IssueProcessReads(client), [client, issue.issue_id]);
+  useEffect(() => () => processReads.close(), [processReads]);
+  useEffect(() => {
+    if (!readable || !rows.length) return;
+    let cancelIdle: (() => void) | undefined;
+    let nextFrame = 0;
+    const paint = requestAnimationFrame(() => {
+      nextFrame = requestAnimationFrame(() => {
+        const prefetch = () => {
+          const viewport = scroll.current?.getBoundingClientRect();
+          if (!viewport) return;
+          const nearby = new Set(
+            Array.from(
+              activityRoot.current?.querySelectorAll<HTMLElement>("[data-discussion-turn]") ?? [],
+            )
+              .filter((node) => {
+                const rect = node.getBoundingClientRect();
+                return rect.bottom >= viewport.top - 300 && rect.top <= viewport.bottom + 300;
+              })
+              .map((node) => node.dataset.discussionTurn),
+          );
+          const turns = rows.filter((row) => row.block?.process?.has_tools).toReversed();
+          const latest = turns[0]?.block;
+          if (latest)
+            void processReads.prefetch([
+              latest,
+              ...turns
+                .slice(1)
+                .filter((row) => nearby.has(row.id))
+                .map((row) => row.block!),
+            ]);
+        };
+        if ("requestIdleCallback" in window) {
+          const idle = window.requestIdleCallback(prefetch, { timeout: 500 });
+          cancelIdle = () => window.cancelIdleCallback(idle);
+        } else {
+          const timer = setTimeout(prefetch, 75);
+          cancelIdle = () => clearTimeout(timer);
+        }
+      });
+    });
+    return () => {
+      cancelAnimationFrame(paint);
+      cancelAnimationFrame(nextFrame);
+      cancelIdle?.();
+    };
+  }, [processReads, readable, rows, scroll]);
   const focusedActivity = useRef<{ node: HTMLElement; id: string } | null>(null);
   const [eventIdentities] = useState(() => new Map<string, string>());
   const activityGroups = useMemo(
@@ -457,6 +495,7 @@ export function IssueActivity({
           <ActivityBlock
             key={entry.id}
             entry={entry}
+            processReads={readable ? processReads : undefined}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
@@ -500,8 +539,10 @@ function ActivityBlock({
   onPagination,
   onPaginationCancel,
   currentIssueId,
+  processReads,
 }: {
   entry: IssueActivityEntry;
+  processReads?: IssueProcessReads | undefined;
   currentIssueId: string;
   rows: TranscriptEntry[];
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
@@ -509,7 +550,8 @@ function ActivityBlock({
   onPaginationCancel(trigger: string): void;
 }) {
   const { client } = useServices();
-  const continuation = useMemo(() => new IssueTurnRead(client), [client]);
+  const readable = !!processReads;
+  const continuation = useMemo(() => new IssueTurnRead(client, readable), [client, readable]);
   const extra = useStore(continuation.state);
   const explicit = useRef(false);
   const [opened, setOpened] = useEntryState(`activity-open:${entry.id}`, false);
@@ -524,7 +566,57 @@ function ActivityBlock({
         ? "回复你的消息"
         : "回应系统通知";
   const triggerNode = useRef<HTMLDivElement>(null);
-  const processBlock = opened && extra.value && !extra.error ? extra.value : block;
+  const [traceOpen, setTraceOpen] = useEntryState(`activity-process-open:${entry.id}`, false);
+  const [process, setProcess] = useState<{
+    value?: ProcessDetails;
+    loading: boolean;
+    error?: string;
+  }>({ loading: false });
+  const processVersion = useRef(0);
+  const loadedProcess = useRef<IssueTranscriptBlock | null>(null);
+  const retryPage = useRef<ProcessDetails | undefined>(undefined);
+  const requestProcess = useCallback(
+    (previous?: ProcessDetails) => {
+      if (!processReads || (!previous && loadedProcess.current === block)) return;
+      retryPage.current = previous;
+      const revision = ++processVersion.current;
+      setProcess((state) => ({ ...(state.value ? { value: state.value } : {}), loading: true }));
+      const pending = previous ? processReads.more(block, previous) : processReads.load(block);
+      void pending.then(
+        (value) => {
+          if (processVersion.current === revision) {
+            loadedProcess.current = block;
+            setProcess({ value, loading: false });
+          }
+        },
+        (error: unknown) => {
+          if (processVersion.current === revision)
+            setProcess((state) => ({
+              ...state,
+              loading: false,
+              error: error instanceof Error ? error.message : String(error),
+            }));
+        },
+      );
+    },
+    [block, processReads],
+  );
+  useEffect(() => {
+    if (traceOpen) requestProcess();
+    return () => {
+      processVersion.current++;
+    };
+  }, [requestProcess, traceOpen]);
+  const processBlock = readable
+    ? process.value
+      ? {
+          ...block,
+          process: { ...block.process, items: process.value.items, more: false },
+        }
+      : block
+    : opened && extra.value && !extra.error
+      ? extra.value
+      : block;
   useEffect(() => {
     if (opened) void continuation.open(block.trigger.message_id, depth);
   }, [opened, block, continuation, depth]);
@@ -563,9 +655,15 @@ function ActivityBlock({
     else if (extra.error) void continuation.refresh();
     else setDepth(depth + 1);
   };
+  const displayRows = activityTurnRows(rows, processBlock, readable);
+  const firstReply = displayRows.find((row) => row.kind === "agent");
   return (
-    <article className={styles.discussion} data-scroll-id={entry.id}>
-      {processBlock.process?.error && (
+    <article
+      className={styles.discussion}
+      data-scroll-id={entry.id}
+      data-discussion-turn={entry.id}
+    >
+      {!readable && processBlock.process?.error && (
         <p role="status" className={styles.error}>
           {processBlock.process.error}
           <button
@@ -578,7 +676,7 @@ function ActivityBlock({
           </button>
         </p>
       )}
-      {activityTurnRows(rows, processBlock).map((row) => {
+      {displayRows.map((row) => {
         switch (row.kind) {
           case "source":
             return (
@@ -669,6 +767,42 @@ function ActivityBlock({
                 <AgentTurn
                   entry={row}
                   processUnavailable={!!processBlock.process?.error}
+                  process={
+                    readable && row === firstReply
+                      ? {
+                          open: traceOpen,
+                          toggle: () => {
+                            if (!traceOpen) requestProcess();
+                            setTraceOpen(!traceOpen);
+                          },
+                          footer: (
+                            <>
+                              {process.loading && <p role="status">正在读取公开过程…</p>}
+                              {process.error && (
+                                <p role="status">
+                                  公开过程读取失败
+                                  <button onClick={() => requestProcess(retryPage.current)}>
+                                    重试
+                                  </button>
+                                </p>
+                              )}
+                              {!process.loading &&
+                                !process.error &&
+                                process.value &&
+                                (process.value.more ? (
+                                  <button onClick={() => requestProcess(process.value)}>
+                                    继续读取公开过程
+                                  </button>
+                                ) : (
+                                  !process.value.items.length && (
+                                    <p>本轮没有已保存的公开执行步骤。</p>
+                                  )
+                                ))}
+                            </>
+                          ),
+                        }
+                      : undefined
+                  }
                   currentIssueId={currentIssueId}
                   proseClassName={!expanded && long ? styles.replyClamp : undefined}
                 />

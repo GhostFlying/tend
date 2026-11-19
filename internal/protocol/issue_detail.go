@@ -72,6 +72,8 @@ type IssueActivityPage struct {
 	More       bool                 `json:"more"`
 	NextBefore int64                `json:"next_before,omitempty"`
 	EventSeq   int64                `json:"event_seq"`
+	Readable   bool                 `json:"readable,omitempty"`
+	Removed    []string             `json:"removed,omitempty"`
 }
 
 // IssueResult identifies one immutable artifact and only its matching verdicts.

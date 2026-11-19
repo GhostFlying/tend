@@ -79,7 +79,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation history", Route: "/api/v1/conversation?conversation_id={id}", Queries: "before after limit"},
 	{Name: "conversation queue", Route: "/api/v1/conversation/queue", Queries: "conversation=conversation_id category after"},
 	{Name: "conversation transcript", Route: "/api/v1/conversation/transcript", Queries: "conversation=conversation_id before"},
-	{Name: "conversation block", Route: "/api/v1/conversation/blocks/{id}", Queries: "after process-after=process_after"},
+	{Name: "conversation block", Route: "/api/v1/conversation/blocks/{id}", Queries: "after process-after=process_after projection"},
 	{Name: "conversation context-index", Route: "/api/v1/agent-conversations/{id}/context-index", Queries: "section after limit", JSONDefault: true},
 	{Name: "conversation rollout", Route: "/api/v1/agent-conversations/{id}/rollout", Queries: "after turn=turn_id thread=thread_id"},
 	{Name: "conversation window", Route: "/api/v1/agent-conversations/{id}/rollout/{seq}", Queries: "offset"},

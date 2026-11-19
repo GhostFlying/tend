@@ -7,8 +7,9 @@ type ActivityRow = TranscriptEntry | { kind: "source"; key: string; item: IssueC
 export function activityTurnRows(
   rows: readonly TranscriptEntry[],
   block: IssueTranscriptBlock,
+  readable = false,
 ): ActivityRow[] {
-  if (block.trigger.issue_owner_steer) return [...rows];
+  if (block.trigger.issue_owner_steer && !readable) return [...rows];
   const key = `${block.position}:reply:${block.trigger.message_id}`;
   // Only this consumer reads and renders the independent process cursor.
   const publicRows: ActivityRow[] = [];
@@ -31,7 +32,12 @@ export function activityTurnRows(
     // Process sequence is its own arrival order. Starting with transcript
     // callbacks would move later callbacks ahead of earlier deferred tools.
     const items = new Map((block.process?.items ?? []).map((item) => [item.message_id, item]));
-    for (const item of row.items) if (!items.has(item.message_id)) items.set(item.message_id, item);
+    for (const item of row.items) {
+      const existing = items.get(item.message_id);
+      if (!existing) items.set(item.message_id, item);
+      else if (item.choices?.length)
+        items.set(item.message_id, { ...existing, choices: item.choices });
+    }
     return {
       ...row,
       key,
@@ -49,7 +55,12 @@ export function activityTurnRows(
     return entries.map((row, index) =>
       index === first && row.kind === "agent" ? withProcess(row) : row,
     );
-  if (block.trigger.state !== "processing" && !block.process?.items?.length) return [...entries];
+  if (
+    block.trigger.state !== "processing" &&
+    !block.process?.has_tools &&
+    !block.process?.items?.length
+  )
+    return [...entries];
   const output = [...entries];
   const more = output.findIndex((row) => row.kind === "block-more");
   output.splice(
