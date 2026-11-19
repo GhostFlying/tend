@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
@@ -431,5 +432,68 @@ func TestIssueActivityReadableProjectsAndRefreshesChangedTurns(t *testing.T) {
 	largeEarlier := read(fmt.Sprintf("&before=%d", large.NextBefore))
 	if len(largeEarlier.Items) == 0 || largeEarlier.Items[len(largeEarlier.Items)-1].Block.Trigger.MessageID != "large-1" {
 		t.Fatal("byte budget skipped the next activity")
+	}
+}
+
+func TestIssueActivityReadableReadsCoalescedPublicProcessChanges(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	conversation := issueDetailHTTP(t, e, token, issue.IssueID).Conversation.ConversationID
+	ctx, now := t.Context(), e.clock.Now().UnixMilli()
+	const source = "process-trigger"
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{
+			ConversationID: conversation, MessageID: source, Author: "system", Body: "background work", CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+		for _, event := range []struct{ kind, body string }{
+			{"conversation.message", "{}"}, {"conversation.message_state", `{"state":"processing"}`},
+		} {
+			if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: e.ids.New(protocol.PrefixEvent), Source: "test",
+				ObjectType: "message", ObjectID: source, Kind: event.kind, BodyJSON: event.body, CreatedAt: now}); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO background_batches(batch_id,group_key,work_item_id,message_id,status,created_at,frozen_at)
+ VALUES('process-batch','group',?,?,'frozen',?,?)`, issue.IssueID, source, now, now); err != nil {
+			return err
+		}
+		return tx.PutMainTurn(ctx, store.MainTurn{RequestID: "process-native", MessageID: source,
+			ThreadID: "process-thread", TurnID: "process-turn", Status: store.TurnStarted}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(since int64) protocol.IssueActivityPage {
+		t.Helper()
+		var page protocol.IssueActivityPage
+		path := fmt.Sprintf("/api/v1/issues/%s/activity?view=readable&since=%d", issue.IssueID, since)
+		if status := e.do("GET", path, token, nil, &page); status != http.StatusOK {
+			t.Fatal(status)
+		}
+		return page
+	}
+	before := read(0)
+	for _, status := range []string{"running", "completed"} {
+		req := e.envelope("conversation.record_tool_use", protocol.Target{Type: "conversation"}, nil, map[string]string{
+			"reply_to": source, "turn_id": "process-turn", "item_id": "process-tool",
+			"tool": "exec_command", "input": "{}", "output": "actual output", "status": status,
+		})
+		principal := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "harness-process", Thread: "process-thread"}
+		if op, err := e.app.Execute(ctx, principal, &req, app.RecordToolUse{}); err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatalf("record tool use: %+v %v", op, err)
+		}
+	}
+	delta := read(before.EventSeq)
+	if len(delta.Items) != 1 || delta.Items[0].ID != "block:"+source || delta.Items[0].Block.Process == nil ||
+		!delta.Items[0].Block.Process.HasTools || len(delta.Items[0].Block.Process.Items) != 0 {
+		t.Fatal("coalesced process revision did not refresh the readable turn", delta)
+	}
+	var detail protocol.IssueTranscriptBlock
+	if status := e.do("GET", "/api/v1/conversation/blocks/"+source, token, nil, &detail); status != http.StatusOK ||
+		detail.Process == nil || len(detail.Process.Items) != 1 || detail.Process.Items[0].Tool.Status != "completed" {
+		t.Fatal("updated process detail failed", status, detail)
 	}
 }

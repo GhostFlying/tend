@@ -57,3 +57,36 @@ test("failed prefetch can be retried and leaving the issue aborts the remaining 
   expect(signals).toHaveLength(2);
   expect(signals[1]?.aborted).toBe(true);
 });
+
+test("a revised turn reloads all disclosed pages and shares the depth read", async () => {
+  const requested: string[] = [];
+  const start = block("turn");
+  const revision = { ...start, items: [] };
+  const reader = new IssueProcessReads({
+    get: async <T>(path: string) => {
+      requested.push(path);
+      const second = path.includes("process_after=");
+      return {
+        ...start,
+        process: {
+          items: [{ ...start.trigger, message_id: second ? "tool-2" : "tool-1" }],
+          more: !second,
+          ...(second ? {} : { next: 11 }),
+        },
+      } as T;
+    },
+  });
+  const first = await reader.load(start);
+  const second = await reader.more(start, first);
+  expect(second.depth).toBe(2);
+  const reload = reader.load(revision, "high", second.depth);
+  expect(reader.load(revision, "high", second.depth)).toBe(reload);
+  expect((await reload).items.map((item) => item.message_id)).toEqual(["tool-1", "tool-2"]);
+  expect(requested.map((path) => path.includes("process_after="))).toEqual([
+    false,
+    true,
+    false,
+    true,
+  ]);
+  reader.close();
+});
