@@ -3,6 +3,7 @@ import type { Reader } from "../live/data.ts";
 
 export interface ProcessDetails {
   items: IssueConversationItem[];
+  publicOrder: string[];
   depth: number;
   after: number;
   processAfter: number;
@@ -44,9 +45,14 @@ export class IssueProcessReads {
     );
     if (result.process?.error) throw new Error(result.process.error);
     const items = new Map(previous?.items.map((item) => [item.message_id, item]));
-    // Preserve the public projection's redaction and arrival order. A callback
-    // can also carry the actionable choice associated with the same tool.
-    for (const item of result.process?.items ?? []) items.set(item.message_id, item);
+    // Transcript callbacks can appear before their public cursor page. Keep
+    // public arrival order separately while preserving callbacks' choices.
+    const publicOrder = new Set(previous?.publicOrder);
+    for (const item of result.process?.items ?? []) {
+      publicOrder.add(item.message_id);
+      const choices = items.get(item.message_id)?.choices;
+      items.set(item.message_id, choices ? { ...item, choices } : item);
+    }
     for (const item of result.items ?? []) {
       if (!item.tool) continue;
       const existing = items.get(item.message_id);
@@ -56,7 +62,11 @@ export class IssueProcessReads {
       );
     }
     return {
-      items: [...items.values()],
+      items: [
+        ...[...publicOrder].map((id) => items.get(id)!),
+        ...[...items.values()].filter((item) => !publicOrder.has(item.message_id)),
+      ],
+      publicOrder: [...publicOrder],
       depth: (previous?.depth ?? 0) + 1,
       after: result.next_seq ?? previous?.after ?? 0,
       processAfter: result.process?.next ?? previous?.processAfter ?? 0,
@@ -88,10 +98,6 @@ export class IssueProcessReads {
     });
     this.first.set(id, { block, controller, depth, promise });
     return promise;
-  }
-
-  more(block: IssueTranscriptBlock, previous: ProcessDetails): Promise<ProcessDetails> {
-    return this.load(block, "high", previous.depth + 1);
   }
 
   async prefetch(candidates: readonly IssueTranscriptBlock[]) {

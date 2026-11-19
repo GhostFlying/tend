@@ -626,6 +626,35 @@ try {
       process: { items: [], has_tools: true, more: false, started_at: now - 1000, ended_at: now },
       more: false,
     };
+    const trailing = Array.from({ length: 18 }, (_, index) => {
+      const id = `readable-tail-${index}`;
+      const position = row.position + index + 1;
+      return {
+        ...row,
+        id,
+        position,
+        block: {
+          ...readableBlock,
+          position,
+          process: { ...readableBlock.process, has_tools: false },
+          trigger: { ...block.trigger, message_id: id },
+          items: [
+            {
+              ...block.items![0]!,
+              message_id: `${id}-reply`,
+              reply_to: id,
+              body: `继续阅读 ${index}`,
+            },
+          ],
+        },
+      };
+    });
+    const firstTools = Array.from({ length: 14 }, (_, index) => ({
+      ...tool,
+      message_id: `readable-tool-${index}`,
+      seq: tool.seq + index,
+    }));
+    const processCursor = firstTools.at(-1)!.seq;
     const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
     const processPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
     let detailRequests = 0;
@@ -638,6 +667,15 @@ try {
     const releaseDetail = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let signalSecond = () => {};
+    let releaseSecond = () => {};
+    let heldSecond = false;
+    const secondStarted = new Promise<void>((resolve) => {
+      signalSecond = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
     await page.route(
       (u) => u.pathname === activityPath,
       (route) => {
@@ -645,10 +683,11 @@ try {
         assert.equal(query.get("view"), "readable");
         return route.fulfill({
           json: {
-            items:
-              query.has("since") && Number(query.get("since")) >= changedAt
-                ? []
-                : [{ ...row, block: readableBlock }],
+            items: query.has("since")
+              ? Number(query.get("since")) < changedAt
+                ? [{ ...row, block: readableBlock }]
+                : []
+              : [{ ...row, block: readableBlock }, ...trailing],
             more: false,
             readable: true,
             event_seq: seq,
@@ -663,14 +702,21 @@ try {
         starting();
         await releaseDetail;
         const second = new URL(route.request().url()).searchParams.has("process_after");
+        if (second && !heldSecond) {
+          heldSecond = true;
+          signalSecond();
+          await secondGate;
+        }
         await route.fulfill({
           json: {
             ...readableBlock,
             process: {
               ...readableBlock.process,
-              items: second ? [{ ...tool, message_id: "readable-second-tool", seq: 502 }] : [tool],
+              items: second
+                ? [{ ...tool, message_id: "readable-second-tool", seq: processCursor + 1 }]
+                : firstTools,
               more: !second,
-              ...(second ? {} : { next: tool.seq }),
+              ...(second ? {} : { next: processCursor }),
             },
           },
         });
@@ -686,30 +732,105 @@ try {
       await trigger.click();
       await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor();
       assert.equal(detailRequests, 1, "opening must reuse the held detail prefetch");
+      const paragraph = page.getByText("继续阅读 3", { exact: true });
+      await paragraph.evaluate((node) => node.scrollIntoView({ block: "center" }));
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      const originalTop = (await paragraph.boundingBox())!.y;
       release();
-      await discussion.locator('[data-tool-item="readable-fixture-tool"]').waitFor();
+      await discussion.locator(`[data-tool-item="${firstTools.at(-1)!.message_id}"]`).waitFor();
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      assert(Math.abs((await paragraph.boundingBox())!.y - originalTop) <= 2);
       assert.equal(detailRequests, 1);
       await discussion.getByText(prose, { exact: true }).waitFor();
       await discussion.getByRole("button", { name: "继续读取公开过程" }).click();
-      const secondTool = discussion.locator('[data-tool-item="readable-second-tool"]');
-      await secondTool.waitFor();
-      const reloaded = page.waitForResponse((response) => {
+      await secondStarted;
+      const refreshedFirst = page.waitForResponse((response) => {
         const url = new URL(response.url());
-        return url.pathname === processPath && url.searchParams.get("process_after") === "501";
+        return url.pathname === processPath && !url.searchParams.has("process_after");
       });
       changedAt = seq + 1;
       publish("conversation.process_changed", {
         ...block.trigger,
         conversation_id: issue.conversation!.conversation_id!,
       });
-      await reloaded;
-      await discussion.getByText("正在读取公开过程…", { exact: true }).waitFor({ state: "hidden" });
+      await refreshedFirst;
+      releaseSecond();
+      await discussion.locator('[data-tool-item="readable-second-tool"]').waitFor();
       assert.equal(await trigger.getAttribute("aria-expanded"), "true");
-      await secondTool.waitFor();
       await discussion.screenshot({ path: join(output, "issue-readable-process.png") });
-      console.log("PASS readable activity detail reuse and expanded page retention");
+      console.log(
+        "PASS readable activity detail reuse, scroll anchor and in-flight page retention",
+      );
     } finally {
+      releaseSecond();
       release();
+      await context.close();
+    }
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 844 } });
+    try {
+      const page = await context.newPage();
+      const entry = activity.items![0]!;
+      const block = entry.block!;
+      const reply = block.items![0]!;
+      const updated = { ...reply, body: "在 Issue 元数据之前到达的回复", assistant_revision: 2 };
+      let firstSeen = () => {};
+      let sendMetadata = () => {};
+      const firstActivity = new Promise<void>((resolve) => {
+        firstSeen = resolve;
+      });
+      const metadata = new Promise<void>((resolve) => {
+        sendMetadata = resolve;
+      });
+      let published = false;
+      const issuePath = `/api/v1/issues/${issue.issue_id}`;
+      const activityPath = `${issuePath}/activity`;
+      await page.route(
+        (url) => url.pathname === issuePath,
+        async (route) => {
+          await metadata;
+          await route.fulfill({ json: issue });
+        },
+      );
+      await page.route(
+        (url) => url.pathname === activityPath,
+        async (route) => {
+          await route.fulfill({
+            json: {
+              items: [{ ...entry, block: published ? { ...block, items: [updated] } : block }],
+              more: false,
+              readable: true,
+              event_seq: seq,
+            },
+          });
+          firstSeen();
+        },
+      );
+      const connected = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/events",
+      );
+      try {
+        await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+        await Promise.all([connected, firstActivity]);
+        const delta = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return url.pathname === activityPath && url.searchParams.has("since");
+        });
+        published = true;
+        publish("conversation.message", {
+          ...updated,
+          conversation_id: issue.conversation!.conversation_id!,
+        });
+        await delta;
+        sendMetadata();
+        await page.getByText(updated.body, { exact: true }).waitFor();
+        console.log("PASS live reply received before Issue metadata");
+      } finally {
+        sendMetadata();
+      }
+    } finally {
       await context.close();
     }
   }

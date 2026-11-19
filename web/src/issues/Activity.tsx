@@ -94,6 +94,24 @@ export function IssueActivity({
     ids: Set<string>;
     ready: boolean;
   } | null>(null);
+  const restoreProcessLayout = useCallback(() => {
+    const node = scroll.current;
+    const anchor = readingAnchor.current;
+    if (
+      !node ||
+      !anchor ||
+      following.current ||
+      reading.followsLatest() ||
+      pagination.current?.ready
+    )
+      return;
+    correctScroll(node, () => restoreAnchor(node, anchor));
+    cancelAnimationFrame(dataFrame.current);
+    dataFrame.current = requestAnimationFrame(() => {
+      correctScroll(node, () => restoreAnchor(node, anchor));
+      readingAnchor.current = captureAnchor(node);
+    });
+  }, [scroll, reading, correctScroll]);
   useEffect(() => {
     const node = scroll.current;
     if (!node) return;
@@ -500,6 +518,7 @@ export function IssueActivity({
             onContinuation={rememberContinuation}
             onPagination={beginContinuation}
             onPaginationCancel={cancelContinuation}
+            onProcessLayout={restoreProcessLayout}
             currentIssueId={issue.issue_id}
           />
         ) : group.length > 1 ? (
@@ -538,6 +557,7 @@ function ActivityBlock({
   onContinuation,
   onPagination,
   onPaginationCancel,
+  onProcessLayout,
   currentIssueId,
   processReads,
 }: {
@@ -548,6 +568,7 @@ function ActivityBlock({
   onContinuation(block: IssueTranscriptBlock, explicit: boolean): void;
   onPagination(trigger: string, control: HTMLButtonElement, ids: string[]): void;
   onPaginationCancel(trigger: string): void;
+  onProcessLayout(): void;
 }) {
   const { client } = useServices();
   const readable = !!processReads;
@@ -573,23 +594,22 @@ function ActivityBlock({
     error?: string;
   }>({ loading: false });
   const processVersion = useRef(0);
-  const loadedProcess = useRef<IssueTranscriptBlock | null>(null);
-  const processDepth = useRef(1);
-  const retryPage = useRef<ProcessDetails | undefined>(undefined);
+  const loadedProcess = useRef<{ block: IssueTranscriptBlock; depth: number } | null>(null);
+  const requestedProcessDepth = useRef(1);
   const requestProcess = useCallback(
-    (previous?: ProcessDetails) => {
-      if (!processReads || (!previous && loadedProcess.current === block)) return;
-      retryPage.current = previous;
+    (depth = requestedProcessDepth.current) => {
+      if (!processReads) return;
+      const wanted = Math.max(depth, requestedProcessDepth.current);
+      requestedProcessDepth.current = wanted;
+      if (loadedProcess.current?.block === block && loadedProcess.current.depth >= wanted) return;
       const revision = ++processVersion.current;
       setProcess((state) => ({ ...(state.value ? { value: state.value } : {}), loading: true }));
-      const pending = previous
-        ? processReads.more(block, previous)
-        : processReads.load(block, "high", processDepth.current);
+      const pending = processReads.load(block, "high", wanted);
       void pending.then(
         (value) => {
           if (processVersion.current === revision) {
-            loadedProcess.current = block;
-            processDepth.current = value.depth;
+            loadedProcess.current = { block, depth: value.depth };
+            requestedProcessDepth.current = value.depth;
             setProcess({ value, loading: false });
           }
         },
@@ -611,6 +631,9 @@ function ActivityBlock({
       processVersion.current++;
     };
   }, [requestProcess, traceOpen]);
+  useLayoutEffect(() => {
+    if (traceOpen && !process.loading && (process.value || process.error)) onProcessLayout();
+  }, [onProcessLayout, process.error, process.loading, process.value, traceOpen]);
   const processBlock = readable
     ? process.value
       ? {
@@ -786,16 +809,14 @@ function ActivityBlock({
                               {process.error && (
                                 <p role="status">
                                   公开过程读取失败
-                                  <button onClick={() => requestProcess(retryPage.current)}>
-                                    重试
-                                  </button>
+                                  <button onClick={() => requestProcess()}>重试</button>
                                 </p>
                               )}
                               {!process.loading &&
                                 !process.error &&
                                 process.value &&
                                 (process.value.more ? (
-                                  <button onClick={() => requestProcess(process.value)}>
+                                  <button onClick={() => requestProcess(process.value!.depth + 1)}>
                                     继续读取公开过程
                                   </button>
                                 ) : (

@@ -75,12 +75,9 @@ export class IssueActivityRead {
       this.close();
       this.id = id;
     }
-    const pending = this.read.open(`${this.path()}?view=readable`);
-    if (retained && !this.state.get().value) {
-      for (const item of retained.items ?? []) this.older.set(item.id, item);
-      this.state.set({ ...this.state.get(), value: retained });
-    }
-    return pending;
+    const restored = this.state.get().value ? null : (retained ?? null);
+    for (const item of restored?.items ?? []) this.older.set(item.id, item);
+    return this.read.open(`${this.path()}?view=readable`, restored);
   }
   earlier(): Promise<void> {
     const current = this.state.get().value;

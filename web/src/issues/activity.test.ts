@@ -447,3 +447,27 @@ test.each(["delta-first", "history-first"])(
     expect(value).toMatchObject({ more: false, next_before: 0, event_seq: 21 });
   },
 );
+
+test("returning to an Issue resumes from the retained cursor and removes a withdrawn old row", async () => {
+  const head = entry("block:head", 100);
+  const withdrawn = entry("block:withdrawn", 25);
+  const retained = { ...page([withdrawn, head]), event_seq: 110, readable: true };
+  const requests: string[] = [];
+  const read = new IssueActivityRead({
+    get: async <T>(path: string) => {
+      const query = new URL(path, "https://example.test").searchParams;
+      requests.push(`${query.get("since")}:${query.get("from")}`);
+      return {
+        ...page([], false),
+        readable: true,
+        event_seq: 111,
+        removed: [withdrawn.id],
+      } as T;
+    },
+  });
+  await read.open("issue", retained);
+  expect(requests).toEqual(["110:0"]);
+  expect(read.state.get().value?.items).toEqual([head]);
+  expect(read.state.get().value).toMatchObject({ event_seq: 111, more: false });
+  read.close();
+});
