@@ -130,10 +130,10 @@ does not stop running processes. Empty, null and omitted modes are rejected.
 
 Use --data for inline JSON or --file - to read JSON from stdin.
 Use --reason to record a reason. The response is JSON with or without --json.
---dry-run prints the complete
-Envelope without submitting the write. For a first write, omitting --revision
-reads the current host control revision, including in dry-run. Supply the
-observed --revision to pin it. If the outcome is unknown, read host show first.
+--dry-run prints the complete Envelope without submitting the write. For a
+first write, omitting --revision reads current control_revision, including
+in dry-run. Supply --revision to pin the control_revision from host show.
+If the outcome is unknown, read control_mode and control_revision there first.
 Keep the original --request-id, --revision and payload. Resubmit only when
 reconciliation calls for it, using those original values or the saved Envelope
 with tend operation submit --file original-envelope.json.

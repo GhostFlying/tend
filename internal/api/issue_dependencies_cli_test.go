@@ -104,8 +104,9 @@ func TestIssueSetDependenciesCLIRealHTTP(t *testing.T) {
 	}
 	read()
 	c.run(append([]string{"issue", "dependencies"}, pinned...)...)
-	if !bytes.Equal(bytes.TrimSpace(original), bytes.TrimSpace(lastWrite)) {
-		t.Fatalf("legacy submission changed the original Envelope: %s", lastWrite)
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, original); err != nil || !bytes.Equal(compact.Bytes(), lastWrite) {
+		t.Fatalf("legacy submission changed the original Envelope: %s (%v)", lastWrite, err)
 	}
 	current := read(first.IssueID)
 
