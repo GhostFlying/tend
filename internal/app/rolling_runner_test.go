@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -179,4 +180,53 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 		t.Fatal("late command did not retain its journal and request", hb, err)
 	}
 
+}
+
+func TestBusyGenerationReceivesAutomaticRollingTarget(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	selfUpgradeHosts(t, h, true)
+	if op := h.syncConfig(testConfig()); op.Error != nil {
+		t.Fatal(op)
+	}
+	const host = "linux-1"
+	// Begin with an already installed independent journal; this test drives
+	// the subsequent release through the ordinary fleet upgrade entry point.
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		rt, err := store.GetHostRuntime(t.Context(), tx.Q(), host)
+		if err != nil {
+			return err
+		}
+		rt.Runtime.JournalID = rt.Runtime.InstanceID
+		return tx.PutHostRuntime(t.Context(), host, rt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.createTask(owner, createTaskPayload{Title: "active predecessor", Spec: testSpec})
+	rt := upgradeAck(h, host, protocol.RunnerNormal)
+	target := protocol.Target{Type: "host", ID: host}
+	claim := h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: &rt}, nil)
+	as, ok := h.claimWith(host, claim)
+	if !ok {
+		t.Fatal("no original assignment")
+	}
+	c.ServerCapabilities = []string{release.ServerCapabilityRunnerJournals}
+	c.ServerUpdaterSupported = true
+	if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	batch := upgradeRead(h)
+	server := ServerObservation{MainDrained: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "current-server", Healthy: true}
+	server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
+	for range 5 {
+		if upgradeTick(h, server).Hosts[0].Phase == "draining" {
+			break
+		}
+	}
+	rt = upgradeAck(h, host, protocol.RunnerMaintenance)
+	upgradeTick(h, server)
+	rt.Sequence++
+	hb, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &rt, Runs: []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}}})
+	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || hb.Control.Upgrade == nil || !hb.Control.Upgrade.Rolling || hb.Control.Upgrade.PrepareOnly || !hb.Control.Upgrade.Updater.Authorized {
+		t.Fatalf("busy generation missing rolling target: control=%+v phase=%+v journal=%q err=%v", hb.Control, upgradeRead(h).View.Hosts, rt.JournalID, err)
+	}
 }

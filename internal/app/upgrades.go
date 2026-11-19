@@ -719,6 +719,13 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			ctl.Mode = protocol.RunnerMaintenance
 			ctl.UpgradeID = r.View.UpgradeID
 			ctl.Upgrade = nil
+			if rt.Runtime.JournalID != "" && h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) {
+				// Publish the target in the same transaction as the drain.
+				// Launch still requires the predecessor's applied-revision ACK.
+				ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
+				ctl.Upgrade.Rolling = true
+				ctl.Upgrade.Updater.Authorized = true
+			}
 			if ctl.CancelledUpgradeID != r.View.UpgradeID {
 				ctl.CancelledUpgradeID = ""
 			}
@@ -751,17 +758,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 			}
 			return nil
 		}
-		if v.Phase == "draining" && rt.Runtime.JournalID != "" && h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) {
-			if ctl.Upgrade == nil && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.Mode != protocol.RunnerNormal {
-				ctl.Revision++
-				ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
-				ctl.Upgrade.Rolling = true
-				ctl.Upgrade.Updater.Authorized = true
-				return tx.PutHostControl(ctx, h.HostID, ctl, now)
-			}
-			return nil
-		}
-		if v.Phase == "draining" && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
+		if v.Phase == "draining" && ctl.Upgrade == nil && rt.Runtime.Mode == protocol.RunnerReady && rt.Runtime.AppliedControlRevision == ctl.Revision && rt.Runtime.PendingClaims == 0 && rt.Runtime.PendingOperations == 0 && len(rt.Runtime.Blockers) == 0 && runs == 0 {
 			ctl.Revision++
 			ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
 			if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
