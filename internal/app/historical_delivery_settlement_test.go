@@ -2,7 +2,10 @@ package app
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/views"
 )
 
@@ -358,10 +362,45 @@ func TestHistoricalDeliverySettlementKeepsRecordedProofAcrossProviderRefresh(t *
 }
 
 func TestHistoricalDeliverySettlementRejectsUnprovedOrReplacedFacts(t *testing.T) {
+	// Build the baseline through real commands, then open an independent
+	// copy of the closed ledger for each invalidation.
+	template := t.TempDir()
+	base, issue, source, execution, baseline := historicalDeploymentHarnessFixture(t, newHarnessAt(t, filepath.Join(template, "tend.db")), "merged")
+	advanceHistoricalDeployment(t, base, issue.IssueID, source, baseline)
+	if err := base.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	open := func(t *testing.T) *harness {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.CopyFS(dir, os.DirFS(template)); err != nil {
+			t.Fatal(err)
+		}
+		clock := testkit.NewClock()
+		clock.Set(base.clock.Now())
+		db, err := store.Open(t.Context(), filepath.Join(dir, "tend.db"), clock.Now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Baseline operations generate their IDs before the clock advance.
+		return harnessWithStore(t, db, clock)
+	}
+	t.Run("original facts settle", func(t *testing.T) {
+		h := open(t)
+		op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{
+			TaskID: source, Action: "complete", UpgradeID: baseline.View.UpgradeID,
+			IssueControlPayload: protocol.IssueControlPayload{Reason: "Settle the original independently accepted installation"},
+		})
+		if op.Status != protocol.OpSucceeded || deliveryDutyForTest(t, h, issue.IssueID, source).Status != "complete" {
+			t.Fatal("copied eligible fixture did not settle", op)
+		}
+	})
 	for _, change := range []string{"unfinished", "unaccepted", "upgrade_running", "upgrade_unknown", "installed_source", "server_instance", "server_health", "server_process", "hosts", "unconfirmed_receipt", "wrong_receipt", "wrong_bound_task", "wrong_payload_batch", "provider_url", "provider_head", "provider_base", "provider_merge", "provider_state", "source_withdrawn", "source_edited", "decision_reopened", "replacement", "candidate_changed", "grant_changed", "deferred", "historical_epoch"} {
 		t.Run(change, func(t *testing.T) {
-			h, issue, source, execution, batch := historicalDeploymentFixture(t)
-			advanceHistoricalDeployment(t, h, issue.IssueID, source, batch)
+			h := open(t)
+			batch := baseline
+			batch.Hosts = slices.Clone(baseline.Hosts)
+			batch.View.Hosts = slices.Clone(baseline.View.Hosts)
 			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 				duty, err := store.GetIssueDeliveryDuty(t.Context(), tx.Q(), issue.IssueID, source)
 				if err != nil {
