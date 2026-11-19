@@ -15,7 +15,6 @@ export class IssueActivityRead {
     this.read = new WorkItemRead({
       get: async <T>(path: string, signal?: AbortSignal) => {
         const generation = this.generation;
-        await this.earlierRead?.catch(() => {});
         if (signal?.aborted) throw signal.reason;
         const current = this.state.get().value;
         if (current?.readable && current.event_seq > 0) {
