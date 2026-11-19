@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/logging"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
@@ -22,6 +24,7 @@ func TestWriteObservationLogFields(t *testing.T) {
 			{Phase: store.WritePersistOutcome, Duration: time.Second},
 			{Phase: store.WriteAttention, Duration: 900 * time.Millisecond},
 			{Phase: store.WriteExternalWaitRefresh, Duration: 125 * time.Millisecond, Items: new(0)},
+			{Phase: store.WriteSettleTurns, Duration: 250 * time.Millisecond, Items: new(16)},
 		},
 	})
 	var decoded map[string]json.RawMessage
@@ -41,13 +44,38 @@ func TestWriteObservationLogFields(t *testing.T) {
 	if err := json.Unmarshal(decoded["phases_inclusive"], &phases); err != nil {
 		t.Fatal(err)
 	}
-	if len(phases) != 3 || phases[0].Phase != "persist_outcome" || phases[0].Duration != int64(time.Second) || phases[1].Duration != int64(900*time.Millisecond) {
+	if len(phases) != 4 || phases[0].Phase != "persist_outcome" || phases[0].Duration != int64(time.Second) || phases[1].Duration != int64(900*time.Millisecond) {
 		t.Fatalf("phases = %+v", phases)
 	}
 	if phases[0].Items != nil || phases[2].Phase != "external_wait_refresh" || phases[2].Items == nil || *phases[2].Items != 0 {
 		t.Errorf("phase item counts = %+v", phases)
 	}
+	if phases[3].Phase != "settle_open_turns" || phases[3].Items == nil || *phases[3].Items != 16 {
+		t.Errorf("nonzero phase count = %+v", phases[3])
+	}
 	t.Log(output.String())
+}
+
+func TestWriteObservationProductionTextLogPhaseCounts(t *testing.T) {
+	var output bytes.Buffer
+	log, err := logging.NewText(&output, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logWriteObservation(log, store.WriteObservation{
+		Phases: []store.WritePhaseDuration{
+			{Phase: store.WriteExternalWaitRefresh, Duration: time.Millisecond, Items: new(0)},
+			{Phase: store.WriteSettleTurns, Duration: 2 * time.Millisecond, Items: new(16)},
+			{Phase: store.WriteSettleTools, Duration: 3 * time.Millisecond},
+		},
+	})
+	_, rest, found := strings.Cut(output.String(), `phases_inclusive="`)
+	phases, _, closed := strings.Cut(rest, `"`)
+	want := "[{Phase:external_wait_refresh Duration:1ms Items:0} {Phase:settle_open_turns Duration:2ms Items:16} {Phase:settle_open_tools Duration:3ms}]"
+	if !found || !closed || phases != want {
+		t.Fatalf("production phase text = %q, want %q", phases, want)
+	}
+	t.Logf("production phases = %s", phases)
 }
 
 func TestWriteObservationLogTimeoutSnapshot(t *testing.T) {

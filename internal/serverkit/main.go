@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 	_ "time/tzdata"
@@ -900,6 +901,27 @@ func syncConfig(ctx context.Context, a *app.App, ids protocol.IDGen, cfg Config)
 	return nil
 }
 
+// JSON handlers encode the phase fields directly. Text handlers use String
+// so a known item count is printed as a number.
+type writePhaseLogList []store.WritePhaseDuration
+
+func (phases writePhaseLogList) String() string {
+	var text strings.Builder
+	text.WriteByte('[')
+	for index, phase := range phases {
+		if index > 0 {
+			text.WriteByte(' ')
+		}
+		fmt.Fprintf(&text, "{Phase:%s Duration:%s", phase.Phase, phase.Duration)
+		if phase.Items != nil {
+			fmt.Fprintf(&text, " Items:%d", *phase.Items)
+		}
+		text.WriteByte('}')
+	}
+	text.WriteByte(']')
+	return text.String()
+}
+
 func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
 	log.Warn("slow or cancelled store write",
 		"write_id", o.ID, "write_started_at", o.StartedAt, "write_finished_at", o.FinishedAt, "write_deadline_at", o.DeadlineAt,
@@ -910,7 +932,7 @@ func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
 		"caller_stack", o.CallerStack, "wait_failure_sampled_at", o.WaitFailureSampledAt, "active_writer_at_wait_failure", o.ActiveWriter,
 		"total", o.Total, "connection_wait", o.ConnectionWait, "begin_immediate", o.Begin,
 		"callback_inclusive", o.Callback, "commit", o.Commit, "rollback", o.Rollback,
-		"phases_inclusive", o.Phases,
+		"phases_inclusive", writePhaseLogList(o.Phases),
 		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal,
 		"pool_open_connections", o.PoolOpenConnections, "pool_in_use", o.PoolInUse, "pool_idle", o.PoolIdle,
 		"reader_pool_max_open", o.ReaderPool.MaxOpenConnections, "reader_pool_open", o.ReaderPool.OpenConnections,
