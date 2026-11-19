@@ -220,7 +220,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "the focused recheck belongs to the original formal reviewer")
 			}
 			r.HeadSHA, r.BaseSHA, r.RequirementsDigest, r.Reviewer, r.Status = o.Observation.HeadSHA, o.Observation.BaseSHA, digest, round.Reviewer, "reviewing"
-			r.AssessedRequirementsDigest, r.AssessmentReason = "", ""
+			r.AssessedRequirementsDigest, r.AssessmentReason, r.Assessment = "", "", nil
 			round.Number, round.HeadSHA, round.BaseSHA, round.Requirements = len(r.Rounds)+1, r.HeadSHA, r.BaseSHA, digest
 			r.Rounds = append(r.Rounds, round)
 			// Earlier dispositions remain in immutable review history; they do
@@ -377,6 +377,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, err
 			}
 			last.Corrections = append(last.Corrections, protocol.SharedReviewCorrection{RequestID: x.Env.RequestID, TaskID: correction.TaskID, SpecVersion: correction.SpecVersion, RunID: run, ArtifactID: artifact, Profile: pin.Profile, Result: *result, Reason: p.Reason, CreatedAt: x.Now.UnixMilli()})
+			r.AssessedRequirementsDigest, r.AssessmentReason, r.Assessment = "", "", nil
 			last.Result = result
 			r.Status = "changes_requested"
 			if result.Verdict == "passed" {
@@ -406,21 +407,9 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			last.SupplementTaskID, last.SupplementSpecVersion = bound.TaskID, bound.SpecVersion
 			last.SupplementGeneration = bound.ImplementGeneration
 		case "assess":
-			if r.Status != "passed" {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only a passed review can be confirmed applicable")
-			}
-			observation, err := store.GetDeliveryObservation(ctx, tx.Q(), i.IssueID, ref.DeliveryID)
-			if err != nil {
+			if err := assessSharedReview(ctx, x, tx.Q(), i, p, &r); err != nil {
 				return Outcome{}, err
 			}
-			if observation.Observation.ErrorKind != "" || observation.Observation.RefreshPending || observation.Observation.HeadSHA != r.HeadSHA || observation.Observation.BaseSHA != r.BaseSHA {
-				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "a changed candidate requires the original reviewer's focused recheck")
-			}
-			digest, err := store.SharedReviewRequirements(ctx, tx.Q(), r)
-			if err != nil {
-				return Outcome{}, err
-			}
-			r.AssessedRequirementsDigest, r.AssessmentReason = digest, p.Reason
 		case "resolve":
 			if r.Status != "changes_requested" && r.Status != "escalated" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only pending review findings accept dispositions")
@@ -469,6 +458,64 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		events = append(events, Event{ObjectType: "issue", ObjectID: id, Kind: "issue.delivery_review_changed", Body: map[string]any{"review_id": r.ReviewID, "review_revision": r.Revision, "status": r.Status}})
 	}
 	return Outcome{Result: r, Notify: true, Events: events}, nil
+}
+
+func assessSharedReview(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, p protocol.UpdateSharedDeliveryReviewPayload, r *protocol.SharedDeliveryReview) error {
+	if r.Status != "passed" {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "only a passed review can be confirmed applicable")
+	}
+	if err := store.SharedDeliveryReviewCurrent(ctx, q, r); err != nil {
+		return err
+	}
+	candidate := r.CurrentCandidate
+	if candidate == nil {
+		return protocol.Errorf(protocol.CodeStaleRevision, "observe the current review candidate before assessing applicability")
+	}
+	if p.ExpectedCandidateRevision == nil && p.ExpectedHeadSHA == "" && p.ExpectedBaseSHA == "" && p.ExpectedRequirementsDigest == "" {
+		// Preserve the existing same-candidate requirements assessment.
+		if candidate.HeadSHA != r.HeadSHA || candidate.BaseSHA != r.BaseSHA {
+			return protocol.Errorf(protocol.CodeStaleRevision, "read the current candidate and bind the applicability assessment or arrange a focused recheck")
+		}
+		if p.ExpectedReviewRevision != nil && *p.ExpectedReviewRevision != r.Revision {
+			return protocol.Errorf(protocol.CodeStaleRevision, "the original shared review changed")
+		}
+		r.Assessment = nil
+		r.AssessedRequirementsDigest, r.AssessmentReason = candidate.RequirementsDigest, p.Reason
+		return nil
+	}
+	// Hosted authorization already checked the current named agent and epoch.
+	// A direct call must come from the human assigned to this Issue.
+	if x.coordinationExecution == nil && issue.Assignee != (protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: x.Principal.Subject}) {
+		return protocol.Errorf(protocol.CodeForbidden, "the current named Issue owner must assess a changed review candidate")
+	}
+	if p.ExpectedReviewRevision == nil || p.ExpectedCandidateRevision == nil || !validDeliverySHA(p.ExpectedHeadSHA) ||
+		!validDeliverySHA(p.ExpectedBaseSHA) || p.ExpectedRequirementsDigest == "" {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "assessment requires the review revision, candidate revision, head, base and requirements digest")
+	}
+	if *p.ExpectedReviewRevision != r.Revision || *p.ExpectedCandidateRevision != candidate.Revision ||
+		p.ExpectedHeadSHA != candidate.HeadSHA || p.ExpectedBaseSHA != candidate.BaseSHA ||
+		p.ExpectedRequirementsDigest != candidate.RequirementsDigest {
+		return protocol.Errorf(protocol.CodeStaleRevision, "review, provider candidate or requirements changed before the applicability assessment")
+	}
+	if len(r.Rounds) == 0 {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "the original passed review round is missing")
+	}
+	round := r.Rounds[len(r.Rounds)-1]
+	if round.Result == nil || round.Result.Verdict != "passed" || round.RunID == "" || round.ArtifactID == "" {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "retain the actual passed review result and its execution evidence")
+	}
+	r.AssessedRequirementsDigest, r.AssessmentReason = "", ""
+	r.Assessment = &protocol.SharedReviewAssessment{
+		Candidate: *candidate, Round: round.Number, ReviewRevision: r.Revision,
+		IssueID: issue.IssueID, Assessor: issue.Assignee, AssignmentEpoch: issue.AssignmentEpoch, Reason: p.Reason,
+	}
+	if err := store.SharedDeliveryReviewCurrent(ctx, q, r); err != nil {
+		return err
+	}
+	if !r.Valid {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "the original review does not satisfy the current delivery requirements")
+	}
+	return nil
 }
 
 func sharedReviewRoundLimit(r protocol.SharedDeliveryReview) int {

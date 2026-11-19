@@ -10,6 +10,7 @@ import (
 func TestReliabilityRecoveryCLIUsesOriginalNamedCommandsAndControls(t *testing.T) {
 	for _, tc := range []struct{ command, payload string }{
 		{"review-delivery", `{"delivery_id":"pr","action":"wait","expected_review_revision":11,"reason":"Original reviewer stopped without a quality conclusion"}`},
+		{"review-delivery", `{"delivery_id":"pr","action":"assess","expected_review_revision":11,"expected_candidate_revision":42,"expected_head_sha":"head","expected_base_sha":"base","expected_requirements_digest":"digest","reason":"The rebased patch and upstream changes preserve reviewed behavior"}`},
 		{"review-delivery", `{"delivery_id":"pr","action":"recheck","reviewer_task_id":"original-reviewer","expected_head_sha":"head","expected_base_sha":"base","expected_requirements_digest":"digest","reason":"Review the exact read candidate"}`},
 		{"update-delivery", `{"task_id":"original-task","action":"recover_preparation","expected_task_control_revision":5,"reason":"Original legacy execution stopped before any upgrade"}`},
 	} {

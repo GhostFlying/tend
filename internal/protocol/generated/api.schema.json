@@ -14189,8 +14189,14 @@
         "assessed_requirements_digest": {
           "type": "string"
         },
+        "assessment": {
+          "$ref": "#/definitions/SharedReviewAssessment"
+        },
         "base_sha": {
           "type": "string"
+        },
+        "current_candidate": {
+          "$ref": "#/definitions/SharedReviewCandidate"
         },
         "head_sha": {
           "type": "string"
@@ -18047,6 +18053,9 @@
         "assessed_requirements_digest": {
           "type": "string"
         },
+        "assessment": {
+          "$ref": "#/definitions/SharedReviewAssessment"
+        },
         "assessment_reason": {
           "type": "string"
         },
@@ -18058,6 +18067,9 @@
             "$ref": "#/definitions/SharedReviewBudgetAuthorization"
           },
           "type": "array"
+        },
+        "current_candidate": {
+          "$ref": "#/definitions/SharedReviewCandidate"
         },
         "dispositions": {
           "items": {
@@ -18321,6 +18333,43 @@
       "title": "SharedFactKind",
       "type": "string"
     },
+    "SharedReviewAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "assessor": {
+          "$ref": "#/definitions/IssueAssignee"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "candidate": {
+          "$ref": "#/definitions/SharedReviewCandidate"
+        },
+        "issue_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "review_revision": {
+          "type": "integer"
+        },
+        "round": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "candidate",
+        "round",
+        "review_revision",
+        "issue_id",
+        "assessor",
+        "assignment_epoch",
+        "reason"
+      ],
+      "title": "SharedReviewAssessment",
+      "type": "object"
+    },
     "SharedReviewBudgetAuthorization": {
       "additionalProperties": false,
       "properties": {
@@ -18340,6 +18389,31 @@
         "reason"
       ],
       "title": "SharedReviewBudgetAuthorization",
+      "type": "object"
+    },
+    "SharedReviewCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "requirements_digest": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "head_sha",
+        "base_sha",
+        "requirements_digest",
+        "revision"
+      ],
+      "title": "SharedReviewCandidate",
       "type": "object"
     },
     "SharedReviewContributionEvidence": {
@@ -20960,6 +21034,9 @@
         },
         "expected_base_sha": {
           "type": "string"
+        },
+        "expected_candidate_revision": {
+          "type": "integer"
         },
         "expected_head_sha": {
           "type": "string"

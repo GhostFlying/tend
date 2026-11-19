@@ -140,7 +140,31 @@ type SharedReviewBudgetAuthorization struct {
 	Reason    string `json:"reason"`
 }
 
+// SharedReviewCandidate identifies the currently observed head/base and
+// linked requirements. Revision changes when the provider observes another
+// head or base, including a return to an earlier pair.
+type SharedReviewCandidate struct {
+	HeadSHA            string `json:"head_sha"`
+	BaseSHA            string `json:"base_sha"`
+	RequirementsDigest string `json:"requirements_digest"`
+	Revision           int64  `json:"revision"`
+}
+
+// SharedReviewAssessment is the Issue owner's reason for applying an existing
+// passed round to another candidate. The round retains its own evidence.
+type SharedReviewAssessment struct {
+	Candidate       SharedReviewCandidate `json:"candidate"`
+	Round           int                   `json:"round"`
+	ReviewRevision  int64                 `json:"review_revision"`
+	IssueID         string                `json:"issue_id"`
+	Assessor        IssueAssignee         `json:"assessor"`
+	AssignmentEpoch int64                 `json:"assignment_epoch"`
+	Reason          string                `json:"reason"`
+}
+
 type SharedDeliveryReview struct {
+	CurrentCandidate           *SharedReviewCandidate            `json:"current_candidate,omitempty"`
+	Assessment                 *SharedReviewAssessment           `json:"assessment,omitempty"`
 	BudgetAuthorizations       []SharedReviewBudgetAuthorization `json:"budget_authorizations,omitempty"`
 	AssessedRequirementsDigest string                            `json:"assessed_requirements_digest,omitempty"`
 	AssessmentReason           string                            `json:"assessment_reason,omitempty"`
@@ -161,6 +185,12 @@ type SharedDeliveryReview struct {
 	Dispositions               []SharedReviewDisposition         `json:"dispositions,omitempty"`
 	EscalationIssueID          string                            `json:"escalation_issue_id,omitempty"`
 	Reason                     string                            `json:"reason,omitempty"`
+}
+
+// CoversCandidate uses the current applicability projection, including a
+// valid assessment, while HeadSHA and BaseSHA identify the original evidence.
+func (r SharedDeliveryReview) CoversCandidate(head, base string) bool {
+	return r.Valid && r.CurrentCandidate != nil && r.CurrentCandidate.HeadSHA == head && r.CurrentCandidate.BaseSHA == base
 }
 
 // SharedReviewReportReference locates an original report without repeating its
@@ -222,6 +252,7 @@ type UpdateSharedDeliveryReviewPayload struct {
 	ExpectedHeadSHA            string                    `json:"expected_head_sha,omitempty"`
 	ExpectedBaseSHA            string                    `json:"expected_base_sha,omitempty"`
 	ExpectedRequirementsDigest string                    `json:"expected_requirements_digest,omitempty"`
+	ExpectedCandidateRevision  *int64                    `json:"expected_candidate_revision,omitempty"`
 	ExpectedReviewRevision     *int64                    `json:"expected_review_revision,omitempty"`
 	DeliveryID                 string                    `json:"delivery_id"`
 	Action                     string                    `json:"action"`
