@@ -22,6 +22,29 @@ func TestNamedIssueOwnerPlansOnePRReviewAndAssessesExistingChecks(t *testing.T) 
 	}
 }
 
+func TestRunnerManagedIssueOwnerDefersPRBaseUpdate(t *testing.T) {
+	m := &Manager{cfg: Config{Thread: ThreadConfig(t.TempDir(), "")}, named: &hostedconfig.Selection{
+		Purpose: agentconfig.IssueManager, OwnershipPolicy: protocol.IssueOwnerPolicy,
+		RunnerManaged: true, NativeOwnerTools: true,
+	}}
+	instructions := m.threadConfig().DeveloperInstructions
+	for _, guidance := range []string{
+		"During development, review, or waiting for merge authorization",
+		"Target advancement alone does not trigger a rebase, push, or check rerun",
+		"Resolve an actual conflict early if it blocks review or validation",
+		"first confirm the applicable authorization and that the other delivery conditions allow proceeding. Then read the current target tip and PR head",
+		"already an ancestor of the head and the required evidence applies, proceed directly through the protected rebase merge",
+		"If the head is behind, rebase and push, then validate the final combination and required CI",
+		"Apply the existing review applicability and candidate approval rules",
+		"If the target advances during validation or the provider rejects a stale merge attempt, refresh the candidate and reassess under the same protections",
+		"GitHub strict where enabled",
+	} {
+		if !strings.Contains(instructions, guidance) {
+			t.Errorf("runner-managed Issue owner guidance lacks %q", guidance)
+		}
+	}
+}
+
 func TestNamedOwnerIncrementalReadingGuidancePreservesScopeAndSession(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
