@@ -179,7 +179,11 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	if view.ForceMaintenance {
 		fmt.Fprintln(e.Stdout, "Forced maintenance of incompatible runners")
 		for _, stop := range view.WindowStops {
-			fmt.Fprintf(e.Stdout, "  %s/%s: protocol %d, pid %d, %s\n", stop.HostID, stop.Process.LaunchID, stop.Protocol, stop.Process.PID, stop.State)
+			role := "draining"
+			if stop.Primary {
+				role = "accepting"
+			}
+			fmt.Fprintf(e.Stdout, "  %s/%s: %s runner, protocol %d, pid %d, %s\n", stop.HostID, stop.Process.LaunchID, role, stop.Protocol, stop.Process.PID, stop.State)
 			for _, run := range stop.Runs {
 				fmt.Fprintf(e.Stdout, "    run %s lease %s\n", run.RunID, run.LeaseID)
 			}
@@ -196,6 +200,10 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 		writeUpdaterObservation(e.Stdout, "server", view.ServerUpdater)
 	}
 	for _, h := range view.Hosts {
+		if h.Phase == "stopping" || h.Phase == "offline_maintenance" {
+			fmt.Fprintf(e.Stdout, "  %s: %s (protocol %d)\n", h.HostID, h.Phase, h.ProtocolVersion)
+			continue
+		}
 		if view.ServerOnly {
 			fmt.Fprintf(e.Stdout, "  %s: retained (protocol %d)\n", h.HostID, h.ProtocolVersion)
 			continue

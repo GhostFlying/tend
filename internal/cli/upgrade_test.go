@@ -126,7 +126,7 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 			}
 			view.Phase = "server_updater"
 			view.ForceMaintenance = true
-			view.WindowStops = []protocol.UpgradeWindowStop{{HostID: "fixture-host", Process: protocol.RecoveryIdentity{PID: 127, LaunchID: "predecessor"}, Protocol: 5, State: "stopped", Runs: []protocol.LeaseRef{{RunID: "long-run", LeaseID: "original-lease"}}, UnknownRuns: []string{"long-run"}}}
+			view.WindowStops = []protocol.UpgradeWindowStop{{HostID: "fixture-host", Primary: true, Process: protocol.RecoveryIdentity{PID: 127, LaunchID: "predecessor"}, Protocol: 5, State: "stopped", Runs: []protocol.LeaseRef{{RunID: "long-run", LeaseID: "original-lease"}}, UnknownRuns: []string{"long-run"}}}
 			view.Hosts = []protocol.UpgradeHostView{
 				{HostID: "excluded", Status: "skipped", Phase: "skipped"},
 				{HostID: "updater-only", Status: "skipped", Phase: "verified", Updater: &protocol.UpdaterSelfObservation{Receipt: &protocol.UpdaterSelfReceipt{RequestID: "original-request"}}},
@@ -173,7 +173,7 @@ func TestLocalUpgradeUsesUnixRevisionAndStableRequestIdentity(t *testing.T) {
 	if code := te.main("upgrade", "--server-only", "--runner-configurations", "unused"); code != exitUsage {
 		t.Fatal("accepted runner configuration in server scope", code)
 	}
-	for _, want := range []string{"fixture-host/predecessor", "pid 127", "stopped", "1970-01-01T00:00:03Z", "run long-run lease original-lease", "unknown result: long-run"} {
+	for _, want := range []string{"fixture-host/predecessor", "pid 127", "stopped", "accepting runner, protocol 5", "run long-run lease original-lease", "unknown result: long-run"} {
 		if !strings.Contains(te.out.String(), want) {
 			t.Fatalf("missing %q in %s", want, te.out)
 		}

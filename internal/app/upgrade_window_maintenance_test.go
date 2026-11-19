@@ -388,3 +388,72 @@ func TestEmergencyWindowStopsSoleAcceptingRunner(t *testing.T) {
 		})
 	}
 }
+
+func TestWindowFleetEvidencePreservesPhysicalHostOrder(t *testing.T) {
+	h, _ := selfUpgradeFixture(t)
+	now := h.clock.Now()
+	r := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "fleet", ReleaseID: "target", Status: "completed", Phase: "completed", CreatedAt: now, UpdatedAt: now, Hosts: []protocol.UpgradeHostView{{HostID: "stopped", Status: "skipped", Phase: "offline_maintenance"}, {HostID: "live", Status: "skipped"}}}, Manifest: release.Manifest{ReleaseID: "target"}, ManifestSHA256: "manifest", ServerHash: "server", Hosts: []store.UpgradeHost{{HostID: "stopped", PrimaryOffline: true}, {HostID: "live", PreviousHash: "same", TargetHash: "same"}}}
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error { return tx.PutUpgrade(t.Context(), r) }); err != nil {
+		t.Fatal(err)
+	}
+	err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		proof, err := store.UpgradeInstallationEvidence(t.Context(), tx.Q(), "fleet", now.UnixMilli())
+		if err == nil && (len(proof.Hosts) != 1 || proof.Hosts[0].HostID != "live") {
+			t.Fatal(proof)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReattachedLeaseRequiresItsOwnWindowExit(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	const host = "linux-1"
+	rt := testRuntime("original")
+	if op := h.versionedHello(host, rt); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	h.createTask(owner, createTaskPayload{Title: "long run", Spec: testSpec})
+	target := protocol.Target{Type: "host", ID: host}
+	as, ok := h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: rt}, nil))
+	if !ok {
+		t.Fatal("missing claim")
+	}
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	h.clock.Advance(2 * time.Minute)
+	if _, err := h.app.ExpireLeases(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error { return seedWindowExit(ctx, tx, h.clock.Now(), as) }); err != nil {
+		t.Fatal(err)
+	}
+	replacement := *rt
+	replacement.InstanceID = "replacement"
+	replacement.Generation++
+	replacement.Sequence = 1
+	hello := protocol.HelloPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: &replacement, Held: []protocol.HeldRun{{RunID: as.RunID, LeaseID: as.LeaseID, Observed: protocol.RunRunning}}}
+	if op := h.exec(runner(host), h.env(protocol.OpRunnerHello, target, hello, nil), Hello{}); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	if h.run(as.RunID).ObservedState != protocol.RunRunning {
+		t.Fatal("replacement did not reattach")
+	}
+	h.clock.Advance(2 * time.Minute)
+	if _, err := h.app.ExpireLeases(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		open, occupied, err := store.HostSlotCounts(ctx, tx.Q(), host)
+		if err == nil && (open != 1 || occupied != 1) {
+			t.Fatal("previous writer released replacement occupancy", open, occupied)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

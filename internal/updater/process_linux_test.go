@@ -269,3 +269,52 @@ func TestUpdaterMaintenanceFastExitHelper(t *testing.T) {
 		os.Exit(17)
 	}
 }
+
+func TestEmergencyUnresponsiveProcessHelper(t *testing.T) {
+	ready := os.Getenv("TEND_TEST_EMERGENCY_READY")
+	if ready == "" {
+		return
+	}
+	signal.Ignore(syscall.SIGTERM)
+	if err := os.WriteFile(ready, []byte("ready"), 0600); err != nil {
+		os.Exit(2)
+	}
+	select {}
+}
+
+func TestEmergencyStopEscalatesUnderSameLiveGrant(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := LinuxProcess{}
+	id, err := p.Start(t.Context(), exe, Config{Args: []string{"-test.run=^TestEmergencyUnresponsiveProcessHelper$"}, LogPath: filepath.Join(t.TempDir(), "child.log")}, map[string]string{"TEND_TEST_EMERGENCY_READY": ready, "TEND_UPDATER_LAUNCH_ID": "emergency-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Crash(ctx, id, time.Second)
+	})
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("fixture did not install signal handler")
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
+	checks := 0
+	if err := p.StopIf(t.Context(), id, time.Second, func() error { checks++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Inspect(t.Context(), id.PID); checks != 2 || !errors.Is(err, ErrNotRunning) {
+		t.Fatal(checks, err)
+	}
+}

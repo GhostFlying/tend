@@ -22,7 +22,10 @@ func UpgradeInstallationEvidence(ctx context.Context, q Querier, id string, chec
 	}
 	v := &protocol.UpgradeEvidence{SourceCommit: r.View.SourceCommit, UpgradeID: id, Revision: r.View.Revision, ReleaseID: r.View.ReleaseID, ManifestSHA256: r.ManifestSHA256, ServerSHA256: r.ServerHash, CheckedAt: checkedAt, CompletedAt: r.View.UpdatedAt.UnixMilli(), Hosts: []protocol.UpgradeEvidenceHost{}}
 	seen := map[string]bool{}
-	for i, h := range r.InstallationHosts() {
+	for i, h := range r.Hosts {
+		if r.View.ServerOnly || h.PrimaryOffline {
+			continue
+		}
 		view := r.View.Hosts[i]
 		if h.HostID != view.HostID || seen[h.HostID] || h.TargetHash == "" {
 			return invalid()

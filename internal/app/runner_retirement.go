@@ -73,15 +73,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		} else if input.Unused {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "no matching unused forced stop")
 		}
-		if !confirmed.Valid && input.AuthorizationID == "" && stop != nil && stop.Primary {
-			rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
-			if err != nil {
-				return Outcome{}, err
-			}
-			if rt.Runtime.InstanceID == process.LaunchID {
-				result.ReadySequence = rt.Runtime.Sequence
-			}
-		} else if !confirmed.Valid && input.AuthorizationID == "" {
+		if !confirmed.Valid && input.AuthorizationID == "" && (stop == nil || !stop.Primary) {
 			drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)
 			if err != nil {
 				return Outcome{}, err
@@ -106,6 +98,12 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		events := []Event{{ObjectType: "host", ObjectID: host, Kind: "runner.retired"}}
 		if stop != nil {
 			if stop.Primary {
+				for i, h := range window.Hosts {
+					if h.HostID == host {
+						window.View.Hosts[i].Phase = "offline_maintenance"
+						break
+					}
+				}
 				rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
 				if err != nil {
 					return Outcome{}, err
@@ -161,13 +159,7 @@ func (RetireRollingRunner) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		stop.Process = process
 		stop.Forced = true
 		result.RemainingMillis = window.View.OverallDeadlineMillis - x.Now.UnixMilli()
-		rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
-		if err != nil {
-			return Outcome{}, err
-		}
-		if rt.Runtime.InstanceID == process.LaunchID {
-			result.ReadySequence = rt.Runtime.Sequence
-		}
+
 		return grantRetirement(ctx, x, tx, result, stop.JournalID, raw, &window, stop)
 	}
 	drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, process.LaunchID)

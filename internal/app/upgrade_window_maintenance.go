@@ -42,7 +42,7 @@ func captureWindowStops(ctx context.Context, q store.Querier, batch *store.Upgra
 		if process.LaunchID != id || process.PID <= 1 || process.StartTicks == 0 || int64(process.PID) != rt.Build.PID || !release.ValidSHA(process.SHA256) || process.SHA256 != rt.Build.BinarySHA256 {
 			return protocol.Errorf(protocol.CodeConflictPayload, "host %s runner %s differs from its supervisor receipt", host, id)
 		}
-		stop := protocol.UpgradeWindowStop{HostID: host, Process: process, SourceUpgradeID: drain.UpgradeID, JournalID: rt.JournalID, Generation: rt.Generation, Protocol: rt.Protocol, State: "draining", Runs: []protocol.LeaseRef{}}
+		stop := protocol.UpgradeWindowStop{HostID: host, Process: process, SourceUpgradeID: drain.UpgradeID, JournalID: rt.JournalID, Generation: rt.Generation, Protocol: rt.Protocol, State: "pending_stop", Runs: []protocol.LeaseRef{}}
 		var granted bool
 		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_retirements WHERE host_id=? AND instance_id=? AND confirmed_at IS NULL)`, host, id).Scan(&granted); err != nil {
 			return err
@@ -98,7 +98,7 @@ func capturePrimaryStop(ctx context.Context, tx *store.Tx, batch *store.UpgradeR
 	if o := rt.Updater; o != nil && o.SupervisedProcess.PID == process.PID && o.SupervisedProcess.LaunchID == process.LaunchID && o.SupervisedProcess.SHA256 == process.SHA256 {
 		process.StartTicks = o.SupervisedProcess.StartTicks
 	}
-	stop := protocol.UpgradeWindowStop{Primary: true, HostID: host, Process: process, SourceUpgradeID: batch.View.UpgradeID, JournalID: rt.JournalID, Generation: rt.Generation, Protocol: rt.Protocol, State: "draining", Runs: []protocol.LeaseRef{}}
+	stop := protocol.UpgradeWindowStop{Primary: true, HostID: host, Process: process, SourceUpgradeID: batch.View.UpgradeID, JournalID: rt.JournalID, Generation: rt.Generation, Protocol: rt.Protocol, State: "pending_stop", Runs: []protocol.LeaseRef{}}
 	if err := appendWindowStop(ctx, tx.Q(), batch, stop); err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func windowForRetirement(ctx context.Context, q store.Querier, host string, inpu
 		WHERE json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.source_upgrade_id')=?
 		AND json_extract(s.value,'$.process.launch_id')=? AND (
 			json_extract(s.value,'$.state')='stop_authorized' OR (json_extract(s.value,'$.state')='not_stopped' AND u.upgrade_id=?) OR
-			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state')='draining'))
+			(u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.state')='pending_stop'))
 		ORDER BY u.created_at,u.rowid LIMIT 1`, host, input.UpgradeID, input.Process.LaunchID, input.WindowID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.UpgradeRow{}, nil, nil
@@ -234,14 +234,36 @@ func (a *App) PrimaryWindowTarget(ctx context.Context, p protocol.Principal, pro
 	var id string
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		err := tx.Q().QueryRowContext(ctx, `SELECT u.upgrade_id FROM upgrades u JOIN json_each(u.state_json,'$.view.window_stops') s
-          WHERE u.phase='window_maintenance' AND u.status='running' AND json_extract(s.value,'$.primary')=1
+          WHERE u.phase='window_maintenance' AND u.status IN ('running','attention') AND json_extract(s.value,'$.primary')=1
           AND json_extract(s.value,'$.host_id')=? AND json_extract(s.value,'$.process.launch_id')=?
           AND json_extract(s.value,'$.process.pid')=? AND json_extract(s.value,'$.process.sha256')=?
-          AND json_extract(s.value,'$.process.start_ticks') IN (0,?) AND json_extract(s.value,'$.state') IN ('draining','stop_authorized') LIMIT 1`, p.Subject, process.LaunchID, process.PID, process.SHA256, process.StartTicks).Scan(&id)
+          AND json_extract(s.value,'$.process.start_ticks') IN (0,?) AND json_extract(s.value,'$.state') IN ('pending_stop','stop_authorized') LIMIT 1`, p.Subject, process.LaunchID, process.PID, process.SHA256, process.StartTicks).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		return err
 	})
 	return id, err
+}
+
+func checkWindowRunOwnership(ctx context.Context, q store.Querier, r store.UpgradeRow, host string) error {
+	runs, err := store.ListOpenRunsOnHost(ctx, q, host)
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if !r.Manifest.Protocol.Contains(run.Protocol) && !windowOwnsRun(r.View.WindowStops, host, run.RunID) {
+			if run.ObservedState == protocol.RunUnknown {
+				proved, err := store.WindowRunStopped(ctx, q, host, run.RunID)
+				if err != nil {
+					return err
+				}
+				if proved {
+					continue
+				}
+			}
+			return protocol.Errorf(protocol.CodeInvalidTransition, "unfinished run %s requires a retired protocol", run.RunID)
+		}
+	}
+	return nil
 }

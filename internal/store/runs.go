@@ -297,6 +297,13 @@ func (t *Tx) SetLease(ctx context.Context, leaseID, from, to string, expiresAt, 
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return ErrStale
 	}
+	if from == LeaseLapsed && to == LeaseActive {
+		// Reconciliation attached a writer to the original lease. Its next
+		// lapse needs its own exit proof; the earlier batch keeps its receipt.
+		if _, err := t.Exec(ctx, `DELETE FROM runner_window_released_leases WHERE lease_id=?`, leaseID); err != nil {
+			return fmt.Errorf("store: invalidate previous writer exit: %w", err)
+		}
+	}
 	return nil
 }
 

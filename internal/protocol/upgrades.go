@@ -18,7 +18,7 @@ type UpgradeHostView struct {
 }
 
 // UpgradeWindowStop pins an incompatible writer and the leases it owned at
-// admission. Its deadline and process identity survive retries and lost replies.
+// admission. Its process identity survives retries and lost replies.
 type UpgradeWindowStop struct {
 	Forced          bool             `json:"forced,omitempty"`
 	HostID          string           `json:"host_id"`

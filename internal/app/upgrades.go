@@ -224,13 +224,18 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, err
 		}
 		if retired || (c.ForceMaintenance && !c.Manifest.Protocol.Contains(rt.Runtime.Protocol)) {
+			phase := "offline_maintenance"
 			if !retired {
+				phase = "stopping"
 				if err := capturePrimaryStop(ctx, tx, &r, h.HostID, rt.Runtime, control); err != nil {
 					return Outcome{}, err
 				}
 			}
+			if err := checkWindowRunOwnership(ctx, tx.Q(), r, h.HostID); err != nil {
+				return Outcome{}, err
+			}
 			r.Hosts = append(r.Hosts, store.UpgradeHost{HostID: h.HostID, PrimaryOffline: true, PreviousHash: rt.Runtime.Build.BinarySHA256, MaintenanceHandoff: control.Mode == protocol.RunnerMaintenance})
-			r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "skipped", Phase: "offline_maintenance", CurrentVersion: rt.Runtime.Build.Version, ProtocolVersion: rt.Runtime.Protocol})
+			r.View.Hosts = append(r.View.Hosts, protocol.UpgradeHostView{HostID: h.HostID, Status: "skipped", Phase: phase, CurrentVersion: rt.Runtime.Build.Version, ProtocolVersion: rt.Runtime.Protocol})
 			continue
 		}
 		if !c.Manifest.Protocol.Contains(rt.Runtime.Protocol) {
@@ -256,23 +261,9 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		if !ok && !c.ServerOnly {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "release lacks runner for host %s", h.HostID)
 		}
-		runs, err := store.ListOpenRunsOnHost(ctx, tx.Q(), h.HostID)
-		if err != nil {
+
+		if err := checkWindowRunOwnership(ctx, tx.Q(), r, h.HostID); err != nil {
 			return Outcome{}, err
-		}
-		for _, run := range runs {
-			if !c.Manifest.Protocol.Contains(run.Protocol) && !windowOwnsRun(r.View.WindowStops, h.HostID, run.RunID) {
-				if run.ObservedState == protocol.RunUnknown {
-					proved, err := store.WindowRunStopped(ctx, tx.Q(), h.HostID, run.RunID)
-					if err != nil {
-						return Outcome{}, err
-					}
-					if proved {
-						continue
-					}
-				}
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "unfinished run %s requires a retired protocol", run.RunID)
-			}
 		}
 		var configuration *protocol.RunnerConfiguration
 		if len(c.RunnerConfigurations) > 0 {
