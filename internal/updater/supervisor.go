@@ -101,6 +101,9 @@ func openSupervisor(cfg Config, opts Options, heldLock *os.File) (*Supervisor, e
 	if (state.Format < 1 || state.Format > rollingStateFormat) || state.InstanceID != cfg.InstanceID {
 		return fail(errors.New("updater: durable state belongs to a different instance"))
 	}
+	if state.CurrentJournal != "" && (cfg.Role != "runner" || state.Format < rollingStateFormat || !release.ValidID(state.CurrentJournal)) {
+		return fail(errors.New("updater: invalid committed runner journal"))
+	}
 	if state.Format == 2 && (state.Generation == 0 || state.UpdaterEpoch == "" || state.Recovery == nil) {
 		return fail(errors.New("updater: incomplete format 2 recovery ownership"))
 	}
@@ -672,7 +675,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		}
 		if op.Kind == "upgrade" && op.Previous.StorageVersion != op.Candidate.StorageVersion {
 			op.BackupDir = filepath.Join(s.cfg.StateDir, "backups", op.ID)
-			if err := backupDataContext(ctx, s.cfg, op); err != nil {
+			if err := backupDataContext(ctx, s.serviceDataConfig(), op); err != nil {
 				return err
 			}
 		}
@@ -724,7 +727,7 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 			return errors.New("updater: restore lacks persistent admission fence")
 		}
 		if !noLaunch && op.BackupDir != "" {
-			if err := restoreData(s.cfg, op); err != nil {
+			if err := restoreData(s.serviceDataConfig(), op); err != nil {
 				return err
 			}
 		}

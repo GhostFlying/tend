@@ -348,7 +348,7 @@ func (s *Supervisor) validateBoundedRunnerData(data protocol.BoundedDataIdentity
 		return errors.New("updater: complete runner journal identity required")
 	}
 	listed := false
-	for _, path := range s.cfg.DataFiles {
+	for _, path := range s.serviceDataConfig().DataFiles {
 		if path == data.Path {
 			listed = true
 		}
@@ -506,7 +506,7 @@ func (s *Supervisor) boundedRunnerStep(ctx context.Context) (handled bool, resul
 		if err := s.save(); err != nil {
 			return true, err
 		}
-		if err := backupBoundedRunnerDataContext(stepCtx, s.cfg, op); err != nil {
+		if err := backupBoundedRunnerDataContext(stepCtx, s.serviceDataConfig(), op); err != nil {
 			return true, err
 		}
 		op.Phase = "backed_up"

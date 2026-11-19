@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"path/filepath"
+	"slices"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 type RollingLaunch struct {
@@ -37,6 +39,23 @@ type RollingAuthority interface {
 func JournalSocket(original, journal string) string {
 	sum := sha256.Sum256([]byte(journal))
 	return filepath.Join(filepath.Dir(original), fmt.Sprintf("r-%x.sock", sum[:12]))
+}
+
+// The configured runner journal denotes the original generation. Maintenance
+// of a committed successor must snapshot and validate its actual writer.
+func (s *Supervisor) serviceDataConfig() Config {
+	cfg := s.cfg
+	if cfg.Role != "runner" || s.state.CurrentJournal == "" {
+		return cfg
+	}
+	cfg.DataFiles = slices.Clone(cfg.DataFiles)
+	for i, path := range cfg.DataFiles {
+		name := filepath.Base(path)
+		if name == "journal.db" || name == "journal.db.incarnation" {
+			cfg.DataFiles[i] = filepath.Join(filepath.Dir(path), "generations", s.state.CurrentJournal, name)
+		}
+	}
+	return cfg
 }
 
 type journalAuthority struct{ cfg Config }
