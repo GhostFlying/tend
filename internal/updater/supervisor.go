@@ -698,6 +698,11 @@ func (s *Supervisor) step(ctx context.Context, op *Operation) error {
 		op.Phase = "backed_up"
 		return s.save()
 	case "backed_up":
+		if op.Kind == "restart" {
+			if held, err := s.checkCrashWindow(ctx); held || err != nil {
+				return err
+			}
+		}
 		if err := s.grantValid(op); err != nil {
 			return s.recoverUnlaunched(ctx, op)
 		}
@@ -1097,6 +1102,9 @@ func (s *Supervisor) monitor(ctx context.Context) error {
 		if err := s.verifyBoundedRunnerSourceGone(ctx, s.state.Process); err != nil {
 			return err
 		}
+	}
+	if held, err := s.checkCrashWindow(ctx); held || err != nil {
+		return err
 	}
 	// A normal crash restarts the committed binary, never a prior data snapshot.
 	id, err := s.opts.NewID()
