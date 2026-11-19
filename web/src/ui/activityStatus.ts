@@ -58,6 +58,7 @@ export function conversationStatus(
   state?: string,
   startedAt: number | null | undefined = undefined,
   endedAt: number | null = null,
+  activeTool?: string,
 ): ActivityStatus {
   const latest = items.at(-1);
   const active =
@@ -74,9 +75,11 @@ export function conversationStatus(
   return {
     active,
     label: active
-      ? latest?.tool?.status === "running" || latest?.body
-        ? stageLabel(latest.tool ? "tool" : "text", latest.tool?.name)
-        : "处理中"
+      ? activeTool
+        ? stageLabel("tool", activeTool)
+        : latest?.tool?.status === "running" || latest?.body
+          ? stageLabel(latest.tool ? "tool" : "text", latest.tool?.name)
+          : "处理中"
       : terminalLabel(terminal),
     steps: items.filter((item) => item.tool).length,
     startedAt: startedAt === undefined ? timestamp(items[0]?.created_at) : startedAt,

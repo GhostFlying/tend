@@ -22,7 +22,7 @@ export class IssueReadingState {
     return this.following;
   }
   saveActivity(page: IssueActivityPage | null): void {
-    if (page) this.activity = page;
+    this.activity = page;
   }
   saveTop(top: number): void {
     this.top = top;

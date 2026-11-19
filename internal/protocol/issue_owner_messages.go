@@ -65,13 +65,15 @@ type IssueConversationQueuePage struct {
 // IssueTurnProcess is a read-only public tool projection. Its cursor belongs to
 // background arrival order, independently of transcript message sequence.
 type IssueTurnProcess struct {
-	HasTools  bool                    `json:"has_tools,omitempty"`
-	Error     string                  `json:"error,omitempty"`
-	Items     []IssueConversationItem `json:"items"`
-	More      bool                    `json:"more"`
-	Next      int64                   `json:"next,omitempty"`
-	StartedAt int64                   `json:"started_at,omitempty"`
-	EndedAt   int64                   `json:"ended_at,omitempty"`
+	HasTools   bool                    `json:"has_tools,omitempty"`
+	State      MessageState            `json:"state,omitempty"`
+	ActiveTool string                  `json:"active_tool,omitempty"`
+	Error      string                  `json:"error,omitempty"`
+	Items      []IssueConversationItem `json:"items"`
+	More       bool                    `json:"more"`
+	Next       int64                   `json:"next,omitempty"`
+	StartedAt  int64                   `json:"started_at,omitempty"`
+	EndedAt    int64                   `json:"ended_at,omitempty"`
 }
 
 type IssueTranscriptBlock struct {

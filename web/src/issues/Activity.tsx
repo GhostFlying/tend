@@ -753,18 +753,23 @@ function ActivityBlock({
   };
   const displayRows = activityTurnRows(rows, processBlock, readable);
   const firstReply = displayRows.find((row) => row.kind === "agent");
+  const summaryError = !process.value ? processBlock.process?.error : undefined;
   const discussion = (
     <article
       className={styles.discussion}
       data-scroll-id={entry.id}
       data-discussion-turn={entry.id}
     >
-      {!readable && processBlock.process?.error && (
+      {summaryError && (
         <p role="status" className={styles.error}>
-          {processBlock.process.error}
+          {process.error ?? summaryError}
           <button
+            disabled={readable && process.loading}
             onClick={() => {
-              if (!opened) setOpened(true);
+              if (readable) {
+                requestProcess();
+                setTraceOpen(true);
+              } else if (!opened) setOpened(true);
               else void continuation.refresh();
             }}
           >
@@ -868,6 +873,7 @@ function ActivityBlock({
                       ? {
                           open: traceOpen,
                           ready: !!process.value,
+                          activeTool: process.value ? undefined : block.process?.active_tool,
                           toggle: () => {
                             if (!traceOpen) requestProcess();
                             setTraceOpen(!traceOpen);
@@ -875,7 +881,7 @@ function ActivityBlock({
                           footer: (
                             <>
                               {process.loading && <p role="status">正在读取公开过程…</p>}
-                              {process.error && (
+                              {process.error && !summaryError && (
                                 <p role="status">
                                   公开过程读取失败
                                   <button onClick={() => requestProcess()}>重试</button>

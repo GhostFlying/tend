@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { IssueTranscriptBlock } from "../api/generated/api.ts";
 import { buildTranscriptEntries } from "../conversation/transcriptBlocks.ts";
+import { conversationStatus } from "../ui/activityStatus.ts";
 import { activityTurnRows } from "./turnRows.ts";
 
 const trigger = {
@@ -26,6 +27,27 @@ const first = {
     updated_at: trigger.created_at,
   },
 };
+
+test("readable tool metadata shows running or uncertain status without tool details", () => {
+  const { state: _state, ...undecided } = trigger;
+  const process = { items: [], more: false, has_tools: true, started_at: 1000 };
+  const collect = (value: IssueTranscriptBlock) =>
+    activityTurnRows([], value, true).find((row) => row.kind === "agent")!;
+  const running = collect({
+    ...block,
+    trigger: undecided,
+    process: { ...process, state: "processing", active_tool: "exec_command" },
+  });
+  expect(running.items).toEqual([]);
+  expect(
+    conversationStatus(running.items, running.state, running.startedAt, null, "exec_command"),
+  ).toMatchObject({ active: true, label: "正在执行命令", startedAt: 1000 });
+  const unknown = collect({ ...block, trigger: undecided, process });
+  expect(conversationStatus(unknown.items, unknown.state)).toMatchObject({
+    active: false,
+    label: "结果待确认",
+  });
+});
 
 test("the original trigger retains its reply identity from empty process to tools and prose", () => {
   const reply = (value: IssueTranscriptBlock) =>

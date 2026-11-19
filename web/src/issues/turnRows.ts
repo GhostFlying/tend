@@ -38,8 +38,14 @@ export function activityTurnRows(
       else if (item.choices?.length)
         items.set(item.message_id, { ...existing, choices: item.choices });
     }
+    const state =
+      row.state ??
+      (readable && !items.size
+        ? (block.process?.state ?? (block.process?.has_tools ? "unknown" : undefined))
+        : undefined);
     return {
       ...row,
+      ...(state ? { state } : {}),
       key,
       items: [...items.values()],
       ...(block.process
@@ -57,6 +63,7 @@ export function activityTurnRows(
     );
   if (
     block.trigger.state !== "processing" &&
+    block.process?.state !== "processing" &&
     !block.process?.has_tools &&
     !block.process?.items?.length
   )

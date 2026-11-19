@@ -176,7 +176,15 @@ export function AgentTurn({
   processUnavailable = false,
   process,
 }: {
-  process?: { open: boolean; ready: boolean; toggle(): void; footer: React.ReactNode } | undefined;
+  process?:
+    | {
+        open: boolean;
+        ready: boolean;
+        activeTool?: string | undefined;
+        toggle(): void;
+        footer: React.ReactNode;
+      }
+    | undefined;
   processUnavailable?: boolean;
   entry: Extract<Entry, { kind: "agent" }>;
   proseClassName?: string | undefined;
@@ -194,6 +202,7 @@ export function AgentTurn({
           entry.startedAt !== null
         ? entry.startedAt + entry.done.tookMs
         : null,
+    process?.activeTool,
   );
   const tools = entry.items.filter((item) => item.tool);
   const processing = groupedProcessing(entry.items);

@@ -19,6 +19,48 @@ type urgentQueueFixture struct {
 	conversation string
 }
 
+func TestIssueActivityReadableKeepsUrgentRunningToolStatus(t *testing.T) {
+	f := newUrgentQueueFixture(t)
+	original := f.submit(t, "Check progress now")
+	notice := f.steer(t, original)
+	f.consume(t, f.claim(t, notice.MessageID))
+	p := protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: f.turn.ThreadID}
+	for _, status := range []protocol.ToolStatus{protocol.ToolRunning, protocol.ToolCompleted} {
+		op := f.exec(p, f.env("conversation.record_tool_use", protocol.Target{Type: "conversation"}, recordToolUsePayload{
+			ReplyTo: notice.MessageID, TurnID: f.turn.TurnID, ItemID: "urgent-tool", Tool: "exec_command", Status: status,
+		}, nil), RecordToolUse{})
+		if op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if err := f.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			page, err := views.ReadIssueActivity(t.Context(), tx.Q(), f.issue.IssueID, views.IssueActivityQuery{Readable: true})
+			if err != nil {
+				return err
+			}
+			for _, entry := range page.Items {
+				b := entry.Block
+				if b == nil || b.Trigger.MessageID != notice.MessageID {
+					continue
+				}
+				if b.Process == nil || !b.Process.HasTools || len(b.Process.Items) != 0 || len(b.Items) != 0 || b.Process.StartedAt == 0 {
+					t.Fatalf("expected lightweight urgent process metadata: %+v", b)
+				}
+				if status == protocol.ToolRunning && (b.Process.State != protocol.MessageProcessing || b.Process.ActiveTool != "exec_command") {
+					t.Fatalf("expected running tool metadata: %+v", b.Process)
+				}
+				if status == protocol.ToolCompleted && (b.Process.State != protocol.MessageProcessing || b.Process.ActiveTool != "" || b.Process.EndedAt != 0) {
+					t.Fatalf("the native turn is still active after its tool completes: %+v", b.Process)
+				}
+				return nil
+			}
+			t.Fatal("urgent activity missing")
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func newUrgentQueueFixture(t *testing.T) urgentQueueFixture {
 	t.Helper()
 	h, _, issue, assignment, _ := reviewManagerAssignment(t)

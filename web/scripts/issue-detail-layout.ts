@@ -596,6 +596,92 @@ const address = server.address();
 assert(address && typeof address !== "string");
 const browser = await chromium.launch();
 try {
+  {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    const savedSeq = seq;
+    seq = 300;
+    try {
+      const page = await context.newPage();
+      const row = activity.items![0]!;
+      const original = row.block!;
+      const error = "公开过程读取失败，已保存的讨论仍可阅读。";
+      const block = {
+        ...original,
+        trigger: { ...original.trigger, author: "owner", state: "failed", body: "保留原讨论" },
+        items: [],
+        more: false,
+        process: { items: [], more: false, error },
+      } satisfies IssueTranscriptBlock;
+      const cursors: (number | null)[] = [];
+      const activityPath = `/api/v1/issues/${issue.issue_id}/activity`;
+      const detailPath = `/api/v1/conversation/blocks/${block.trigger.message_id}`;
+      await page.route(
+        (url) => url.pathname === activityPath,
+        (route) => {
+          const param = new URL(route.request().url()).searchParams.get("since");
+          const since = param === null ? null : Number(param);
+          if (seq === 100) cursors.push(since);
+          if (since !== null && since > seq)
+            return route.fulfill({
+              status: 400,
+              json: { error: { code: "invalid_request", message: "invalid activity cursor" } },
+            });
+          return route.fulfill({
+            json: {
+              items:
+                since === seq
+                  ? []
+                  : [
+                      {
+                        ...row,
+                        id: seq === 100 ? "rebuilt-turn" : row.id,
+                        block:
+                          seq === 100
+                            ? { ...block, trigger: { ...block.trigger, body: "恢复后的权威讨论" } }
+                            : block,
+                      },
+                    ],
+              readable: true,
+              more: false,
+              event_seq: seq,
+            },
+          });
+        },
+      );
+      let retries = 0;
+      await page.route(
+        (url) => url.pathname === detailPath,
+        (route) => {
+          retries++;
+          return route.fulfill({ json: { ...block, process: { items: [], more: false } } });
+        },
+      );
+      const connected = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      await connected;
+      const discussion = page.locator(`article[data-scroll-id="${row.id}"]`);
+      await discussion.getByText("保留原讨论", { exact: true }).waitFor();
+      const notice = discussion.getByRole("status").filter({ hasText: error });
+      await notice.waitFor();
+      assert.equal(retries, 0);
+      await discussion.getByRole("button", { name: "重新读取公开过程", exact: true }).click();
+      await notice.waitFor({ state: "hidden" });
+      assert.equal(retries, 1);
+      seq = 100;
+      for (const stream of streams) stream.end(`event: reset\ndata: {"event_seq":${seq}}\n\n`);
+      await page.getByText("恢复后的权威讨论", { exact: true }).waitFor();
+      assert.equal(cursors[0], null, "an event-stream reset must request a fresh activity head");
+      assert.equal(await discussion.count(), 0);
+      console.log(
+        "PASS readable process error retry without a reply and authoritative activity reset",
+      );
+    } finally {
+      await context.close();
+      seq = savedSeq;
+    }
+  }
   for (const followEnd of [true, false]) {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 844 },

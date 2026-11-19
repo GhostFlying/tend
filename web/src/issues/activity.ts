@@ -1,3 +1,4 @@
+import { ApiError } from "../api/client.ts";
 import type { IssueActivityPage, IssueActivityEntry } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
 import { WorkItemRead } from "../workitems/live.ts";
@@ -15,19 +16,39 @@ export class IssueActivityRead {
   private generation = 0;
   private earlierRead: Promise<void> | null = null;
   private controller: AbortController | undefined;
+  private headRequired = false;
   readonly read: WorkItemRead<ActivityReadPage>;
   readonly state: WorkItemRead<ActivityReadPage>["state"];
   constructor(private api: Reader) {
     const source: Reader = {
       get: async <T>(path: string, signal?: AbortSignal) => {
-        const generation = this.generation;
+        let generation = this.generation;
         if (signal?.aborted) throw signal.reason;
         const current = this.state.get().value;
-        if (current?.readable && current.event_seq > 0) {
-          return (await this.changes(path, current, signal)) as T;
+        if (!this.headRequired && current?.readable && current.event_seq > 0) {
+          try {
+            return (await this.changes(path, current, signal)) as T;
+          } catch (error) {
+            if (
+              signal?.aborted ||
+              generation !== this.generation ||
+              !(error instanceof ApiError) ||
+              error.status !== 400 ||
+              error.code !== "invalid_request" ||
+              error.message !== "invalid activity cursor"
+            )
+              throw error;
+            this.cancelEarlier();
+            generation = this.generation;
+            this.headRequired = true;
+          }
         }
         let page = await this.api.get<IssueActivityPage>(path, signal);
         const head = page;
+        if (this.headRequired && !signal?.aborted && generation === this.generation) {
+          this.older.clear();
+          this.headRequired = false;
+        }
         if (page.readable) {
           if (!signal?.aborted && generation === this.generation) this.merge(page);
           return { ...page, items: this.items() } as T;
@@ -81,7 +102,7 @@ export class IssueActivityRead {
   }
   earlier(): Promise<void> {
     const current = this.state.get().value;
-    if (!current?.more || this.earlierRead) return Promise.resolve();
+    if (!current?.more || this.earlierRead || this.headRequired) return Promise.resolve();
     const generation = this.generation;
     const controller = new AbortController();
     this.controller = controller;
@@ -102,9 +123,13 @@ export class IssueActivityRead {
           event_seq: Math.min(current.event_seq, page.event_seq),
         },
       });
-    })().finally(() => {
-      if (this.earlierRead === pending) this.earlierRead = null;
-    });
+    })()
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted && generation === this.generation) throw error;
+      })
+      .finally(() => {
+        if (this.earlierRead === pending) this.earlierRead = null;
+      });
     this.earlierRead = pending;
     return pending.then(() => {
       if (generation === this.generation) return this.read.refresh();
@@ -163,10 +188,21 @@ export class IssueActivityRead {
   refresh(): Promise<void> {
     return this.read.refresh();
   }
-  close(): void {
+  rebuild(): Promise<void> {
+    const id = this.id;
+    if (!id) return Promise.resolve();
+    this.close();
+    return this.open(id);
+  }
+  private cancelEarlier(): void {
     this.generation++;
     this.controller?.abort();
+    this.controller = undefined;
     this.earlierRead = null;
+  }
+  close(): void {
+    this.cancelEarlier();
+    this.headRequired = false;
     this.id = "";
     this.older.clear();
     this.read.close();
