@@ -49,6 +49,12 @@
   --err: #d93c3c;
   --idle: rgba(15, 17, 21, 0.28);
 
+  /* GitHub Primer PR lifecycle foregrounds. */
+  --primer-pr-open: #1a7f37;
+  --primer-pr-draft: #59636e;
+  --primer-pr-merged: #8250df;
+  --primer-pr-closed: #d1242f;
+
   /* semantic foregrounds and overlays */
   --on-accent: #fff;
   --on-state: #fff;
@@ -141,6 +147,11 @@
 }
 
 body[data-dark] {
+  --primer-pr-open: #3fb950;
+  --primer-pr-draft: #9198a1;
+  --primer-pr-merged: #ab7df8;
+  --primer-pr-closed: #f85149;
+
   --diagnostic-accent: #8ab4ff;
   --diagnostic-selection: #202d44;
   --rollout-accent: #97a8ff;

@@ -11,6 +11,7 @@ type deliveryActionFields struct {
 
 func deliveryActions() []deliveryActionFields {
 	return []deliveryActionFields{
+		{"register_pr", []string{"pr_url"}, nil},
 		{"submit_result", []string{"result"}, []string{"run_id", "independent_acceptance"}},
 		{"prepare", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
 		{"resume", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
@@ -25,7 +26,10 @@ func deliveryActions() []deliveryActionFields {
 // ValidateInput is shared by App and the native CLI; generated schemas derive
 // their action alternatives from exactly the same field groups below.
 func (p UpdateIssueDeliveryPayload) ValidateInput() error {
-	present := map[string]bool{"task_id": p.TaskID != "", "result": p.Result != nil, "run_id": p.RunID != "", "independent_acceptance": p.IndependentAcceptance != nil, "candidate": p.Candidate != nil, "expected_task_control_revision": p.ExpectedTaskControlRevision != nil, "execution_task_id": p.ExecutionTaskID != "", "execution_run_id": p.ExecutionRunID != "", "execution_duty_revision": p.ExecutionDutyRevision != 0, "upgrade_id": p.UpgradeID != "", "acceptance_id": p.AcceptanceID != "", "reviewer_artifact_id": p.ReviewerArtifactID != ""}
+	present := map[string]bool{"pr_url": p.PRURL != "", "task_id": p.TaskID != "", "result": p.Result != nil, "run_id": p.RunID != "", "independent_acceptance": p.IndependentAcceptance != nil, "candidate": p.Candidate != nil, "expected_task_control_revision": p.ExpectedTaskControlRevision != nil, "execution_task_id": p.ExecutionTaskID != "", "execution_run_id": p.ExecutionRunID != "", "execution_duty_revision": p.ExecutionDutyRevision != 0, "upgrade_id": p.UpgradeID != "", "acceptance_id": p.AcceptanceID != "", "reviewer_artifact_id": p.ReviewerArtifactID != ""}
+	if p.PRURL != "" && p.Action != "register_pr" {
+		return Errorf(CodeInvalidRequest, "pr_url requires register_pr")
+	}
 	for _, rule := range deliveryActions() {
 		if rule.action != p.Action {
 			continue
@@ -33,6 +37,11 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 		for _, field := range rule.required {
 			if !present[field] {
 				return Errorf(CodeInvalidRequest, "%s requires %s", p.Action, field)
+			}
+		}
+		if p.Action == "register_pr" {
+			if _, err := ParseGitHubPullRequestURL(p.PRURL); err != nil {
+				return err
 			}
 		}
 		// Existing payloads may retain fields from another action. Preserve
@@ -48,7 +57,7 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 		}
 		return nil
 	}
-	return Errorf(CodeInvalidRequest, "action must be submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
+	return Errorf(CodeInvalidRequest, "action must be register_pr, submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
 }
 
 func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {

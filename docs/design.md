@@ -230,6 +230,7 @@ D225 修订 D11 的通用请求持久化方式，其他未另行修订的基线�
 | D227 | 物理停止归还执行资源，原请求的未结事实跨载体持续可发现；历史读取与新业务准入分离，停止交接、升级 park 和原件复用沿真实出处推进。 | 实施中 |
 | D228 | 独立维护控制按原计划与当前 archive/host 业务状态收敛；未知回执后不重放过时 CAS，取消与 finish 只执行尚未满足的转换，不恢复通用请求账本。 | 已实现，待统一验证 |
 | D253 | Issue 看板可按当前人类 owner 的 Inbox 行动筛选，复用正式事项和个人行动的责任条件，在筛选、计数和分页前按原关联 Issue 去重。顶层看板将 in_review 和 in_progress 一起投影到「进行中」的计数与分页，保留卡片的真实状态。见 docs/plans/issue-board-owner-action.md。 | 实施中 |
+| D254 | Issue 看板随列分页显示登记的 GitHub PR 及其生命周期。显式 URL 关联和有界原工作分支补查复用当前 Issue 交付引用及 provider 观测。见 docs/plans/issue-board-pull-requests.md。 | 实施中 |
 | D252 | 业务判断归责任 Agent；执行与恢复共享事实；发布提前通过 server 分发，停机只含必要替换和数据转换；本机独立恢复可替换失效 updater；测试按真实影响分层并删除退役策略。见 docs/plans/autonomous-execution.md。 | 已实现 |
 
 

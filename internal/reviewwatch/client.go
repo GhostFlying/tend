@@ -39,6 +39,7 @@ type Actor struct {
 
 // Observation records provider facts. Missing actors/times remain unknown.
 type Observation struct {
+	Draft               *bool                `json:"draft,omitempty"`
 	LineageErrorKind    string               `json:"lineage_error_kind,omitempty"`
 	Mergeability        string               `json:"mergeability,omitempty"`
 	CI                  *protocol.DeliveryCI `json:"ci,omitempty"`
@@ -149,9 +150,9 @@ func commandError(err error) error {
 	return &Error{Kind: "query_failed"}
 }
 
-const githubChecksQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} mergeable mergeStateStatus commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubChecksQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRef{target{oid}} mergeable mergeStateStatus commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
-const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state headRefOid baseRefOid baseRef{target{oid}} mergeable updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRef{target{oid}} mergeable updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
 func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	parts := strings.Split(ref.Repository, "/")
@@ -168,6 +169,7 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 			Repository *struct {
 				PullRequest *struct {
 					Number                      int64 `json:"number"`
+					IsDraft                     *bool
 					Mergeable, MergeStateStatus string
 					Commits                     struct {
 						Nodes []struct {
@@ -235,7 +237,7 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	if state != Open && state != Merged && state != Closed {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
-	out := Observation{Mergeability: strings.ToLower(pr.Mergeable), BaseSHA: pr.BaseRefOid, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
+	out := Observation{Draft: pr.IsDraft, Mergeability: strings.ToLower(pr.Mergeable), BaseSHA: pr.BaseRefOid, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
 	if len(pr.Commits.Nodes) == 1 {
 		commit := pr.Commits.Nodes[0].Commit
 		if commit.OID == out.HeadSHA && commit.StatusCheckRollup != nil {

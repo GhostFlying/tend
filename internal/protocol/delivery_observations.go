@@ -17,6 +17,7 @@ type DeliveryActor struct {
 
 // DeliverySnapshot contains provider facts; missing identities remain unknown.
 type DeliverySnapshot struct {
+	Draft               *bool          `json:"draft,omitempty"`
 	LineageErrorKind    string         `json:"lineage_error_kind,omitempty"`
 	Mergeability        string         `json:"mergeability,omitempty"`
 	CI                  *DeliveryCI    `json:"ci,omitempty"`

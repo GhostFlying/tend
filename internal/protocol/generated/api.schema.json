@@ -5878,6 +5878,9 @@
         "delivery_id": {
           "type": "string"
         },
+        "draft": {
+          "type": "boolean"
+        },
         "error_kind": {
           "type": "string"
         },
@@ -8577,6 +8580,12 @@
         "progress": {
           "$ref": "#/definitions/IssueProgress"
         },
+        "pull_requests": {
+          "items": {
+            "$ref": "#/definitions/IssueBoardPullRequest"
+          },
+          "type": "array"
+        },
         "queue_reason": {
           "$ref": "#/definitions/QueueWaitReason"
         },
@@ -8604,6 +8613,42 @@
         "attention_count"
       ],
       "title": "IssueBoardCard",
+      "type": "object"
+    },
+    "IssueBoardPRStatus": {
+      "enum": [
+        "open",
+        "draft",
+        "merged",
+        "closed",
+        "unknown"
+      ],
+      "title": "IssueBoardPRStatus",
+      "type": "string"
+    },
+    "IssueBoardPullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "type": "integer"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/IssueBoardPRStatus"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "number",
+        "url",
+        "status"
+      ],
+      "title": "IssueBoardPullRequest",
       "type": "object"
     },
     "IssueChildProgress": {
@@ -9785,6 +9830,9 @@
         },
         "delivery_id": {
           "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
         },
         "error_kind": {
           "type": "string"
@@ -20841,6 +20889,19 @@
         {
           "properties": {
             "action": {
+              "const": "register_pr",
+              "description": "Uses pr_url. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "pr_url"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
               "const": "submit_result",
               "description": "Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
               "type": "string"
@@ -20976,6 +21037,9 @@
         },
         "independent_acceptance": {
           "$ref": "#/definitions/IndependentAcceptanceRequest"
+        },
+        "pr_url": {
+          "type": "string"
         },
         "reason": {
           "type": "string"

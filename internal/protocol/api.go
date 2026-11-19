@@ -45,6 +45,7 @@ func APIEnums() []any {
 	return []any{
 		[]DecisionContinuationMode{DecisionContinueNow, DecisionWait, DecisionDependency},
 		IssueWorkStatusValues(),
+		[]IssueBoardPRStatus{IssueBoardPROpen, IssueBoardPRDraft, IssueBoardPRMerged, IssueBoardPRClosed, IssueBoardPRUnknown},
 		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},
 		[]IssueAssigneeKind{IssueAssigneeOwner, IssueAssigneeAgent},

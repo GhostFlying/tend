@@ -236,6 +236,11 @@ export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancel
 export type RelationDirection = "outgoing" | "incoming";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBoardPRStatus".
+ */
+export type IssueBoardPRStatus = "open" | "draft" | "merged" | "closed" | "unknown";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MessagingPublication".
  */
 export type MessagingPublication = {
@@ -276,6 +281,12 @@ export type UpdateIssueDeliveryPayload = {
 } & UpdateIssueDeliveryPayload1 &
   UpdateIssueDeliveryPayload2;
 export type UpdateIssueDeliveryPayload1 =
+  | {
+      /**
+       * Uses pr_url. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "register_pr";
+    }
   | {
       /**
        * Uses result, run_id, independent_acceptance. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
@@ -1132,6 +1143,7 @@ export interface DeliveryObservation {
   closed_at?: string;
   closed_by?: DeliveryActor;
   delivery_id: string;
+  draft?: boolean;
   error_kind?: string;
   error_message?: string;
   generation: number;
@@ -4535,6 +4547,7 @@ export interface IssueDeliveryObservation {
   closed_at?: string;
   closed_by?: DeliveryActor;
   delivery_id: string;
+  draft?: boolean;
   error_kind?: string;
   error_message?: string;
   generation: number;
@@ -5865,12 +5878,23 @@ export interface IssueBoardCard {
   pause?: IssuePauseProgress;
   pending_manager_category_id?: string;
   progress?: IssueProgress;
+  pull_requests?: IssueBoardPullRequest[];
   queue_reason?: QueueWaitReason;
   retained_execution?: boolean;
   stage_title?: string;
   stages_done: number;
   stages_total: number;
   status: IssueWorkStatus;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBoardPullRequest".
+ */
+export interface IssueBoardPullRequest {
+  number: number;
+  repository: string;
+  status: IssueBoardPRStatus;
+  url: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -7747,6 +7771,7 @@ export interface UpdateIssueDeliveryPayload2 {
   expected_source_revision?: number;
   expected_task_control_revision?: number;
   independent_acceptance?: IndependentAcceptanceRequest;
+  pr_url?: string;
   reason?: string;
   result?: ArtifactPayload;
   reviewer_artifact_id?: string;
