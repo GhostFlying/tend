@@ -32,7 +32,7 @@ func TestFault_NormalManagerReceiptDeadlineReleasesOnlyActualClosedProcess(t *te
 				t.Fatal(err)
 			}
 			defer j.Close()
-			as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "normal-manager", LeaseID: "original-lease", Role: protocol.RoleIssueManager, Desired: protocol.DesiredRun, Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{ConversationID: "original-issue"}}
+			as := protocol.Assignment{EventSync: true, Protocol: protocol.CurrentRunnerProtocol, RunID: "normal-manager", LeaseID: "original-lease", Role: protocol.RoleIssueManager, Desired: protocol.DesiredRun, Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{ConversationID: "original-issue"}}
 			if err := j.AcceptAssignment(ctx, as, ""); err != nil {
 				t.Fatal(err)
 			}
