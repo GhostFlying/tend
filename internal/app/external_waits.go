@@ -440,7 +440,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 			if err != nil {
 				return false, err
 			}
-			current = reportDecisionCurrent(issue, attention)
+			current = v.WakeReason != reportWaitSuperseded && reportDecisionCurrent(issue, attention)
 		}
 		if !current || t.Lifecycle.Terminal() || a.TargetSpecVersion != t.SpecVersion || a.Status != protocol.ActionDispatched || a.Kind == protocol.ActionImplement && a.Generation != t.ImplementGeneration || a.Kind == protocol.ActionAccept && a.TargetArtifactID != t.CurrentArtifactID {
 			v.Status = "cancelled"

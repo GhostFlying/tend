@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,7 +11,10 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
-const reportFollowOnWaitKey = "report-follow-on"
+const (
+	reportFollowOnWaitKey = "report-follow-on"
+	reportWaitSuperseded  = "report_superseded"
+)
 
 func reportRequestedAcceptance(p protocol.UpdateIssueDeliveryPayload) *bool {
 	if p.IndependentAcceptance == nil {
@@ -19,8 +23,22 @@ func reportRequestedAcceptance(p protocol.UpdateIssueDeliveryPayload) *bool {
 	return &p.IndependentAcceptance.Required
 }
 
-func reportAttentionID(issue string) string {
-	return protocol.NativeObjectID(protocol.Prefix("attn"), issue, "report-follow-on")
+func reportAttentionID(issue, artifact string) string {
+	return protocol.NativeObjectID(protocol.Prefix("attn"), issue, "report-follow-on/"+artifact)
+}
+
+func latestReportAttention(ctx context.Context, q store.Querier, issue string) (protocol.Attention, error) {
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT attention_id FROM attentions
+ WHERE issue_id=? AND json_type(body_json,'$.report_follow_on')='object'
+ ORDER BY rowid DESC LIMIT 1`, issue).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protocol.Attention{}, store.ErrNotFound
+	}
+	if err != nil {
+		return protocol.Attention{}, err
+	}
+	return store.GetAttention(ctx, q, id)
 }
 
 // Report settlement creates the question and parks the original owner in the
@@ -29,11 +47,11 @@ func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 	if !issue.Plan.ReportFollowOnDecision {
 		return nil, false, protocol.Errorf(protocol.CodeInvalidRequest, "the Issue is not configured to ask about implementation")
 	}
-	id := reportAttentionID(issue.IssueID)
 	task, err := store.GetTask(ctx, tx.Q(), duty.TaskID)
 	if err != nil {
 		return nil, false, err
 	}
+	id := reportAttentionID(issue.IssueID, task.CurrentArtifactID)
 	scope := strings.TrimSpace(p.ProposedImplementationScope)
 	if a, err := store.GetAttention(ctx, tx.Q(), id); err == nil {
 		if a.ReportFollowOn == nil {
@@ -43,6 +61,13 @@ func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 			return nil, true, nil
 		}
 		return nil, false, protocol.Errorf(protocol.CodeConflictPayload, "the original report already has its own implementation decision")
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, false, err
+	}
+	if previous, err := latestReportAttention(ctx, tx.Q(), issue.IssueID); err == nil {
+		if previous.Status == "open" {
+			return nil, false, protocol.Errorf(protocol.CodeInvalidTransition, "the previous report is still awaiting its original decision")
+		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, false, err
 	}
@@ -144,7 +169,7 @@ func validateReportFollowOnAnswer(ctx context.Context, x *Exec, q store.Querier,
 // Only the one that observes both may apply a report-only endpoint.
 func applyReportFollowOnAnswer(ctx context.Context, x *Exec, tx *store.Tx, a protocol.Attention, d store.DecisionRow, option string) ([]Event, error) {
 	v, err := store.GetExternalWait(ctx, tx.Q(), a.ReportFollowOn.RunID)
-	if err != nil || v == nil || v.WaitKey != reportFollowOnWaitKey || v.TargetID != d.DecisionID || v.Status != "waiting" || !v.Stopped {
+	if err != nil || v == nil || v.WaitKey != reportFollowOnWaitKey || v.TargetID != d.DecisionID || v.Status != "waiting" || !v.Stopped || v.WakeReason == reportWaitSuperseded {
 		return nil, err
 	}
 	run, err := store.GetRun(ctx, tx.Q(), v.RunID)
@@ -259,7 +284,7 @@ func settleStoppedReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, v *
 }
 
 func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue protocol.Issue) error {
-	a, err := store.GetAttention(ctx, q, reportAttentionID(issue.IssueID))
+	a, err := latestReportAttention(ctx, q, issue.IssueID)
 	if errors.Is(err, store.ErrNotFound) || err == nil && a.ReportFollowOn == nil {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "settle the formal report and its owner decision before completing the Issue")
 	}
@@ -268,6 +293,9 @@ func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue prot
 	}
 	if a.Status == "open" {
 		return nil // The ordinary Attention blocker supplies the original identity.
+	}
+	if a.Status != "resolved" {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "settle the renewed report decision before completing the Issue")
 	}
 	v, err := store.GetExternalWait(ctx, q, a.ReportFollowOn.RunID)
 	if err != nil {
@@ -280,7 +308,7 @@ func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue prot
 }
 
 func reportDecisionCurrent(issue protocol.Issue, a protocol.Attention) bool {
-	return a.ReportFollowOn != nil && issue.AssignmentEpoch == a.ReportFollowOn.AssignmentEpoch &&
+	return a.ReportFollowOn != nil && a.Status != "withdrawn" && issue.AssignmentEpoch == a.ReportFollowOn.AssignmentEpoch &&
 		issue.Plan.ReportFollowOnDecision && issue.AssignmentState == "active" &&
 		(issue.State == protocol.IssueActive || issue.State == protocol.IssuePaused) &&
 		issue.BoardStatus() != protocol.IssueBacklog
@@ -289,12 +317,25 @@ func reportDecisionCurrent(issue protocol.Issue, a protocol.Attention) bool {
 // Changes to admission or scope retire the open question without answering it.
 // The stopped Run and its published report remain durable.
 func retireObsoleteReportDecision(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue) ([]Event, error) {
-	a, err := store.GetAttention(ctx, tx.Q(), reportAttentionID(issue.IssueID))
+	a, err := latestReportAttention(ctx, tx.Q(), issue.IssueID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
-	if err != nil || a.ReportFollowOn == nil || a.Status != "open" || reportDecisionCurrent(issue, a) {
+	if err != nil || a.ReportFollowOn == nil || reportDecisionCurrent(issue, a) {
 		return nil, err
+	}
+	v, err := store.GetExternalWait(ctx, tx.Q(), a.ReportFollowOn.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if v != nil && (v.Status == "stopping" || v.Status == "waiting") && v.WakeReason != reportWaitSuperseded {
+		v.WakeReason = reportWaitSuperseded
+		if err := tx.PutExternalWait(ctx, *v, x.Now.UnixMilli()); err != nil {
+			return nil, err
+		}
+	}
+	if a.Status != "open" {
+		return nil, nil
 	}
 	if _, err := tx.Exec(ctx, `UPDATE decisions SET status='cancelled',version=version+1,updated_at=? WHERE decision_id=? AND status='open'`, x.Now.UnixMilli(), a.DecisionID); err != nil {
 		return nil, err

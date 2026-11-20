@@ -16,16 +16,21 @@ func TestReportFollowOnDecision(t *testing.T) {
 	for _, tc := range []struct {
 		option     string
 		beforeStop bool
+		readmit    bool
 	}{
 		{option: protocol.ReportContinueImplementation},
 		{option: protocol.ReportContinueImplementation, beforeStop: true},
 		{option: protocol.ReportMoveToBacklog, beforeStop: true},
 		{option: protocol.ReportCloseOnly},
 		{option: protocol.ReportCloseOnly, beforeStop: true},
+		{option: protocol.ReportContinueImplementation, readmit: true},
 	} {
 		name := tc.option
 		if tc.beforeStop {
 			name += "/before-stop"
+		}
+		if tc.readmit {
+			name += "/readmit-revised-report"
 		}
 		t.Run(name, func(t *testing.T) {
 			h, runtime, issue, run, _ := reviewManagerAssignment(t)
@@ -115,6 +120,12 @@ func TestReportFollowOnDecision(t *testing.T) {
 				Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Endpoint request"}},
 			}}
 			expectWorkCode(t, h.exec(owner, h.env("issues.close", target, close, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "close"}), protocol.CodeInvalidTransition)
+			if tc.readmit {
+				finishHostedReview(t, h, turn)
+				stopOwnerClaim(t, h, run)
+				checkReportFollowOnReadmission(t, h, runtime, issue, run, item, p)
+				return
+			}
 			answer := func() {
 				t.Helper()
 				aTarget := protocol.Target{Type: "attention", ID: item.AttentionID}
@@ -190,5 +201,56 @@ func TestReportFollowOnDecision(t *testing.T) {
 				t.Fatal("the choice replaced the original report or decision")
 			}
 		})
+	}
+}
+
+// An explicit return to backlog supersedes a pending choice. New owner input
+// can re-admit the same Issue to revise the investigation with a new report.
+func checkReportFollowOnReadmission(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issue protocol.Issue, original protocol.Assignment, old protocol.AttentionView, p protocol.UpdateIssueDeliveryPayload) {
+	t.Helper()
+	target := protocol.Target{Type: "issue", ID: issue.IssueID}
+	for _, status := range []protocol.IssueWorkStatus{protocol.IssueBacklog, protocol.IssueTodo} {
+		issue = canonicalTaskIssue(t, h, issue.IssueID)
+		payload := protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}
+		if op := h.exec(owner, h.env("issues.set_status", target, payload, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "set_status"}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	// Readmission must work even before the next interval of the wait observer.
+	queueOwnerWaitInput(t, h, original.Manager.ConversationID)
+	next := ownerClaim(t, h, runtime)
+	if next.TaskID != original.TaskID || next.RunID == original.RunID || next.ExternalWaitContinuation != nil {
+		t.Fatal("readmission must not adopt the withdrawn approval", next)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	p.Action, p.TaskID, p.RunID = "submit_result", next.TaskID, next.RunID
+	p.ProposedImplementationScope = ""
+	p.Result = &protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Revised investigation and recommendation"}}
+	if op := h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	p.Action, p.Result = "report", nil
+	p.ProposedImplementationScope = "Implement the revised recommendation."
+	if op := h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		previous, err := views.Attention(t.Context(), tx.Q(), old.AttentionID)
+		if err != nil {
+			return err
+		}
+		page, err := views.Attentions(t.Context(), tx.Q(), views.AttentionFilter{IssueID: issue.IssueID, Status: "open", Recipient: "owner"})
+		if err != nil {
+			return err
+		}
+		if previous.Status != "withdrawn" || previous.ReportFollowOn.ArtifactID != old.ReportFollowOn.ArtifactID ||
+			len(page.Items) != 1 || page.Items[0].AttentionID == old.AttentionID ||
+			page.Items[0].ReportFollowOn.ImplementationScope != p.ProposedImplementationScope {
+			t.Fatalf("original approval was overwritten or reused: previous %+v current %+v", previous, page)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
