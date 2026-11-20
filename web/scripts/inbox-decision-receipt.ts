@@ -20,6 +20,8 @@ const open = {
   revision: 7,
   question_version: 2,
   question_options: options,
+  delivery_decision: true,
+  responsibility: { recipient_kind: "owner" },
   created_at: 1,
   raised_by: { kind: "agent", ref: "fixture" },
   task_context: {
@@ -35,7 +37,7 @@ const open = {
 };
 function resolved(option: string, text = "") {
   return {
-    ...open,
+    ...current,
     status: "resolved",
     revision: 8,
     question_version: 3,
@@ -101,7 +103,11 @@ const server = createServer(async (req, res) => {
         },
       });
     const answer = e.payload as RespondAttentionPayload;
-    assert(!["approve", "end_delivery"].includes(answer.option ?? "") || !answer.text);
+    assert(
+      !current.delivery_decision ||
+        !["approve", "end_delivery"].includes(answer.option ?? "") ||
+        !answer.text,
+    );
     current = resolved(answer.option ?? "", answer.text);
     return json({ operation: { request_id: e.request_id, status: "succeeded", result: current } });
   }
@@ -109,7 +115,10 @@ const server = createServer(async (req, res) => {
     detailReads++;
     return json(current);
   }
-  if (path === "/api/v1/inbox")
+  if (path === "/api/v1/inbox") {
+    const pending = url.searchParams.get("status") === "open";
+    if (pending && current.responsibility.recipient_kind !== "owner")
+      return json({ items: [], more: false });
     return json({
       items: staleList
         ? [open]
@@ -118,6 +127,7 @@ const server = createServer(async (req, res) => {
           : [current],
       more: false,
     });
+  }
   if (path.startsWith("/api/"))
     return json({ items: [], more: false, repos: [], enabled: false, revision: 0 });
   try {
@@ -161,6 +171,22 @@ try {
     },
     {
       width: 1024,
+      name: "ordinary-agent-routed",
+      local: "approve",
+      actual: "答复已记录",
+      note: "普通决定允许保留说明",
+      recipient: "agent",
+    },
+    {
+      width: 390,
+      name: "ordinary-main-routed",
+      local: "end_delivery",
+      actual: "答复已记录",
+      note: "原始问题仍开放",
+      recipient: "main",
+    },
+    {
+      width: 1024,
       name: "unknown-cross-device",
       local: "批准",
       actual: "结束交付决定已记录",
@@ -168,7 +194,13 @@ try {
       crossDevice: true,
     },
   ]) {
-    current = open;
+    current = scenario.recipient
+      ? {
+          ...open,
+          delivery_decision: false,
+          responsibility: { recipient_kind: scenario.recipient },
+        }
+      : open;
     staleList = false;
     refuse = scenario.name === "failure";
     lose = !!scenario.crossDevice;
@@ -205,8 +237,10 @@ try {
         .getByRole("link", { name: "收件箱", exact: true });
       await badge.waitFor({ state: "visible" });
       const pendingBadge = badge.locator('[data-badge="pending"]');
-      await pendingBadge.waitFor({ state: "visible" });
-      assert.equal(await badge.getAttribute("aria-description"), "1 项待处理");
+      if (!scenario.recipient) {
+        await pendingBadge.waitFor({ state: "visible" });
+        assert.equal(await badge.getAttribute("aria-description"), "1 项待处理");
+      }
       await radio.check();
       if (scenario.local === "批准") assert(await explanation.isDisabled());
       if (scenario.note) await explanation.fill(scenario.note);

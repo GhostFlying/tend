@@ -194,7 +194,8 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	mixedExecutionChoice := p.Text != "" && oneOf(p.Option, "approve", "end_delivery")
 	var delivery bool
 	if c.Responsible || mixedExecutionChoice {
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id') WHERE a.decision_id=?)`, d.DecisionID).Scan(&delivery); err != nil {
+		delivery, err = store.DecisionHasDeliveryDuty(ctx, tx.Q(), d.DecisionID)
+		if err != nil {
 			return Outcome{}, err
 		}
 		if delivery && c.Responsible {

@@ -30,7 +30,6 @@ import {
   decisionReceipt,
   decisionReceiptTitle,
   differsFromSubmission,
-  isDeliveryDecision,
   questionVersion,
   submittedExplanation,
 } from "./decisionReceipt.ts";
@@ -340,10 +339,9 @@ function AttentionForm({
   const questionStatus = (a.decision ?? a.choice)?.status;
   const answerable =
     a.status === "open" &&
-    (questionStatus === "open" || (!questionStatus && questionVersion(a) > 0)) &&
-    (!a.responsibility || a.responsibility.recipient_kind === "owner");
+    (questionStatus === "open" || (!questionStatus && questionVersion(a) > 0));
   const hasReceipt = !!receipt;
-  const deliveryDecision = isDeliveryDecision(a);
+  const deliveryDecision = a.delivery_decision;
   const choiceRequiresNoText =
     deliveryDecision && (choice === "approve" || choice === "end_delivery");
   const receiptTitle = receipt ? decisionReceiptTitle(a, receipt.option) : "";

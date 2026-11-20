@@ -8,6 +8,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // retainLegacyDeliveryAnswer loads the historical accepted representation with
@@ -59,6 +60,42 @@ func deliveryDecisionForTest(t *testing.T, h *harness, duty protocol.IssueDelive
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestAttentionViewClassifiesDeliveryByOriginalDuty(t *testing.T) {
+	h, issue, task, candidate := deliveryFixture(t)
+	duty := prepareDeliveryForTest(t, h, issue.IssueID, task, candidate)
+	op := h.exec(owner, h.env("attentions.create", protocol.Target{Type: "attention"}, protocol.CreateAttentionPayload{
+		Kind: "decision", Title: "Ordinary approval",
+		Options: []string{"approve", "defer", "end_delivery"},
+	}, nil), AttentionCommand{Action: "create"})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var ordinary protocol.Attention
+	if err := json.Unmarshal(op.Result, &ordinary); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		for _, tc := range []struct {
+			id   string
+			want bool
+		}{
+			{duty.AttentionID, true},
+			{ordinary.AttentionID, false},
+		} {
+			view, err := views.Attention(t.Context(), tx.Q(), tc.id)
+			if err != nil {
+				return err
+			}
+			if view.DeliveryDecision != tc.want {
+				t.Errorf("delivery decision for %s = %v, want %v", tc.id, view.DeliveryDecision, tc.want)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDeliveryMixedAnswerRejectsApprovalButRetainsExplicitDeferral(t *testing.T) {

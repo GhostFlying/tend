@@ -755,6 +755,7 @@ export interface AttentionView {
   created_at: number;
   decision?: DecisionView;
   decision_id?: string;
+  delivery_decision?: boolean;
   historical?: boolean;
   historical_reason?: string;
   issue_id?: string;
