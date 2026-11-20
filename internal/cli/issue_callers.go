@@ -23,9 +23,6 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 		tail = tail[1:]
 	}
 	fs := newFlags(e, "issue "+action)
-	if help := auditReadHelp("issue " + action); help != "" {
-		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
-	}
 	if help := issueCommandHelp(action); help != "" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
 	} else if action == "context" {
@@ -46,6 +43,9 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 	afterSource := fs.Int64("after-source", 0, "source message sequence cursor")
 	afterRevision := fs.Int64("after-revision", 0, "history revision cursor")
 	afterOccurrence := fs.String("after-occurrence", "", "occurrence history cursor")
+	if help := auditReadHelp("issue " + action); help != "" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
+	}
 	pos, err := parse(fs, tail)
 	if err != nil {
 		return err

@@ -198,9 +198,6 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return runManagerReconciliation(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
-	if cmd.Name == "task waits" {
-		fs.Usage = func() { fmt.Fprint(e.Stderr, auditReadHelp(cmd.Name)) }
-	}
 	if cmd.Operation == hostMaintenanceOperation {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, hostMaintenanceHelp(cmd.Name)) }
 	} else if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {
@@ -249,6 +246,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	conversation := new(string)
 	if cmd.Name == "conversation settings set" {
 		conversation = fs.String("conversation", "", "exact conversation; default main")
+	}
+	if cmd.Name == "task waits" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, auditReadHelp(cmd.Name)) }
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
