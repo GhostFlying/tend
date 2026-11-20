@@ -11,23 +11,29 @@ export function isHumanAction(item: AttentionView) {
 }
 
 /** Share the same owner-action count between desktop and phone navigation. */
-export function inboxCount(summary?: AttentionPage, next?: NextActionPage) {
+export function inboxCount(
+  summary?: AttentionPage,
+  next?: NextActionPage,
+  answered?: ReadonlyMap<string, AttentionView>,
+) {
   const items = summary?.items ?? [];
   return (
-    items.filter(isHumanAction).length +
+    items.filter((item) => isHumanAction(item) && !answered?.has(item.attention_id)).length +
     (next?.items ?? []).filter(
       (item) =>
         item.kind === "user_action" &&
         ["open", "blocked"].includes(item.status) &&
         (!item.attention_id ||
-          !items.some((attention) => attention.attention_id === item.attention_id)),
+          (!answered?.has(item.attention_id) &&
+            !items.some((attention) => attention.attention_id === item.attention_id))),
     ).length
   );
 }
 export function useInboxCount(summary?: AttentionPage) {
   const { live } = useServices();
   const next = useStore(live.attention.next.state);
-  const count = inboxCount(summary, next.value ?? undefined);
+  const answered = useStore(live.attention.answered);
+  const count = inboxCount(summary, next.value ?? undefined, answered);
   const more = !!summary?.more;
   return { count, more, description: `${count}${more ? "+" : ""} 项待处理` };
 }

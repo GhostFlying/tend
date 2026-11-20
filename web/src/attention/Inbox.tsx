@@ -8,14 +8,14 @@ import { AttentionActionTime } from "./ActionTime.tsx";
 import { ReportOriginal } from "./ReportOriginal.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
 import { SourceDetails } from "../conversation/SourceDetails.tsx";
-import { optionLabel, question } from "../decisions/text.ts";
+import { question } from "../decisions/text.ts";
 import { useSourceTransfer } from "../conversation/useSourceTransfer.ts";
 import {
   LocalAttachment,
   OutgoingAttachments,
   MessageAttachments,
 } from "../conversation/Attachments.tsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttentionView,
   IssueConversationItem,
@@ -25,6 +25,14 @@ import type {
 import { useServices } from "../app/services.tsx";
 import { useDurableOp } from "../app/useDurableOp.ts";
 import { useStore } from "../state/store.ts";
+import {
+  attentionDecisionLabel,
+  decisionReceipt,
+  decisionReceiptTitle,
+  differsFromSubmission,
+  questionVersion,
+  submittedExplanation,
+} from "./decisionReceipt.ts";
 import { attentionCommand } from "./actions.ts";
 import type { OpOutcome } from "../app/ops.ts";
 import styles from "./Inbox.module.css";
@@ -64,9 +72,19 @@ export function Inbox({
     void live.attention.openNext();
     return () => live.attention.inbox.close();
   }, [live, kind, scope]);
-  const items = (state.value?.items ?? []).filter(
-    (item) => scope !== "pending" || item.kind !== "information" || !item.archived_at,
-  );
+  const answered = useStore(live.attention.answered);
+  const items = (state.value?.items ?? [])
+    .map((item) => {
+      const receipt = answered.get(item.attention_id);
+      return receipt && receipt.revision >= item.revision && item.status === "open"
+        ? receipt
+        : item;
+    })
+    .filter(
+      (item) =>
+        scope === "all" ||
+        (item.kind === "information" ? !item.archived_at : item.status === "open"),
+    );
   const firstID = items[0]?.attention_id;
   useEffect(() => {
     const media = window.matchMedia("(min-width: 761px)");
@@ -262,7 +280,12 @@ export function AttentionDetails({
 }) {
   const { live } = useServices();
   const state = useStore(live.attention.attention(id).state);
-  const a = state.value;
+  const known = useStore(live.attention.answered).get(id);
+  const current = state.value;
+  const a =
+    known && (!current || (current.status === "open" && current.revision <= known.revision))
+      ? known
+      : current;
   return (
     <>
       {showBack && (
@@ -272,7 +295,7 @@ export function AttentionDetails({
       )}
       {a ? (
         <AttentionForm
-          key={`${a.attention_id}:${a.revision}`}
+          key={`${a.attention_id}:${a.kind === "decision" ? questionVersion(a) : a.revision}`}
           item={a}
           onIssue={onIssue}
           onBack={onBack}
@@ -297,6 +320,7 @@ function AttentionForm({
   onBack(): void;
 }) {
   const { live, client } = useServices();
+  const detail = useStore(live.attention.attention(a.attention_id).state);
   const operation = useDurableOp(client, `attention:${a.attention_id}`);
   const source = useSourceTransfer(
     `attention:${a.attention_id}`,
@@ -306,6 +330,25 @@ function AttentionForm({
   const [choice, setChoice] = useState("");
   const [text, setText] = useState("");
   const [result, setResult] = useState<OpOutcome | null>(null);
+  const [submitted, setSubmitted] = useState<RespondAttentionPayload>();
+  const [submitting, setSubmitting] = useState(false);
+  const activeAnswer = useRef(false);
+  const focusReceipt = useRef(a.status === "open");
+  const receiptElement = useRef<HTMLDivElement>(null);
+  const receipt = decisionReceipt(a);
+  const questionStatus = (a.decision ?? a.choice)?.status;
+  const answerable =
+    a.status === "open" &&
+    questionStatus === "open" &&
+    (!a.responsibility || a.responsibility.recipient_kind === "owner");
+  const hasReceipt = !!receipt;
+  const receiptTitle = receipt ? decisionReceiptTitle(a, receipt.option) : "";
+  useEffect(() => {
+    if (hasReceipt && focusReceipt.current) {
+      focusReceipt.current = false;
+      receiptElement.current?.focus();
+    }
+  }, [hasReceipt]);
   const options =
     a.question_options ??
     a.choice?.options ??
@@ -317,30 +360,28 @@ function AttentionForm({
     a.decision?.answer && typeof a.decision.answer === "object"
       ? (a.decision.answer as Record<string, unknown>)
       : undefined;
-  const recordedOption = typeof recordedAnswer?.option === "string" ? recordedAnswer.option : "";
-  const recordedText = typeof recordedAnswer?.text === "string" ? recordedAnswer.text : "";
   const recordedEffect =
     recordedAnswer?.effect && typeof recordedAnswer.effect === "object"
       ? (recordedAnswer.effect as Record<string, unknown>)
       : undefined;
+  const pendingAnswer =
+    original?.operation === "attentions.respond"
+      ? (original.payload as RespondAttentionPayload)
+      : undefined;
+  const originalAnswer = pendingAnswer ?? submitted;
+  const differentAnswer =
+    receipt && originalAnswer && differsFromSubmission(a, receipt, originalAnswer);
   const shownText =
-    a.status === "resolved"
-      ? a.kind === "action"
+    a.kind === "action"
+      ? a.status === "resolved"
         ? (a.resolution ?? "")
-        : (a.choice?.answer ?? recordedText)
-      : original?.operation === "attentions.confirm"
-        ? (original.payload as ConfirmAttentionPayload).summary
-        : original?.operation === "attentions.respond"
-          ? ((original.payload as RespondAttentionPayload).text ?? "")
-          : a.kind === "action"
-            ? (source.current?.body ?? source.content.text)
-            : text;
-  const shownChoice =
-    a.status === "resolved"
-      ? (a.choice?.answer?.split("\n\n")[0] ?? recordedOption)
-      : original?.operation === "attentions.respond"
-        ? ((original.payload as RespondAttentionPayload).option ?? "")
-        : choice;
+        : original?.operation === "attentions.confirm"
+          ? (original.payload as ConfirmAttentionPayload).summary
+          : (source.current?.body ?? source.content.text)
+      : pendingAnswer
+        ? submittedExplanation(pendingAnswer, !!a.choice)
+        : text;
+  const shownChoice = pendingAnswer?.option ?? choice;
   const run = async (action: "respond" | "confirm" | "read" | "archive" | "reconcile") => {
     let sourceMessageID: string | undefined;
     if (
@@ -359,15 +400,33 @@ function AttentionForm({
         return;
       }
     }
+    const answer =
+      action === "respond"
+        ? {
+            version: questionVersion(a),
+            option: choice,
+            text: a.choice ? [choice, text].filter(Boolean).join("\n\n") : text,
+          }
+        : action === "reconcile"
+          ? pendingAnswer
+          : undefined;
+    if (answer) {
+      if (activeAnswer.current || (action === "respond" && (!answerable || operation.pending)))
+        return;
+      activeAnswer.current = true;
+      setSubmitting(true);
+      setSubmitted(answer);
+      if (action === "reconcile" && answer.version === questionVersion(a)) {
+        const option = answer.option ?? "";
+        setChoice(option);
+        setText(submittedExplanation(answer, !!a.choice));
+      }
+    }
     const command =
       action === "reconcile"
         ? undefined
         : action === "respond"
-          ? attentionCommand(a, "respond", {
-              version: a.question_version ?? a.choice?.version ?? a.decision?.version ?? 0,
-              option: choice,
-              text: a.choice ? [choice, text].filter(Boolean).join("\n\n") : text,
-            })
+          ? attentionCommand(a, "respond", answer!)
           : action === "confirm"
             ? attentionCommand(a, "confirm", {
                 summary: shownText,
@@ -381,12 +440,40 @@ function AttentionForm({
     try {
       const out = await operation.execute(command);
       setResult(out);
-      if (out.kind === "done" || out.kind === "stale") live.attention.refresh();
+      if (answer) {
+        const current =
+          out.kind === "done"
+            ? (out.result as AttentionView | undefined)
+            : out.kind === "stale"
+              ? out.currentAttention
+              : undefined;
+        if (current?.attention_id === a.attention_id) live.attention.applyDetail(current);
+        if (out.kind === "stale" && !current) {
+          await live.attention.attention(a.attention_id).refresh();
+        }
+      }
+      if (answer || out.kind === "done" || out.kind === "stale") live.attention.refresh();
     } catch {
       setResult({ kind: "unknown", message: "尚未取得回执，请核实原请求。" });
+    } finally {
+      if (answer) {
+        activeAnswer.current = false;
+        setSubmitting(false);
+      }
     }
   };
-  const blocked = operation.busy || operation.pending || source.busy || a.status !== "open";
+  const awaitingCurrentQuestion =
+    a.kind === "decision" &&
+    result?.kind === "stale" &&
+    !result.currentAttention &&
+    (detail.loading || !!detail.error);
+  const blocked =
+    operation.busy ||
+    operation.pending ||
+    source.busy ||
+    submitting ||
+    awaitingCurrentQuestion ||
+    a.status !== "open";
   const failure = attentionFailure(a);
   const currentFailure =
     a.status === "open" &&
@@ -440,7 +527,7 @@ function AttentionForm({
       </p>
       {a.kind === "decision" && (
         <>
-          <h3>{a.status === "open" ? "需要你决定" : "原始问题与答复"}</h3>
+          <h3>{answerable ? "需要你决定" : "原始问题与答复"}</h3>
           {currentFailure ? (
             <p>接下来如何推进这项任务？</p>
           ) : (
@@ -452,36 +539,61 @@ function AttentionForm({
               id={a.report_follow_on.artifact_id}
             />
           )}
-          <div className={styles.options}>
-            {options.map((option) => (
-              <label key={option} className={styles.option}>
-                <input
-                  type="radio"
-                  name={`answer-${a.attention_id}`}
-                  value={option}
-                  checked={shownChoice === option}
+          {receipt ? (
+            <div className={styles.receipt} role="status" tabIndex={-1} ref={receiptElement}>
+              <strong>{receiptTitle}</strong>
+              {receipt.option && <p>已记录的决定：{attentionDecisionLabel(a, receipt.option)}</p>}
+              {receipt.text && <p>补充说明：{receipt.text}</p>}
+              {receiptTitle === "延期决定已记录" && <p>交付事项仍会保留。</p>}
+              {receiptTitle === "结束交付决定已记录" && <p>交付是否已结束，请查看当前结果。</p>}
+              {differentAnswer && <p>此决定已在另一端记录，本次选择未采用。</p>}
+            </div>
+          ) : answerable ? (
+            <>
+              <div className={styles.options}>
+                {options.map((option) => (
+                  <label key={option} className={styles.option}>
+                    <input
+                      type="radio"
+                      name={`answer-${a.attention_id}`}
+                      value={option}
+                      checked={shownChoice === option}
+                      disabled={blocked}
+                      onChange={() => setChoice(option)}
+                    />
+                    <span>
+                      <span>{attentionDecisionLabel(a, option)}</span>
+                      {attentionOptionHelp(a, option) && (
+                        <span className={styles.optionHelp}>{attentionOptionHelp(a, option)}</span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <label>
+                补充说明（可选）
+                <Textarea
+                  className={styles.textarea}
+                  value={shownText}
                   disabled={blocked}
-                  onChange={() => setChoice(option)}
+                  onChange={(e) => setText(e.target.value)}
                 />
-                <span>
-                  <span>{a.decision ? optionLabel(a.decision, option) : option}</span>
-                  {attentionOptionHelp(a, option) && (
-                    <span className={styles.optionHelp}>{attentionOptionHelp(a, option)}</span>
-                  )}
-                </span>
               </label>
-            ))}
-          </div>
-          {!a.report_follow_on && (
-            <label>
-              补充说明（可选）
-              <Textarea
-                className={styles.textarea}
-                value={shownText}
-                disabled={blocked}
-                onChange={(e) => setText(e.target.value)}
-              />
-            </label>
+            </>
+          ) : (
+            <p className={styles.muted}>
+              {a.status === "withdrawn" || questionStatus === "withdrawn"
+                ? "此问题已撤回。"
+                : a.status === "resolved"
+                  ? "此问题已处理，暂时无法读取原答复。"
+                  : "此问题已失效。"}
+            </p>
+          )}
+          {submitting && (
+            <div role="status" className={styles.submitting}>
+              <strong>{pendingAnswer ? "正在核实原提交结果…" : "正在提交决定…"}</strong>
+              {!pendingAnswer && <p>正在等待记录回执。</p>}
+            </div>
           )}
         </>
       )}
@@ -575,21 +687,28 @@ function AttentionForm({
           {operation.storageError}
         </p>
       )}
-      {result && !(operation.pending && result.kind === "unknown") && (
+      {result && !receipt && !submitting && !(operation.pending && result.kind === "unknown") && (
         <p role="status" className={result.kind === "done" ? styles.muted : styles.warning}>
-          {result.kind === "done" ? "已记录。" : result.message}
+          {result.kind === "done"
+            ? "已记录。"
+            : a.kind === "decision" && result.kind === "refused"
+              ? `提交失败：${result.message}`
+              : result.message}
         </p>
       )}
-      {operation.pending && (
+      {operation.pending && !submitting && (
         <div className={styles.warning}>
-          提交结果待确认，请勿重复提交。
+          <strong role="status">
+            {receipt && pendingAnswer ? "原提交仍可核实。" : "提交结果待确认"}
+          </strong>
+          {!receipt && <p>已保留本次输入，请核实原提交结果。</p>}
           <Button variant="primary" disabled={operation.busy} onClick={() => void run("reconcile")}>
             核实原提交结果
           </Button>
         </div>
       )}
       <div className={styles.actions}>
-        {a.kind === "decision" && a.status === "open" && (
+        {a.kind === "decision" && answerable && !pendingAnswer && (
           <Button
             variant="primary"
             disabled={blocked || (!choice && !text.trim())}
@@ -608,7 +727,7 @@ function AttentionForm({
           </Button>
         )}
         <Button variant="secondary" onClick={onBack}>
-          {a.status === "open" ? "稍后处理" : "返回列表"}
+          {a.status === "open" && (!a.decision || answerable) ? "稍后处理" : "返回列表"}
         </Button>
         <Button disabled={operation.busy || operation.pending} onClick={() => void run("read")}>
           {a.read_at ? "标记未读" : "标记已读"}

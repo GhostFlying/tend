@@ -24,6 +24,7 @@ export const layoutGroups: Record<string, string[]> = {
     "test:agents",
     "test:followups",
     "test:inbox-badge",
+    "test:inbox-receipt",
     "test:conversation-reads",
   ],
 };

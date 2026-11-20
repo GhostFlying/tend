@@ -64,6 +64,9 @@ export async function runOp(
     return { kind: "unknown", message: "tend 的回答里没有结果" };
   }
   const outcome = settleOp(res.operation.status, res.operation.result, res.operation.error);
+  if (op.operation === "attentions.respond" && outcome.kind === "done") {
+    return recoverOperation(sender, envelope);
+  }
   if (outcome.kind === "stale") {
     if (res.current) outcome.current = res.current;
     if (res.current_issue) outcome.currentIssue = res.current_issue;

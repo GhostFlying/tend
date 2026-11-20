@@ -5,6 +5,8 @@ import type {
   NextActionPage,
 } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
+import { Store } from "../state/store.ts";
+import { decisionReceipt } from "./decisionReceipt.ts";
 import { WorkItemRead } from "../workitems/live.ts";
 
 export interface AttentionFilter {
@@ -20,10 +22,13 @@ export class AttentionData {
   readonly inbox: WorkItemRead<AttentionPage>;
   readonly next: WorkItemRead<NextActionPage>;
   readonly deadlines: WorkItemRead<IssueDeadline[]>;
+  readonly answered = new Store<ReadonlyMap<string, AttentionView>>(new Map());
   private readonly details = new Map<string, WorkItemRead<AttentionView>>();
 
   constructor(private readonly api: Reader) {
-    this.inbox = new WorkItemRead(api);
+    this.inbox = new WorkItemRead(api, (page) => {
+      for (const item of page.items ?? []) this.observeAnswer(item);
+    });
     this.next = new WorkItemRead(api);
     this.deadlines = new WorkItemRead(api);
   }
@@ -43,11 +48,31 @@ export class AttentionData {
   attention(id: string): WorkItemRead<AttentionView> {
     let read = this.details.get(id);
     if (!read) {
-      read = new WorkItemRead(this.api);
+      read = new WorkItemRead(this.api, (item) => {
+        this.observeAnswer(item);
+        const displayed = this.details.get(id)?.state.get().value;
+        return displayed && displayed.revision > item.revision ? displayed : item;
+      });
       this.details.set(id, read);
       void read.open(`/api/v1/attentions/${encodeURIComponent(id)}`);
     }
     return read;
+  }
+
+  applyDetail(item: AttentionView): void {
+    this.observeAnswer(item);
+    const read = this.attention(item.attention_id);
+    const state = read.state.get();
+    if (!state.value || item.revision >= state.value.revision) {
+      read.state.set({ ...state, value: item });
+    }
+  }
+
+  private observeAnswer(item: AttentionView): void {
+    if (!decisionReceipt(item)) return;
+    const known = this.answered.get();
+    if ((known.get(item.attention_id)?.revision ?? -1) >= item.revision) return;
+    this.answered.set(new Map(known).set(item.attention_id, item));
   }
 
   openNext(kind?: string, issueID?: string): Promise<void> {
@@ -73,5 +98,6 @@ export class AttentionData {
     for (const read of [this.inbox, this.next, this.deadlines, ...this.details.values()])
       read.close();
     this.details.clear();
+    this.answered.set(new Map());
   }
 }
