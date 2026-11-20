@@ -59,11 +59,11 @@ func TestWriterWaitTimelineSQLite(t *testing.T) {
 				started, released, finished := make(chan error, 1), make(chan struct{}), make(chan error, 1)
 				writes.Go(func() {
 					ctx := WithWriteSource(guard, WriteSource{Operation: operation, RequestID: fmt.Sprintf("request-%d", seq), TraceID: "short-trace"})
-					if seq == 2 {
-						ctx = WithWriteCloseRequest(ctx, "native-close-id")
-					}
 					ctx = WithWriteEvent(ctx, "holder-run", seq)
 					finished <- s.Write(ctx, func(tx *Tx) error {
+						if seq == 2 {
+							tx.ObserveCloseRequest("native-close-id")
+						}
 						_, err := tx.Exec(ctx, "INSERT INTO writes VALUES (?)", "private-sql-parameter")
 						started <- err
 						select {

@@ -71,6 +71,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			if prior != nil {
+				observeNativeClose(tx, prior.ID)
 				return Outcome{NoEffect: true, Result: *prior}, nil
 			}
 			prior, err = unresolvedManagerClose(ctx, tx.Q(), run)
@@ -78,6 +79,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			if prior != nil {
+				observeNativeClose(tx, prior.ID)
 				return Outcome{NoEffect: true, Result: *prior}, nil
 			}
 		}
@@ -122,6 +124,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO manager_native_requests(request_id,run_id,method,payload_json,status,created_at) VALUES(?,?,?,?,'pending',?)`, p.ID, run, p.Method, payload, x.Now.UnixMilli())
+		if err == nil && p.Method == "close" {
+			observeNativeClose(tx, p.ID)
+		}
 		return Outcome{Result: p}, err
 	case protocol.OpManagerNativeClaim:
 		var claim protocol.ManagerNativeClaimPayload
@@ -259,6 +264,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if p.Method != "" && p.Method != method {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "native receipt names another command method")
+		}
+		if method == "close" {
+			observeNativeClose(tx, p.ID)
 		}
 		var raw []byte
 		var err error
@@ -567,6 +575,12 @@ func settleClosedManagerToolResults(ctx context.Context, tx *store.Tx, run strin
 	return err
 }
 
+func observeNativeClose(tx *store.Tx, id string) {
+	if protocol.ValidID(protocol.PrefixRequest, id) {
+		tx.ObserveCloseRequest(id)
+	}
+}
+
 func (a *App) QueueManagerNative(ctx context.Context, run, method string, payload json.RawMessage) (string, error) {
 	id := a.ids.New(protocol.PrefixRequest)
 	p := protocol.ManagerNativeRequest{ID: id, Method: method, Payload: payload}
@@ -598,9 +612,6 @@ func (a *App) QueueManagerNative(ctx context.Context, run, method string, payloa
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return "", err
-	}
-	if method == "close" {
-		ctx = store.WithWriteCloseRequest(ctx, id)
 	}
 	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: id, Operation: "manager.native_enqueue", Target: protocol.Target{Type: "run", ID: run}, Payload: raw}, ManagerNativeCommand{OperationName: "manager.native_enqueue"})
 	if err == nil && op.Status != protocol.OpSucceeded {
