@@ -61,6 +61,9 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			}
 		}
 	case "update":
+		if a.ReportFollowOn != nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "report implementation scope and options are frozen")
+		}
 		var p protocol.UpdateAttentionPayload
 		if err := decodePayload(x.Env, &p); err != nil {
 			return Outcome{}, err
@@ -149,7 +152,13 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			if e != nil {
 				return Outcome{}, e
 			}
-			if len(out.Events) == 0 && a.Status == "resolved" {
+			// A decision effect may already have resolved the Attention before
+			// applying an endpoint that is blocked by open obligations.
+			a, e = store.GetAttention(ctx, tx.Q(), a.AttentionID)
+			if e != nil {
+				return Outcome{}, e
+			}
+			if a.Status == "resolved" {
 				out.Result = a
 				return out, nil
 			}
@@ -199,6 +208,9 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			a.ResolutionOwnerSubject = x.Principal.Subject
 		}
 	case "withdraw":
+		if a.ReportFollowOn != nil {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "answer the original report decision or use the Issue lifecycle controls")
+		}
 		if a.Kind == "decision" {
 			if a.DecisionID == "" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "withdraw legacy choices through their original business path")
@@ -266,6 +278,10 @@ func attentionEvent(a protocol.Attention) Event {
 	return Event{ObjectType: "attention", ObjectID: a.AttentionID, ObjectVersion: a.Revision, Kind: "attention.changed", Body: map[string]any{"issue_id": a.IssueID, "status": a.Status}}
 }
 func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+	return createAttentionWithReport(ctx, x, tx, nil)
+}
+
+func createAttentionWithReport(ctx context.Context, x *Exec, tx *store.Tx, report *protocol.ReportFollowOn) (Outcome, error) {
 	if !protocol.ValidID(protocol.Prefix("attn"), x.Env.Target.ID) || x.Env.ExpectedControlRevision != nil {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "new attention requires its stable attention identity")
 	}
@@ -340,7 +356,7 @@ func createAttention(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if p.DecisionID != "" && p.ChoiceID != "" || p.Kind != "decision" && (p.DecisionID != "" || p.ChoiceID != "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
-	a := protocol.Attention{AttentionID: x.Env.Target.ID, IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	a := protocol.Attention{ReportFollowOn: report, AttentionID: x.Env.Target.ID, IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
 	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 		return Outcome{}, err
 	}

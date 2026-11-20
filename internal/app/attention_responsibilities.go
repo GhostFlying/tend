@@ -283,7 +283,9 @@ func (c HandleAttention) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 }
 
 func initializeAttentionResponsibility(ctx context.Context, x *Exec, tx *store.Tx, a *protocol.Attention) error {
-	if a.Responsibility != nil || a.IssueID == "" || a.Kind == "information" || a.Status != "open" {
+	// This question grants scope only the human can authorize. The decision
+	// owns its notification and uses the existing direct owner Inbox route.
+	if a.ReportFollowOn != nil || a.Responsibility != nil || a.IssueID == "" || a.Kind == "information" || a.Status != "open" {
 		return nil
 	}
 	r := &protocol.AttentionResponsibility{OriginIssueID: a.IssueID, History: []protocol.AttentionResponsibilityHop{}}

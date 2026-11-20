@@ -224,6 +224,16 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		}
 		return Outcome{}, pe
 	}
+	reportAttention, hasAttention, err := attentionForDecision(ctx, tx.Q(), d.DecisionID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	reportFollowOn := hasAttention && reportAttention.ReportFollowOn != nil
+	if reportFollowOn {
+		if err := validateReportFollowOnAnswer(ctx, x, tx.Q(), reportAttention, p, c.Responsible); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if delivery && mixedExecutionChoice {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery approve/end_delivery must omit text; use text-only for conditional answers or Envelope.reason for audit explanation; defer may include text")
 	}
@@ -341,6 +351,13 @@ func (c AnswerDecision) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "decision", d.DecisionID); err != nil {
 		return Outcome{}, err
+	}
+	if reportFollowOn {
+		reportEvents, err := applyReportFollowOnAnswer(ctx, x, tx, reportAttention, d, p.Option)
+		if err != nil {
+			return Outcome{}, err
+		}
+		effectEvents = append(effectEvents, reportEvents...)
 	}
 	events := append([]Event{{ObjectType: "decision", ObjectID: d.DecisionID, ObjectVersion: d.Version + 1, Kind: "decision.answered",
 		Body: map[string]any{"task_id": d.TaskID, "answer": json.RawMessage(answer)}}}, effectEvents...)

@@ -17,7 +17,7 @@ func deliveryActions() []deliveryActionFields {
 		{"resume", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
 		{"recover_preparation", []string{"task_id", "expected_task_control_revision"}, nil},
 		{"bind", []string{"task_id", "execution_task_id", "expected_task_control_revision"}, []string{"acceptance_id", "reviewer_artifact_id"}},
-		{"report", []string{"task_id"}, []string{"acceptance_id", "reviewer_artifact_id"}},
+		{"report", []string{"task_id"}, []string{"acceptance_id", "reviewer_artifact_id", "run_id", "proposed_implementation_scope"}},
 		{"end", []string{"task_id"}, []string{"acceptance_id", "reviewer_artifact_id"}},
 		{"complete", []string{"task_id"}, []string{"execution_task_id", "execution_run_id", "execution_duty_revision", "upgrade_id", "acceptance_id", "reviewer_artifact_id"}},
 	}
@@ -51,6 +51,9 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 		}
 		if p.ExecutionDutyRevision < 0 || p.ExecutionDutyRevision > 0 && (p.Action != "complete" || p.ExecutionRunID == "" || p.ExecutionTaskID == "") {
 			return Errorf(CodeInvalidRequest, "execution_duty_revision requires complete with execution_task_id and execution_run_id")
+		}
+		if p.ProposedImplementationScope != "" && (p.Action != "report" || strings.TrimSpace(p.ProposedImplementationScope) == "") {
+			return Errorf(CodeInvalidRequest, "proposed_implementation_scope requires a nonempty scope on action report")
 		}
 		if p.Action == "complete" && p.ExecutionRunID != "" && p.ExecutionTaskID == "" {
 			return Errorf(CodeInvalidRequest, "execution_run_id requires execution_task_id")

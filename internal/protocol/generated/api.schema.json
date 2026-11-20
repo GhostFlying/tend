@@ -2263,6 +2263,9 @@
         "read_at": {
           "type": "integer"
         },
+        "report_follow_on": {
+          "$ref": "#/definitions/ReportFollowOn"
+        },
         "resolution": {
           "type": "string"
         },
@@ -11477,6 +11480,9 @@
         "project": {
           "type": "string"
         },
+        "report_follow_on_decision": {
+          "type": "boolean"
+        },
         "scope": {
           "type": "string"
         },
@@ -16316,6 +16322,31 @@
       "title": "RepoRegistry",
       "type": "object"
     },
+    "ReportFollowOn": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "assignment_epoch": {
+          "type": "integer"
+        },
+        "implementation_scope": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "run_id",
+        "assignment_epoch",
+        "implementation_scope"
+      ],
+      "title": "ReportFollowOn",
+      "type": "object"
+    },
     "RepositoryRegistration": {
       "additionalProperties": false,
       "properties": {
@@ -20988,7 +21019,7 @@
           "properties": {
             "action": {
               "const": "report",
-              "description": "Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "description": "Uses task_id, acceptance_id, reviewer_artifact_id, run_id, proposed_implementation_scope. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
               "type": "string"
             }
           },
@@ -21056,6 +21087,9 @@
           "$ref": "#/definitions/IndependentAcceptanceRequest"
         },
         "pr_url": {
+          "type": "string"
+        },
+        "proposed_implementation_scope": {
           "type": "string"
         },
         "reason": {
@@ -22881,6 +22915,9 @@
         },
         "project": {
           "type": "string"
+        },
+        "report_follow_on_decision": {
+          "type": "boolean"
         },
         "revision": {
           "type": "integer"

@@ -38,6 +38,30 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if manager.IssueID != issue.IssueID || manager.AssignmentEpoch != issue.AssignmentEpoch || p.TaskID != "" && p.TaskID != run.TaskID {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "result belongs to another Issue responsibility")
 	}
+	task, err := store.GetTask(ctx, tx.Q(), run.TaskID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	raw, err := json.Marshal(p.Result)
+	if err != nil {
+		return Outcome{}, err
+	}
+	digest := sha256.Sum256(raw)
+	digestHex := hex.EncodeToString(digest[:])
+	if issue.Plan.ReportFollowOnDecision && task.CurrentArtifactID != "" {
+		var same bool
+		err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifacts a JOIN issue_owner_results r USING(artifact_id)
+ WHERE a.artifact_id=? AND a.run_id=? AND a.digest=? AND r.issue_id=? AND r.assignment_epoch=?
+ AND (? IS NULL OR r.required_independent=?))`, task.CurrentArtifactID, runID, digestHex, issue.IssueID, issue.AssignmentEpoch,
+			reportRequestedAcceptance(p), reportRequestedAcceptance(p)).Scan(&same)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if same {
+			duty, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
+			return Outcome{Result: map[string]any{"artifact_id": task.CurrentArtifactID, "task_id": task.TaskID, "run_id": runID, "delivery": duty}, NoEffect: true}, err
+		}
+	}
 	allowed, err := managerNativeBusinessAllowed(ctx, tx.Q(), run)
 	if err != nil {
 		return Outcome{}, err
@@ -56,10 +80,6 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 		workspace.Mounts = append(workspace.Mounts, domain.Mount{Path: mount.Path, Repo: mount.Repo})
 	}
 	if err := checkResultDeliverables(ctx, tx.Q(), domain.Spec{Deliverables: []string{domain.DeliveryReport}, Workspace: workspace}, runID, *p.Result); err != nil {
-		return Outcome{}, err
-	}
-	task, err := store.GetTask(ctx, tx.Q(), run.TaskID)
-	if err != nil {
 		return Outcome{}, err
 	}
 	duty, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
@@ -102,13 +122,8 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 			return Outcome{}, err
 		}
 	}
-	raw, err := json.Marshal(p.Result)
-	if err != nil {
-		return Outcome{}, err
-	}
-	digest := sha256.Sum256(raw)
 	artifact := x.IDs.New(protocol.PrefixArtifact)
-	if err := tx.InsertArtifact(ctx, artifact, task.TaskID, runID, "result", string(raw), hex.EncodeToString(digest[:]), x.Now.UnixMilli()); err != nil {
+	if err := tx.InsertArtifact(ctx, artifact, task.TaskID, runID, "result", string(raw), digestHex, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
 	}
 	policy, err := taskAcceptancePolicy(ctx, x, tx.Q(), issue, domain.Spec{}, p.IndependentAcceptance)

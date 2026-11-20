@@ -419,7 +419,7 @@ func hostedPayloadSource(raw json.RawMessage) string {
 // Manager closure consumes verified facts from the existing evidence resolver,
 // never re-labeling its own command as an owner decision.
 func canonicalEndpointEvidence(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, evidence []protocol.IssueEvidence) error {
-	if x.coordinationExecution == nil {
+	if x.coordinationExecution == nil && !x.reportDecisionEndpoint {
 		return validateCanonicalOwnerEndpointEvidence(evidence)
 	}
 	w := protocol.WorkItem{WorkItemID: issue.IssueID, IssuePlan: issue.Plan}

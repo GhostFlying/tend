@@ -4,6 +4,7 @@ package protocol
 // Responsibility determines whether an Agent or a human must handle it.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
+	ReportFollowOn         *ReportFollowOn          `json:"report_follow_on,omitempty"`
 	ResolutionOwnerSubject string                   `json:"resolution_owner_subject,omitempty"`
 	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
 	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
@@ -33,6 +34,21 @@ type Attention struct {
 	CreatedAt              int64                    `json:"created_at"`
 	UpdatedAt              int64                    `json:"updated_at"`
 }
+
+// ReportFollowOn binds a versioned owner decision to the exact delivered report
+// and the Issue owner's execution that must stop before the choice takes effect.
+type ReportFollowOn struct {
+	ArtifactID          string `json:"artifact_id"`
+	RunID               string `json:"run_id"`
+	AssignmentEpoch     int64  `json:"assignment_epoch"`
+	ImplementationScope string `json:"implementation_scope"`
+}
+
+const (
+	ReportContinueImplementation = "继续实现"
+	ReportMoveToBacklog          = "暂放 Backlog"
+	ReportCloseOnly              = "仅报告结案"
+)
 
 // AttentionResponsibility identifies who must handle an original question.
 // It never changes the Issue assignee or grants general access to child tasks.

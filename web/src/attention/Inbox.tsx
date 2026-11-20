@@ -5,6 +5,7 @@ import { Button, Tabs, Badge, EmptyState, Textarea } from "../ui/index.ts";
 import { back, navigate, Link, useEntryState } from "../app/router.ts";
 import { PageHeader } from "../shell/PageHeader.tsx";
 import { AttentionActionTime } from "./ActionTime.tsx";
+import { ReportOriginal } from "./ReportOriginal.tsx";
 import { AttentionOriginalMessage } from "./OriginalMessage.tsx";
 import { SourceDetails } from "../conversation/SourceDetails.tsx";
 import { optionLabel, question } from "../decisions/text.ts";
@@ -445,6 +446,12 @@ function AttentionForm({
           ) : (
             <p>{a.decision ? question(a.decision).text : a.choice?.question || a.title}</p>
           )}
+          {a.report_follow_on && (
+            <ReportOriginal
+              key={a.report_follow_on.artifact_id}
+              id={a.report_follow_on.artifact_id}
+            />
+          )}
           <div className={styles.options}>
             {options.map((option) => (
               <label key={option} className={styles.option}>
@@ -465,15 +472,17 @@ function AttentionForm({
               </label>
             ))}
           </div>
-          <label>
-            补充说明（可选）
-            <Textarea
-              className={styles.textarea}
-              value={shownText}
-              disabled={blocked}
-              onChange={(e) => setText(e.target.value)}
-            />
-          </label>
+          {!a.report_follow_on && (
+            <label>
+              补充说明（可选）
+              <Textarea
+                className={styles.textarea}
+                value={shownText}
+                disabled={blocked}
+                onChange={(e) => setText(e.target.value)}
+              />
+            </label>
+          )}
         </>
       )}
       {a.kind === "action" && (
