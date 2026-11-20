@@ -334,6 +334,7 @@ func TestImplementationOwnedRecoveryEndsBoundedPass(t *testing.T) {
 			case "malformed result":
 				workers.recoveryErr = errors.New("original submitted result cannot be decoded")
 			case "unknown outcome":
+				expectedReconcileReads = 0 // The native closer cannot run before the terminal is known.
 				if err := os.Remove(workerOutcomePath(spaces.prepared.StateDir, 1)); err != nil {
 					t.Fatal(err)
 				}
@@ -433,7 +434,7 @@ func TestImplementationUnconfirmedInterruptionDoesNotReplay(t *testing.T) {
 	err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun})
 	saved, readErr := r.cfg.Journal.Run(t.Context(), as.RunID)
 	failure, ok := errors.AsType[*stepError](err)
-	if !ok || failure.reason != "worker_interrupted_after_runner_restart" || readErr != nil || !saved.StoppedConfirmed || saved.Attempts != 1 || saved.Phase != journal.PhaseStarted || workers.starts != 0 || len(workers.stops) != 1 || spaces.mutations != 0 {
+	if !ok || failure.reason != "worker_interrupted_after_runner_restart" || readErr != nil || !saved.StoppedConfirmed || saved.Attempts != 1 || saved.Phase != journal.PhaseStarted || workers.starts != 0 || len(workers.seen) != 1 || len(workers.stops) != 0 || spaces.mutations != 0 {
 		t.Fatal("unconfirmed interruption authorized another attempt", saved, err, readErr, workers)
 	}
 }

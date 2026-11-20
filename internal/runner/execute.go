@@ -386,15 +386,13 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		}
 		return nil
 	}
-	if !protocol.RunnerOwnsExecution(as.Protocol) || a.recoveryAttempt > 0 {
-		if recovered, err := r.recoverAppServerAttempt(runCtx, as); recovered {
-			if err != nil {
-				return &ownedRecoveryUncertain{&completionPending{err}}
-			}
-			return failed("worker_interrupted_after_runner_restart", errors.New("runner: original app-server attempt was stopped; owner must reconcile its effects before choosing follow-up work"))
-		} else if err != nil {
-			return &completionPending{err}
+	if recovered, err := r.recoverAppServerAttempt(runCtx, as); recovered {
+		if err != nil {
+			return &ownedRecoveryUncertain{&completionPending{err}}
 		}
+		return failed("worker_interrupted_after_runner_restart", errors.New("runner: original app-server attempt was stopped; owner must reconcile its effects before choosing follow-up work"))
+	} else if err != nil {
+		return &completionPending{err}
 	}
 	if err := r.requireRunWorker(runCtx, as.RunID); err != nil {
 		return &completionPending{err}
@@ -411,7 +409,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
-	attachOriginal := a.recoveryAttempt > 0 && a.recoveryAttempt == run.Attempts && !run.StoppedConfirmed && !run.Held
+	attachOriginal := protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && !run.StoppedConfirmed && !run.Held
 	attachmentOnly := strictResume != nil || attachOriginal
 	defer func() {
 		// Setup, observation and local persistence failures do not prove the

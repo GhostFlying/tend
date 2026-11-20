@@ -147,12 +147,11 @@ var (
 
 // active is a run with a live executor.
 type active struct {
-	recoveryAttempt int // Previous process attempt observed at offline startup.
-	as              protocol.Assignment
-	ctx             context.Context
-	cancel          context.CancelCauseFunc
-	deadline        time.Time
-	desired         protocol.RunDesired
+	as       protocol.Assignment
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	deadline time.Time
+	desired  protocol.RunDesired
 	// heldAt is when the runner itself learned of a takeover; a desired
 	// state tend sent before then does not undo it.
 	heldAt time.Time
@@ -224,7 +223,6 @@ type Runner struct {
 	instanceID                      string
 	generation                      int64
 	sequence                        int64
-	recoveredAttempts               map[string]int
 	grantDeadlines                  map[string]time.Time
 	helloConfirmed                  bool
 	grantServerDeadline             int64
@@ -324,17 +322,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		defer listener.Close()
 		r.wg.Go(func() { r.serveUpdater(ctx, listener) })
-	}
-	// Freeze predecessor attempts before any concurrent hello can start work.
-	initial, err := r.cfg.Journal.Runs(ctx)
-	if err != nil {
-		return err
-	}
-	r.recoveredAttempts = make(map[string]int)
-	for _, run := range initial {
-		if protocol.RunnerOwnsExecution(run.Assignment.Protocol) && run.Attempts > 0 {
-			r.recoveredAttempts[run.Assignment.RunID] = run.Attempts
-		}
 	}
 	// Lease upkeep runs before anything can start a worker.
 	r.wg.Go(func() { r.heartbeats(ctx) })
@@ -937,9 +924,6 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 }
 
 func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, observedAt time.Time, pauseObservation bool) {
-	r.startExecution(ctx, as, observedAt, pauseObservation, r.recoveredAttempts[as.RunID])
-}
-func (r *Runner) startExecution(ctx context.Context, as protocol.Assignment, observedAt time.Time, pauseObservation bool, recoveryAttempt int) {
 	runID := as.RunID
 	if err := r.cfg.Journal.RecordExternalWait(ctx, as.RunID, as.ExternalWait); err != nil {
 		r.cfg.Log.ErrorContext(ctx, "external wait assignment not journaled", "run_id", as.RunID, "err", err)
@@ -1036,7 +1020,7 @@ func (r *Runner) startExecution(ctx context.Context, as protocol.Assignment, obs
 			desired = persisted
 		}
 	}
-	a := &active{recoveryAttempt: recoveryAttempt, as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1), reporting: pauseOnly, pauseOnly: pauseOnly}
+	a := &active{as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1), reporting: pauseOnly, pauseOnly: pauseOnly}
 	r.active[runID] = a
 	r.mu.Unlock()
 	r.wg.Go(func() {
