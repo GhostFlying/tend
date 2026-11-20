@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -283,6 +284,7 @@ type auditNativeFixture struct {
 	threads         map[string][]NativeTurn
 	creates, starts int
 	loseTurnReply   bool
+	legacyRead      bool
 }
 
 func (f *auditNativeFixture) counts() (int, int) {
@@ -328,6 +330,9 @@ func (f *auditNativeFixture) serve(w http.ResponseWriter, r *http.Request) {
 				ThreadID     string `json:"threadId"`
 				InputID      string `json:"clientUserMessageId"`
 				IncludeTurns bool   `json:"includeTurns"`
+				Limit        int    `json:"limit"`
+				Cursor       string `json:"cursor"`
+				ItemsView    string `json:"itemsView"`
 			} `json:"params"`
 		}
 		if conn.ReadJSON(&req) != nil {
@@ -369,6 +374,26 @@ func (f *auditNativeFixture) serve(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			result = map[string]any{"thread": map[string]any{"status": map[string]string{"type": status}, "turns": turns}}
+		case "thread/turns/list":
+			if f.legacyRead {
+				rejection = map[string]any{"code": -32601, "message": "method not found"}
+				break
+			}
+			offset, _ := strconv.Atoi(req.Params.Cursor)
+			limit := min(len(state), offset+req.Params.Limit)
+			turns = make([]map[string]any, 0, limit-offset)
+			for i := offset; i < limit; i++ {
+				v := state[len(state)-i-1]
+				row := map[string]any{"id": v.ID, "status": v.Status}
+				if req.Params.ItemsView != "notLoaded" {
+					row["items"] = []any{map[string]string{"type": "userMessage", "clientId": v.InputID}}
+				}
+				turns = append(turns, row)
+			}
+			result = map[string]any{"data": turns}
+			if limit < len(state) {
+				result.(map[string]any)["nextCursor"] = strconv.Itoa(limit)
+			}
 		case "turn/start":
 			f.starts++
 			turn := NativeTurn{ID: fmt.Sprintf("fixture-turn-%d", f.starts), InputID: req.Params.InputID, Status: "inProgress"}
@@ -394,9 +419,10 @@ func TestFault_MaintenanceLegacyCreatingRetainsOriginalAuditReceipt(t *testing.T
 				t.Fatal(err)
 			}
 			if ambiguous {
-				// A legacy no-op duplicate still had a receipt. Without the
-				// original scheduler evidence the two cannot be attributed.
-				command(t, c, "audit", protocol.MaintenanceRequest{ScheduledAudit: true})
+				// The later manual request moved LastAudit into another UTC
+				// hour. Both original receipts survive the creating snapshot.
+				c.opts.Now = func() time.Time { return opts.Now().Add(time.Hour) }
+				command(t, c, "audit", protocol.MaintenanceRequest{})
 			}
 			c.state.PendingAudits = nil
 			c.state.Active = &protocol.MaintenanceSession{
@@ -473,6 +499,14 @@ func TestFault_MaintenanceLegacyCreatingRetainsOriginalAuditReceipt(t *testing.T
 }
 
 func TestMaintenanceIncompatibleAuditWaitsForOriginalReviewContinuation(t *testing.T) {
+	for _, unreadable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unreadable=%t", unreadable), func(t *testing.T) {
+			testAuditWaitsForReviewContinuation(t, unreadable)
+		})
+	}
+}
+
+func testAuditWaitsForReviewContinuation(t *testing.T, unreadable bool) {
 	c, n, cfg, _ := fixture(t)
 	now := c.opts.Now()
 	c.opts.Now = func() time.Time { return now }
@@ -493,8 +527,18 @@ func TestMaintenanceIncompatibleAuditWaitsForOriginalReviewContinuation(t *testi
 	second := c.Status().PendingAudits[0]
 	n.complete, n.busy = true, false
 	step(t, c)
-	if err := os.WriteFile(cfg.InstructionsFile, []byte("Changed maintenance instructions."), 0600); err != nil {
-		t.Fatal(err)
+	changeInstructions := func() {
+		t.Helper()
+		if err := os.WriteFile(cfg.InstructionsFile, []byte("Changed maintenance instructions."), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if unreadable {
+		if err := os.Remove(cfg.InstructionsFile); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		changeInstructions()
 	}
 	step(t, c)
 	repair := c.Status().Active
@@ -504,6 +548,12 @@ func TestMaintenanceIncompatibleAuditWaitsForOriginalReviewContinuation(t *testi
 	}
 	n.complete, n.busy = true, false
 	step(t, c)
+	if unreadable {
+		if err := c.Step(t.Context()); err == nil || !slices.Contains(c.Status().PendingAudits, second) {
+			t.Fatal("timer should remain queued while only its instructions are unreadable")
+		}
+		changeInstructions()
+	}
 	step(t, c)
 	step(t, c)
 	step(t, c)

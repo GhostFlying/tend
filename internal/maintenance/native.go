@@ -36,6 +36,13 @@ func (n *NativeClient) Close() error {
 	return nil
 }
 
+var errNativeMethodUnavailable = errors.New("native RPC method is unavailable")
+
+type nativeRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
 type nativeRPC struct {
 	sandbox map[string]any
 	conn    *websocket.Conn
@@ -97,8 +104,14 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 			continue
 		}
 		if len(response.Error) > 0 && string(response.Error) != "null" {
-			if nativeThreadUnavailable(method, params, response.Error) {
-				return fmt.Errorf("maintenance: native %s: %w: %w", method, ErrNotSent, ErrThreadUnavailable)
+			var rejection nativeRPCError
+			if json.Unmarshal(response.Error, &rejection) == nil {
+				if rejection.Code == -32601 {
+					return fmt.Errorf("maintenance: native %s: %w: %w", method, ErrNotSent, errNativeMethodUnavailable)
+				}
+				if nativeThreadUnavailable(method, params, rejection) {
+					return fmt.Errorf("maintenance: native %s: %w: %w", method, ErrNotSent, ErrThreadUnavailable)
+				}
 			}
 			return fmt.Errorf("maintenance: native %s rejected the request: %w", method, ErrNotSent)
 		}
@@ -111,7 +124,7 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 
 // Only exact provider replies for the addressed thread can retire a completed
 // audit's idle session. In particular, a transport failure has no such meaning.
-func nativeThreadUnavailable(method string, params any, raw json.RawMessage) bool {
+func nativeThreadUnavailable(method string, params any, rejection nativeRPCError) bool {
 	if method != "thread/read" && method != "thread/resume" && method != "turn/start" {
 		return false
 	}
@@ -120,11 +133,7 @@ func nativeThreadUnavailable(method string, params any, raw json.RawMessage) boo
 		return false
 	}
 	id, _ := values["threadId"].(string)
-	var rejection struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	}
-	if id == "" || json.Unmarshal(raw, &rejection) != nil || rejection.Code != -32600 {
+	if id == "" || rejection.Code != -32600 {
 		return false
 	}
 	return rejection.Message == "thread not found: "+id ||
@@ -209,7 +218,48 @@ func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBack
 	return NativeThread{ID: result.Thread.ID, Path: result.Thread.Path, Sandbox: result.Sandbox}, err
 }
 
-func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode) (state NativeState, err error) {
+type nativeHistoryTurn struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Items  []struct {
+		Type, ID string
+		ClientID string `json:"clientId"`
+		Review   string `json:"review"`
+	} `json:"items"`
+}
+
+func (t nativeHistoryTurn) identity() NativeTurn {
+	turn := NativeTurn{ID: t.ID, Status: t.Status}
+	for _, item := range t.Items {
+		switch item.Type {
+		case "enteredReviewMode":
+			_, tail, ok := strings.Cut(item.Review, "request_id=")
+			if fields := strings.Fields(tail); ok && len(fields) > 0 {
+				turn.InputID = strings.TrimSuffix(fields[0], ".")
+			}
+			return turn
+		case "userMessage":
+			turn.InputID = item.ClientID
+			if turn.InputID == "" {
+				turn.InputID = item.ID
+			}
+			return turn
+		}
+	}
+	return turn
+}
+
+func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode) (NativeState, error) {
+	return n.readThread(ctx, b, id, mode, nil, false)
+}
+
+// ReadTurn reconciles the current durable input without loading other turns'
+// item payloads. Older providers can still complete a single-use session.
+func (n *NativeClient) ReadTurn(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode, target NativeTurn, review bool) (NativeState, error) {
+	return n.readThread(ctx, b, id, mode, &target, review)
+}
+
+func (n *NativeClient) readThread(ctx context.Context, b protocol.MaintenanceBackend, id string, mode NativeReadMode, target *NativeTurn, review bool) (state NativeState, err error) {
 	n.mu.Lock()
 	r := n.unstarted[id]
 	n.mu.Unlock()
@@ -220,7 +270,6 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 		}
 	}()
 	if r == nil {
-		var err error
 		r, err = connectNative(ctx, b)
 		if err != nil {
 			return NativeState{}, err
@@ -232,15 +281,7 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 			Status struct {
 				Type string `json:"type"`
 			} `json:"status"`
-			Turns []struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-				Items  []struct {
-					Type, ID string
-					ClientID string `json:"clientId"`
-					Review   string `json:"review"`
-				} `json:"items"`
-			} `json:"turns"`
+			Turns []nativeHistoryTurn `json:"turns"`
 		} `json:"thread"`
 	}
 	if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &result); err != nil {
@@ -254,36 +295,69 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 			return NativeState{}, err
 		}
 	}
-	// Native provider failures leave a quiescent systemError thread. Its failed
-	// turn still needs identity-bound reconciliation before any new work.
-	quiescent := result.Thread.Status.Type == "idle" || result.Thread.Status.Type == "systemError"
-	if !unstarted && (mode == ReadFullHistory || mode == ReadWhenIdle && quiescent) {
-		if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}, &result); err != nil {
-			return NativeState{}, err
+	// A quiescent systemError thread still needs identity-bound reconciliation.
+	s := NativeState{Busy: result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError", Unusable: result.Thread.Status.Type == "systemError"}
+	if unstarted || mode == ReadMetadata || mode == ReadWhenIdle && s.Busy {
+		return s, nil
+	}
+	if target != nil {
+		turns, readErr := r.readBoundedTurn(ctx, id, *target, review)
+		if readErr == nil {
+			s.Turns, s.BoundedHistory = turns, true
+			return s, nil
+		}
+		if !errors.Is(readErr, errNativeMethodUnavailable) {
+			return NativeState{}, readErr
 		}
 	}
-	s := NativeState{Busy: result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError", Unusable: result.Thread.Status.Type == "systemError"}
+	if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}, &result); err != nil {
+		return NativeState{}, err
+	}
+	s.Busy = result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError"
+	s.Unusable = result.Thread.Status.Type == "systemError"
 	for _, t := range result.Thread.Turns {
-		turn := NativeTurn{ID: t.ID, Status: t.Status}
-		for _, item := range t.Items {
-			if item.Type == "enteredReviewMode" {
-				_, tail, ok := strings.Cut(item.Review, "request_id=")
-				if fields := strings.Fields(tail); ok && len(fields) > 0 {
-					turn.InputID = strings.TrimSuffix(fields[0], ".")
-				}
-				break
-			}
-			if item.Type == "userMessage" {
-				turn.InputID = item.ClientID
-				if turn.InputID == "" {
-					turn.InputID = item.ID
-				}
-				break
-			}
-		}
-		s.Turns = append(s.Turns, turn)
+		s.Turns = append(s.Turns, t.identity())
 	}
 	return s, nil
+}
+
+func (r *nativeRPC) readBoundedTurn(ctx context.Context, threadID string, target NativeTurn, review bool) ([]NativeTurn, error) {
+	items, limit := "notLoaded", 16
+	if target.ID == "" {
+		items, limit = "summary", 1
+		if review {
+			// The summary intentionally excludes enteredReviewMode.
+			items = "full"
+		}
+	}
+	params := map[string]any{"threadId": threadID, "sortDirection": "desc", "limit": limit, "itemsView": items}
+	for range 32 {
+		var page struct {
+			Data       *[]nativeHistoryTurn `json:"data"`
+			NextCursor string               `json:"nextCursor"`
+		}
+		if err := r.call(ctx, "thread/turns/list", params, &page); err != nil {
+			return nil, err
+		}
+		if page.Data == nil {
+			return nil, errors.New("maintenance: native turn page omitted data")
+		}
+		var matches []NativeTurn
+		for _, record := range *page.Data {
+			turn := record.identity()
+			if target.ID != "" && turn.ID == target.ID || target.ID == "" && turn.InputID == target.InputID {
+				matches = append(matches, turn)
+			}
+		}
+		if len(matches) > 0 || page.NextCursor == "" {
+			return matches, nil
+		}
+		if page.NextCursor == params["cursor"] {
+			return nil, errors.New("maintenance: native turn page did not advance")
+		}
+		params["cursor"] = page.NextCursor
+	}
+	return nil, errors.New("maintenance: original input not found within bounded native history")
 }
 
 func (n *NativeClient) threadRPC(ctx context.Context, b protocol.MaintenanceBackend, thread NativeThread) (*nativeRPC, error) {
