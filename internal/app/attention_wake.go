@@ -33,6 +33,10 @@ func routeQuestionAttention(ctx context.Context, x *Exec, tx *store.Tx, e Event,
 		return false, err
 	}
 	if e.Kind == "decision.opened" {
+		a, _, err := attentionForDecision(ctx, tx.Q(), e.ObjectID)
+		if err != nil || a.ReportFollowOn != nil {
+			return true, err
+		}
 		if x.ActualPrincipal().Kind == protocol.PrincipalMainAgent {
 			return true, nil
 		}
@@ -54,6 +58,9 @@ func recordAttentionNotice(ctx context.Context, x *Exec, tx *store.Tx, e Event, 
 	a, err := store.GetAttention(ctx, tx.Q(), e.ObjectID)
 	if err != nil {
 		return err
+	}
+	if a.ReportFollowOn != nil {
+		return nil // The original versioned decision owns its communication.
 	}
 	if a.Responsibility != nil {
 		if a.Status == "withdrawn" || a.Kind == "action" && a.Status == "resolved" {

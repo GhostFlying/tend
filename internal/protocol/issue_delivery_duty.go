@@ -71,6 +71,9 @@ type UpdateIssueDeliveryPayload struct {
 	Action    string                  `json:"action"`
 	Candidate *IssueDeliveryCandidate `json:"candidate,omitempty"`
 	UpgradeID string                  `json:"upgrade_id,omitempty"`
+	// ProposedImplementationScope is the concrete scope the owner is asked to
+	// confirm when settling a report on an Issue configured to ask.
+	ProposedImplementationScope string `json:"proposed_implementation_scope,omitempty"`
 }
 
 // IssueDeliveryAuthorization selects an answered candidate, never an approval

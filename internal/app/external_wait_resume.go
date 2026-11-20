@@ -64,6 +64,9 @@ func (ResumeExternalWait) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err != nil {
 		return Outcome{}, err
 	}
+	if v.WaitKey == reportFollowOnWaitKey {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "answer the original report decision to continue this Issue")
+	}
 	if p.RestoreNotice {
 		fact, err := views.OwnerCIContinuation(ctx, tx.Q(), task.TaskID, runID)
 		if err != nil {

@@ -24,6 +24,13 @@ func (WaitExternal) Authorize(ctx context.Context, x *Exec, q store.Querier) err
 	if x.Principal.Kind != protocol.PrincipalRun || x.Principal.Subject != x.Env.Target.ID {
 		return protocol.Errorf(protocol.CodeForbidden, "only the execution may yield for an external condition")
 	}
+	var p protocol.WaitExternalPayload
+	if err := decodePayload(x.Env, &p); err != nil {
+		return err
+	}
+	if p.WaitKey == reportFollowOnWaitKey {
+		return protocol.Errorf(protocol.CodeForbidden, "the report settlement records its own wait")
+	}
 	rc, err := loadRun(ctx, q, x.Env.Target.ID)
 	if err != nil {
 		return err
@@ -79,6 +86,9 @@ func (WaitExternal) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(event_seq),0) FROM events`).Scan(&v.InputEventWatermark); err != nil {
 			return Outcome{}, err
 		}
+	}
+	if p.WaitKey == reportFollowOnWaitKey {
+		v.NextReminderAtMillis = 0
 	}
 	if p.DeadlineAtMillis > 0 {
 		v.NextReminderAtMillis = p.DeadlineAtMillis
@@ -158,6 +168,16 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 		d, err := store.GetDecision(ctx, q, p.TargetID)
 		if err != nil {
 			return errNotFound(err, "answer.target_id decision_id %q does not exist", p.TargetID)
+		}
+		if p.WaitKey == reportFollowOnWaitKey {
+			a, found, err := attentionForDecision(ctx, q, d.DecisionID)
+			if err != nil {
+				return err
+			}
+			if found && a.ReportFollowOn != nil && a.ReportFollowOn.RunID == run.RunID && a.IssueID == p.IssueID && allowed[p.IssueID] {
+				return nil
+			}
+			return protocol.Errorf(protocol.CodeForbidden, "wait must match this Run's original report decision")
 		}
 		return allowedTask(d.TaskID)
 	case "task":
@@ -262,6 +282,16 @@ func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.Exter
 		}
 		v.ObservedState = d.Status
 		v.ObservedRevision = d.Version
+		if v.WaitKey == reportFollowOnWaitKey {
+			if d.Status != store.DecisionAnswered {
+				return false, "", nil
+			}
+			var answer decisionAnswer
+			if err := json.Unmarshal([]byte(d.AnswerJSON), &answer); err != nil {
+				return false, "", err
+			}
+			return answer.Option == protocol.ReportContinueImplementation, "answer_" + d.Status, nil
+		}
 		return d.Status != store.DecisionOpen, "answer_" + d.Status, nil
 	case "task":
 		t, err := store.GetTask(ctx, q, v.TargetID)
@@ -341,10 +371,23 @@ func settleExternalWaitStopped(ctx context.Context, x *Exec, tx *store.Tx, r sto
 			return Outcome{}, err
 		}
 	}
+	events := []Event{{ObjectType: "task", ObjectID: v.TaskID, Kind: "run.external_wait_yielded", Body: map[string]any{"wait": v}}}
+	if v.WaitKey == reportFollowOnWaitKey && v.Status == "waiting" {
+		reportEvents, err := settleStoppedReportFollowOn(ctx, x, tx, v)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, reportEvents...)
+		v, err = store.GetExternalWait(ctx, tx.Q(), r.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events[0].Body["wait"] = v
+	}
 	if err := refreshExternalWaits(ctx, x, tx); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Result: v, Events: []Event{{ObjectType: "task", ObjectID: v.TaskID, Kind: "run.external_wait_yielded", Body: map[string]any{"wait": v}}}}, nil
+	return Outcome{Result: v, Events: events}, nil
 }
 
 func refreshExternalWaits(ctx context.Context, x *Exec, tx *store.Tx) error {
@@ -410,7 +453,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 		ready, reason := false, ""
 		if v.ResumeReason != "" {
 			ready, reason = true, "requested"
-		} else if r.Role == protocol.RoleIssueManager {
+		} else if r.Role == protocol.RoleIssueManager && v.WaitKey != reportFollowOnWaitKey {
 			ready, err = externalWaitOwnerInputReady(ctx, tx.Q(), r.TaskID)
 			if err != nil {
 				return false, err
@@ -429,7 +472,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 			}
 		}
 		now := x.Now.UnixMilli()
-		if !ready && now >= v.NextReminderAtMillis {
+		if !ready && v.NextReminderAtMillis > 0 && now >= v.NextReminderAtMillis {
 			ready = true
 			reason = "reminder"
 			if v.DeadlineAtMillis > 0 && now >= v.DeadlineAtMillis {

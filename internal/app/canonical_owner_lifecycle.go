@@ -213,6 +213,11 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 		if action == "close" && endpoint.Closure == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "explicit closure is required")
 		}
+		if action == "close" && endpoint.Closure.Kind == protocol.WorkItemClosureCompleted && current.Plan.ReportFollowOnDecision {
+			if err := reportFollowOnClosureGuard(ctx, tx.Q(), current); err != nil {
+				return Outcome{}, err
+			}
+		}
 		if action == "finish_cancel" && (endpoint.Closure != nil || strings.TrimSpace(common.Reason) == "") {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "cancellation requires an explicit reason, not a completion closure")
 		}
@@ -246,7 +251,7 @@ func applyCanonicalOwnerLifecycle(ctx context.Context, x *Exec, tx *store.Tx, ac
 			}
 			projection := protocol.WorkItem{IssuePlan: next.Plan, Closure: next.Closure}
 			validateClosure := domain.ValidateIssueClosure
-			if x.coordinationExecution != nil {
+			if x.coordinationExecution != nil || x.reportDecisionEndpoint {
 				validateClosure = domain.ValidateResponsibleIssueClosure
 			}
 			if err = validateClosure(projection, *next.Closure); err != nil {

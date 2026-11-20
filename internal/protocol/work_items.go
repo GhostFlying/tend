@@ -3,6 +3,9 @@ package protocol
 // IssuePlan is the editable responsibility ledger. Existing stable IDs and
 // task links survive revisions; implementation designs belong in task specs.
 type IssuePlan struct {
+	// ReportFollowOnDecision records an investigation or design whose proposed
+	// implementation requires a new owner decision after formal report delivery.
+	ReportFollowOnDecision bool            `json:"report_follow_on_decision,omitempty"`
 	PRPolicy               *IssuePRPolicy  `json:"pr_policy,omitempty"`
 	Title                  string          `json:"title"`
 	Project                string          `json:"project"`

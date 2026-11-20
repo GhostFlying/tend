@@ -319,7 +319,7 @@ export type UpdateIssueDeliveryPayload1 =
     }
   | {
       /**
-       * Uses task_id, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       * Uses task_id, acceptance_id, reviewer_artifact_id, run_id, proposed_implementation_scope. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
        */
       action: "report";
     }
@@ -770,6 +770,7 @@ export interface AttentionView {
   question_version?: number;
   raised_by: Principal;
   read_at?: number;
+  report_follow_on?: ReportFollowOn;
   resolution?: string;
   resolution_actor?: Principal;
   resolution_owner_subject?: string;
@@ -919,6 +920,16 @@ export interface Principal {
   role?: RunRole;
   subject?: string;
   thread?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ReportFollowOn".
+ */
+export interface ReportFollowOn {
+  artifact_id: string;
+  assignment_epoch: number;
+  implementation_scope: string;
+  run_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1484,6 +1495,7 @@ export interface IssuePlan {
   intent: string;
   pr_policy?: IssuePRPolicy;
   project: string;
+  report_follow_on_decision?: boolean;
   scope?: string;
   stages: IssueStage[] | null;
   title: string;
@@ -5536,6 +5548,7 @@ export interface WorkItem {
   intent: string;
   pr_policy?: IssuePRPolicy;
   project: string;
+  report_follow_on_decision?: boolean;
   revision: number;
   scope?: string;
   stages: IssueStage[] | null;
@@ -7773,6 +7786,7 @@ export interface UpdateIssueDeliveryPayload2 {
   expected_task_control_revision?: number;
   independent_acceptance?: IndependentAcceptanceRequest;
   pr_url?: string;
+  proposed_implementation_scope?: string;
   reason?: string;
   result?: ArtifactPayload;
   reviewer_artifact_id?: string;

@@ -38,6 +38,9 @@ type Command interface {
 
 // Exec carries the context of one execution.
 type Exec struct {
+	// Report-only closure is derived from the exact authenticated decision
+	// after its original Run stops. It carries no general owner authority.
+	reportDecisionEndpoint        bool
 	clock                         func() time.Time // Read again for observations made after acquiring the writer.
 	diagnosticEvents              []Event
 	repeatedPhysicalStop          bool
