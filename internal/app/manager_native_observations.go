@@ -157,7 +157,7 @@ func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command, sourc
 		}
 		if operation == protocol.OpManagerNativeClaim {
 			if request := a.nativeCalls.claim(x.Env.Target.ID); request != nil {
-				result = request
+				result = activeManagerClaimResult(request)
 			}
 		} else {
 			a.nativeCalls.deliver(x.Env.Target.ID, reply)
@@ -176,4 +176,17 @@ func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command, sourc
 		a.changes.Notify()
 	}
 	return protocol.Operation{RequestID: x.Env.RequestID, Status: protocol.OpSucceeded, Result: raw}, true, err
+}
+
+// Active native claims share the same transport capability, whether the next
+// command is durable, an in-flight observation, or absent.
+func activeManagerClaimResult(request *protocol.ManagerNativeRequest) any {
+	if request == nil {
+		return map[string]any{"request": nil, "accepts_disconnect_process_text": true}
+	}
+	return protocol.ManagerNativeClaimResult{
+		ManagerNativeRequest:         *request,
+		AcceptsCloseProcessText:      request.Method == "close",
+		AcceptsDisconnectProcessText: true,
+	}
 }
