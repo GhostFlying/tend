@@ -118,8 +118,14 @@ func (b *nativeCallBroker) result(run, id string) (protocol.ManagerNativeReply, 
 	return reply, true, true
 }
 
-func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command) (protocol.Operation, bool, error) {
+func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command, source *store.WriteSource) (protocol.Operation, bool, error) {
 	operation := cmd.Operation()
+	switch operation {
+	case "manager.native_enqueue", protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped:
+		if x.Env.Target.Type == "run" && protocol.ValidID(protocol.PrefixRun, x.Env.Target.ID) {
+			source.RunID = x.Env.Target.ID
+		}
+	}
 	if operation != protocol.OpManagerNativeClaim && operation != protocol.OpManagerNativeReply {
 		return protocol.Operation{}, false, nil
 	}
@@ -136,6 +142,12 @@ func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command) (prot
 	if operation == protocol.OpManagerNativeReply {
 		if err := decodePayload(x.Env, &reply); err != nil {
 			return protocol.Operation{}, true, err
+		}
+		if protocol.ValidID(protocol.PrefixRequest, reply.ID) {
+			source.NativeRequestID = reply.ID
+			if reply.Method == "close" {
+				source.CloseRequestID = reply.ID
+			}
 		}
 		if !a.nativeCalls.observation(x.Env.Target.ID, reply.ID) && !managerNativeObservationMethod(reply.Method) {
 			return protocol.Operation{}, false, nil

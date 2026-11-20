@@ -599,6 +599,9 @@ func (a *App) QueueManagerNative(ctx context.Context, run, method string, payloa
 	if err != nil {
 		return "", err
 	}
+	if method == "close" {
+		ctx = store.WithWriteCloseRequest(ctx, id)
+	}
 	op, err := a.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{RequestID: id, Operation: "manager.native_enqueue", Target: protocol.Target{Type: "run", ID: run}, Payload: raw}, ManagerNativeCommand{OperationName: "manager.native_enqueue"})
 	if err == nil && op.Status != protocol.OpSucceeded {
 		err = op.Error

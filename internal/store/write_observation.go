@@ -18,6 +18,8 @@ type WriteSource struct {
 	EventSequence       int64  `json:"event_sequence,omitempty"`
 	AttachmentRunID     string `json:"attachment_run_id,omitempty"`
 	CoordinatorSequence int64  `json:"coordinator_sequence,omitempty"`
+	NativeRequestID     string `json:"native_request_id,omitempty"`
+	CloseRequestID      string `json:"close_request_id,omitempty"`
 }
 
 type writeSourceKey struct{}
@@ -25,6 +27,14 @@ type writeSourceKey struct{}
 // WithWriteSource attaches validated request metadata to a write.
 func WithWriteSource(ctx context.Context, source WriteSource) context.Context {
 	return context.WithValue(ctx, writeSourceKey{}, source)
+}
+
+type writeCloseRequestKey struct{}
+
+// WithWriteCloseRequest carries the coordinator's generated close request ID
+// through the transport envelope's write metadata.
+func WithWriteCloseRequest(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, writeCloseRequestKey{}, id)
 }
 
 type writeEventKey struct{}
@@ -113,8 +123,13 @@ type WriteObservation struct {
 	Outcome     string
 	// ActiveWriter is sampled when connection acquisition fails. It does not
 	// identify all writers that occupied the connection during this wait.
-	ActiveWriter         *ActiveWriteSnapshot
-	WaitFailureSampledAt time.Time
+	ActiveWriter               *ActiveWriteSnapshot
+	WaitFailureSampledAt       time.Time
+	WaitTimeline               *WriterWaitTimeline
+	ConnectionAcquiredAt       time.Time
+	ConnectionReleaseStartedAt time.Time
+	ConnectionReleasedBy       time.Time
+	ConnectionHeld             time.Duration
 	// ContextState is captured at the failing write boundary. It describes
 	// cancellation state without replacing the returned error or claiming cause.
 	ContextState          string
@@ -151,9 +166,11 @@ const writeCallerLimit = 8
 // writeDiagnostics belongs to one Store. Its IDs and active snapshot have no
 // business meaning. Never hold mu across database, callback, or logging calls.
 type writeDiagnostics struct {
-	mu     sync.Mutex
-	next   uint64
-	active activeWrite
+	mu        sync.Mutex
+	next      uint64
+	active    activeWrite
+	historyAt uint64
+	history   *[writerHistoryCapacity]WriterWaitHolder
 }
 
 type activeWrite struct {
@@ -179,6 +196,7 @@ type writeCall struct {
 	diagnostics  *writeDiagnostics
 	pcs          [writeCallerLimit]uintptr
 	pcCount      int
+	historyAt    uint64
 }
 
 func (s *Store) startWriteObservation(ctx context.Context) *writeCall {
@@ -187,6 +205,9 @@ func (s *Store) startWriteObservation(ctx context.Context) *writeCall {
 	}
 	started := s.observer.now()
 	source, _ := ctx.Value(writeSourceKey{}).(WriteSource)
+	if closeID, ok := ctx.Value(writeCloseRequestKey{}).(string); ok {
+		source.CloseRequestID = closeID
+	}
 	if event, ok := ctx.Value(writeEventKey{}).(writeEvent); ok {
 		source.RunID, source.EventSequence = event.run, event.sequence
 		source.AttachmentRunID, source.CoordinatorSequence = event.attachment, event.coordinator
@@ -206,8 +227,36 @@ func (s *Store) acquiredWrite(c *writeCall) {
 		return
 	}
 	d := c.diagnostics
+	c.observation.ConnectionAcquiredAt = c.stageStarted
 	d.mu.Lock()
+	if d.historyAt != 0 {
+		// A later acquisition proves that the preceding connection was
+		// returned, even if Close's caller has yet to record its return.
+		d.historyAtSlot(d.historyAt).releasedBy(c.stageStarted)
+	}
 	d.active = activeWrite{id: c.observation.ID, source: c.observation.Source, acquired: c.stageStarted, stage: c.observation.Stage, pcs: c.pcs, pcCount: c.pcCount}
+	d.mu.Unlock()
+}
+
+func (s *Store) releasingWrite(c *writeCall) {
+	if c == nil {
+		return
+	}
+	o := &c.observation
+	o.ConnectionReleaseStartedAt = c.observer.now()
+	o.ConnectionHeld = o.ConnectionReleaseStartedAt.Sub(o.ConnectionAcquiredAt)
+	d := c.diagnostics
+	d.mu.Lock()
+	if d.history == nil {
+		d.history = new([writerHistoryCapacity]WriterWaitHolder)
+	}
+	d.historyAt++
+	c.historyAt = d.historyAt
+	*d.historyAtSlot(c.historyAt) = WriterWaitHolder{
+		ID: o.ID, Source: o.Source, AcquiredAt: o.ConnectionAcquiredAt, ReleaseStartedAt: o.ConnectionReleaseStartedAt,
+		LastObservedStage: o.Stage, Begin: o.Begin, Callback: o.Callback, Commit: o.Commit, Rollback: o.Rollback,
+	}
+	d.active = activeWrite{}
 	d.mu.Unlock()
 }
 
@@ -215,11 +264,15 @@ func (s *Store) releasedWrite(c *writeCall) {
 	if c == nil {
 		return
 	}
+	at := c.observer.now()
+	c.observation.ConnectionReleasedBy = at
 	d := c.diagnostics
 	d.mu.Lock()
-	// Another writer may already have acquired the returned connection.
-	if d.active.id == c.observation.ID {
-		d.active = activeWrite{}
+	// A slow release caller may already have been overtaken by a full ring.
+	if d.historyAt-c.historyAt < writerHistoryCapacity {
+		holder := d.historyAtSlot(c.historyAt)
+		holder.releasedBy(at)
+		c.observation.ConnectionReleasedBy = holder.ReleasedBy
 	}
 	d.mu.Unlock()
 }
@@ -233,6 +286,7 @@ func (s *Store) failedWriteWait(c *writeCall) {
 	d := c.diagnostics
 	d.mu.Lock()
 	active := d.active
+	c.observation.WaitTimeline = d.waitTimeline(c.started, c.stageStarted)
 	d.mu.Unlock()
 	if active.id != 0 && !active.acquired.After(sampled) {
 		c.observation.ActiveWriter = &ActiveWriteSnapshot{ID: active.id, Source: active.source, CallerStack: writeCallers(active.pcs[:active.pcCount]), AcquiredAt: active.acquired, SampledAt: sampled, HeldFor: sampled.Sub(active.acquired), Stage: active.stage}
@@ -279,7 +333,7 @@ func (c *writeCall) endStage(next string) {
 // setLiveStage describes current connection cleanup without changing the
 // terminal failure stage or its already measured callback/commit duration.
 func (c *writeCall) setLiveStage(stage string) {
-	if c == nil {
+	if c == nil || c.observation.ConnectionAcquiredAt.IsZero() {
 		return
 	}
 	c.diagnostics.mu.Lock()
@@ -323,6 +377,12 @@ func (s *Store) finishWriteObservation(c *writeCall, err error) {
 	}
 	if o.Total < c.observer.slow && o.Outcome != "cancelled" && o.Outcome != "deadline_exceeded" && o.ContextState == "" {
 		return
+	}
+	if !o.ConnectionAcquiredAt.IsZero() {
+		d := c.diagnostics
+		d.mu.Lock()
+		o.WaitTimeline = d.waitTimeline(c.started, o.ConnectionAcquiredAt)
+		d.mu.Unlock()
 	}
 	o.CallerStack = writeCallers(c.pcs[:c.pcCount])
 	if len(o.CallerStack) > 0 {
