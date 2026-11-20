@@ -199,10 +199,11 @@ func boardCheckWaits(ctx context.Context, q store.Querier, runs issueBoardRuns) 
 		}
 		if err == nil {
 			ready, reason := store.ApplyChecksWaitObservation(wait, row)
-			if observed := row.ChecksWaitEndedAt(reason); ready && observed > 0 && (end == 0 || observed < end) {
+			observed := row.ChecksWaitEndedAt(reason)
+			if observed > 0 && (end == 0 || observed < end) {
 				end = observed
 			}
-			pending = pending || check.Current && !ready && wait.ResumeReason == ""
+			pending = pending || check.Current && !ready && observed == 0 && wait.ResumeReason == ""
 			// No time is available for an older observation. In that case only
 			// a recorded continuation or cancellation bounds historical use.
 			if ready && end == 0 {

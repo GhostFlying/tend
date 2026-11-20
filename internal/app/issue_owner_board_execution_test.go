@@ -263,10 +263,14 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 	snapshot := func(state string) {
 		t.Helper()
 		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-			_, err := tx.PutDeliveryObservationFact(t.Context(), delivery, protocol.DeliveryObservation{
-				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "candidate", BaseSHA: "base", TargetSHA: "target", CI: &protocol.DeliveryCI{HeadSHA: "candidate", State: state}},
+			observation := protocol.DeliveryObservation{
+				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "candidate", BaseSHA: "base", TargetSHA: "target"},
 				CheckedAt:        h.clock.Now().UnixMilli(),
-			})
+			}
+			if state != "" {
+				observation.CI = &protocol.DeliveryCI{HeadSHA: "candidate", State: state}
+			}
+			_, err := tx.PutDeliveryObservationFact(t.Context(), delivery, observation)
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -328,6 +332,9 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 			h.clock.Advance(time.Millisecond)
 			snapshot("success")
 			check("repeated terminal observation after the parallel stop", protocol.IssueColumnWIP, "")
+			h.clock.Advance(time.Millisecond)
+			snapshot("")
+			check("partial provider read preserves the confirmed end of the CI wait", protocol.IssueColumnWIP, "")
 			return
 		}
 		check("parallel worker stops while CI is pending", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)
