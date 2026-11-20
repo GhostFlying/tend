@@ -1179,9 +1179,10 @@ function ActivityBlock({
       )}
     </article>
   );
+  // Arm the snapshot before a linked tool arrives and expands the trace.
   return (
     <ProcessLayout
-      change={readable && traceOpen ? process : null}
+      change={readable && (traceOpen || processTarget || anchorTraceOpen) ? process : null}
       scroll={scroll}
       snapshot={onProcessSnapshot}
       restore={onProcessLayout}

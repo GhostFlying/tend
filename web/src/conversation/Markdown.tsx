@@ -5,7 +5,6 @@ import { Link, legacyURL, parse } from "../app/router.ts";
 // chips (D72); code blocks are monospace with a copy button.
 import { FilePreview } from "../tasks/FilePreview.tsx";
 import { resolveFile, type PreviewFile } from "../tasks/files.ts";
-import MarkdownIt from "markdown-it";
 import type { Token } from "markdown-it";
 import { createElement, Fragment, memo, useMemo, useState, type ReactNode } from "react";
 import { splitTaskIds } from "./model.ts";
@@ -14,10 +13,7 @@ import { IssueLink, IssueRef } from "../issues/IssueRef.tsx";
 import { shortIssueCode } from "../issues/identity.ts";
 import { splitWorkItemIds } from "../workitems/model.ts";
 import { TaskRef } from "./TaskRef.tsx";
-
-// linkify turns bare URLs into links; validateLink keeps javascript: and
-// the like out of hrefs.
-const md = new MarkdownIt({ html: false, linkify: true, typographer: false });
+import { markdownParser } from "./markdownParser.ts";
 
 /** The tags a token may become; anything else keeps only its content. */
 const tags = new Set([
@@ -58,7 +54,7 @@ export const Markdown = memo(function Markdown({
   demoteHeadings?: boolean;
 }) {
   const nodes = useMemo(() => {
-    const tokens = md.parse(text, {});
+    const tokens = markdownParser.parse(text, {});
     if (demoteHeadings)
       for (const token of tokens) {
         if (token.type === "heading_open" || token.type === "heading_close") token.tag = "h4";

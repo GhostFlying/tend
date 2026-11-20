@@ -157,6 +157,14 @@ describe("work-item presentation", () => {
       ]);
     },
   );
+  test.each(["short", "all"] as const)("short references leave URL text intact (%s)", (mode) => {
+    const links = "https://example.test/?issue=T123 https://example.test/#t234";
+    expect(splitWorkItemIds(`${links}，继续 T456。`, mode)).toEqual([
+      `${links}，继续 `,
+      { workItemId: "T456" },
+      "。",
+    ]);
+  });
   test("references recognize only complete work-item IDs at text boundaries", () => {
     const id = workItemID;
     expect(splitWorkItemIds(`继续 ${id}。`)).toEqual(["继续 ", { workItemId: id }, "。"]);
