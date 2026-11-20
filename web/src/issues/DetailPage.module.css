@@ -772,3 +772,23 @@
   overflow-wrap: anywhere;
   min-width: 0;
 }
+
+.deliveryHistory {
+  margin-block-start: var(--space-2);
+  padding-inline-start: 10px;
+}
+.deliveryHistory summary {
+  cursor: pointer;
+}
+.deliveryHistory > details {
+  margin-block: var(--space-2);
+  padding-inline-start: var(--space-2);
+}
+.deliveryChecks {
+  margin-block: var(--space-2);
+  padding-inline-start: var(--space-5);
+}
+.deliveryChecks [data-tone="error"],
+.deliveryChecks [data-tone="error"] a {
+  color: var(--danger);
+}

@@ -39,7 +39,8 @@ import { buildTranscriptEntries, type TranscriptEntry } from "../conversation/tr
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "../conversation/scrollAnchor.ts";
 import { Chevron } from "../shell/icons.tsx";
 import { clock } from "../conversation/model.ts";
-import { groupActivityEvents, identifyActivityGroups } from "./activity.ts";
+import { projectActivityGroups } from "./activity.ts";
+import { DeliveryCandidateActivity } from "./DeliveryCandidateActivity.tsx";
 import { IssueTurnRead } from "./turn.ts";
 import { IssueProcessReads, type ProcessDetails } from "./process.ts";
 import { activityTurnRows } from "./turnRows.ts";
@@ -253,7 +254,7 @@ export function IssueActivity({
   const focusedActivity = useRef<{ node: HTMLElement; id: string } | null>(null);
   const [eventIdentities] = useState(() => new Map<string, string>());
   const activityGroups = useMemo(
-    () => identifyActivityGroups(groupActivityEvents(rows), eventIdentities),
+    () => projectActivityGroups(rows, eventIdentities),
     [rows, eventIdentities],
   );
   useLayoutEffect(() => {
@@ -526,7 +527,7 @@ export function IssueActivity({
       {state.value && !rows.length && (
         <p className={styles.muted}>暂无讨论记录。可以在下方补充要求。</p>
       )}
-      {activityGroups.map(({ entries: group, key }) => {
+      {activityGroups.map(({ entries: group, key, candidate }) => {
         const entry = group[0]!;
         return entry.block ? (
           <ActivityBlock
@@ -553,6 +554,13 @@ export function IssueActivity({
               groupedFirst
             />
           </ReceiptDetails>
+        ) : candidate ? (
+          <DeliveryCandidateActivity
+            key={key}
+            anchor={key}
+            entries={group}
+            newCandidate={candidate.newCandidate}
+          />
         ) : group.length > 1 ? (
           <EventGroup
             key={key}
@@ -1034,7 +1042,9 @@ function Milestone({
           </button>
         ) : null}
       </div>
-      {entry.delivery ? <DeliveryProgress item={entry.delivery} historical /> : null}
+      {entry.delivery ? (
+        <DeliveryProgress item={entry.delivery} presentation="observation" />
+      ) : null}
       {entry.issue_id &&
       (entry.kind === "issue.delivery_review_changed" ||
         entry.kind === "work_item.delivery_changed" ||
