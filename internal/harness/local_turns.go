@@ -7,6 +7,7 @@ import (
 )
 
 type LocalTurns interface {
+	HasNext(context.Context, string, string) (bool, error)
 	Queue(context.Context, ToolCall, string) error
 	Begin(context.Context, string, string) (string, string, error)
 	Started(context.Context, string, string, string) error

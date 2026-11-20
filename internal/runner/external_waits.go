@@ -305,12 +305,7 @@ func (r *Runner) syncSessionStops(ctx context.Context) {
 			r.cfg.Log.WarnContext(ctx, "read pending physical stop reports", "err", err)
 		}
 		for _, as := range runs {
-			env, err := r.cfg.Journal.SessionStopReport(ctx, as.RunID)
-			if err == nil && env != nil {
-				attempt, cancel := context.WithTimeout(ctx, time.Second)
-				err = r.deliverSessionStop(attempt, as, env)
-				cancel()
-			}
+			err := r.flushSessionStop(ctx, as)
 			if err != nil && ctx.Err() == nil {
 				r.cfg.Log.WarnContext(ctx, "physical stop delivery pending", "run_id", as.RunID, "err", err)
 			}
@@ -321,4 +316,14 @@ func (r *Runner) syncSessionStops(ctx context.Context) {
 		case <-time.After(r.cfg.RetryDelay):
 		}
 	}
+}
+
+func (r *Runner) flushSessionStop(ctx context.Context, as protocol.Assignment) error {
+	env, err := r.cfg.Journal.SessionStopReport(ctx, as.RunID)
+	if err != nil || env == nil {
+		return err
+	}
+	attempt, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	return r.deliverSessionStop(attempt, as, env)
 }

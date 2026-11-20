@@ -171,8 +171,14 @@ func bindIssueOwnerSteerRequest(ctx context.Context, tx *store.Tx, run string, r
 	if err != nil {
 		return err
 	}
+	target := s.TurnID
+	var waiting bool
+	err = tx.Q().QueryRowContext(ctx, `SELECT native_turn,awaiting_start FROM manager_continued_turns WHERE run_id=? AND thread_id=? AND root_turn=?`, run, s.ThreadID, s.TurnID).Scan(&target, &waiting)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	if s.Status != "sending" || s.NativeRequestID != "" || s.RunID != run || s.ThreadID != payload.ThreadID ||
-		s.TurnID != payload.TurnID || issueSteerInputDigest(payload.Input.Text) != s.InputSHA256 {
+		waiting || target != payload.TurnID || issueSteerInputDigest(payload.Input.Text) != s.InputSHA256 {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "urgent input is already bound or its native target changed")
 	}
 	_, err = tx.Exec(ctx, `UPDATE issue_owner_steers SET native_request_id=? WHERE message_id=?`, request.ID, s.MessageID)

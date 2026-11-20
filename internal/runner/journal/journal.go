@@ -317,7 +317,7 @@ func (j *Journal) PendingRequestCounts(ctx context.Context) (total, claims int64
 // PendingEventCount counts durable worker originals without opening their bodies.
 func (j *Journal) PendingEventCount(ctx context.Context) (int64, error) {
 	var n int64
-	err := j.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM events) + (SELECT COUNT(*) FROM session_stop_reports WHERE delivered=0 AND json_extract(envelope_json,'$.payload.physical_exit')=1)`).Scan(&n)
+	err := j.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&n)
 	return n, err
 }
 

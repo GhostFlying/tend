@@ -53,34 +53,44 @@ func TestManagerCloseDeliveryRollsBackWithOriginalSettlement(t *testing.T) {
 
 func TestManagerCloseDeliveryMigrationDoesNotInferHistoricalReceipt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "journal.db")
-	j := open(t, path)
-	as := protocol.Assignment{RunID: "historical-run", Role: protocol.RoleIssueManager, Protocol: 3}
-	if err := j.AcceptAssignment(t.Context(), as, ""); err != nil {
-		t.Fatal(err)
-	}
-	command := protocol.ManagerNativeRequest{ID: "historical-close", Method: "close", Payload: json.RawMessage(`{}`)}
-	if _, _, err := j.ManagerOperation(t.Context(), as.RunID, command); err != nil {
-		t.Fatal(err)
-	}
-	if err := j.CompleteManagerOperation(t.Context(), protocol.ManagerNativeReply{ID: command.ID, Result: json.RawMessage(`null`)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := j.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// Model the committed journal24 shape with a completed close and no pending
-	// reply. Neither local completion nor queue absence proves peer acceptance.
+	// Build the committed v24 journal before inserting an unacknowledged
+	// close. Subsequent migrations must never infer peer acceptance.
 	legacy, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = legacy.ExecContext(t.Context(), `DROP INDEX rollout_sources_run; DROP INDEX runs_archive_pending; ALTER TABLE runs DROP COLUMN archive_generation; ALTER TABLE runs DROP COLUMN archive_uploaded_generation; ALTER TABLE manager_native_operations DROP COLUMN reply_delivered; PRAGMA user_version=24;`); err != nil {
+	defer legacy.Close()
+	entries, err := migrationFS.ReadDir("migrations")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err = legacy.Close(); err != nil {
+	for _, entry := range entries[:24] {
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := legacy.ExecContext(t.Context(), string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	as := protocol.Assignment{RunID: "historical-run", Role: protocol.RoleIssueManager, Protocol: 3}
+	command := protocol.ManagerNativeRequest{ID: "historical-close", Method: "close", Payload: json.RawMessage(`{}`)}
+	assignment, _ := json.Marshal(as)
+	request, _ := json.Marshal(command)
+	reply, _ := json.Marshal(protocol.ManagerNativeReply{ID: command.ID, Result: json.RawMessage(`null`)})
+	if _, err := legacy.ExecContext(t.Context(), `INSERT INTO runs(run_id,lease_id,run_token,assignment_json,phase,updated_at) VALUES(?,'','',?,'done',1)`, as.RunID, string(assignment)); err != nil {
 		t.Fatal(err)
 	}
-	j = open(t, path)
+	if _, err := legacy.ExecContext(t.Context(), `INSERT INTO manager_native_operations(request_id,run_id,request_json,reply_json,status) VALUES(?,?,?,?,'completed')`, command.ID, as.RunID, string(request), string(reply)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.ExecContext(t.Context(), `PRAGMA user_version=24`); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j := open(t, path)
 	defer j.Close()
 	delivered, err := j.ManagerCloseReplyDelivered(t.Context(), as.RunID, command.ID)
 	closed, closeErr := j.CompletedManagerClose(t.Context(), as.RunID)
