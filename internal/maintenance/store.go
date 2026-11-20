@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -140,20 +141,74 @@ func Open(ctx context.Context, cfg Config, opts Options) (*Controller, error) {
 	if c.state.Format != 1 {
 		return fail(errors.New("maintenance: unsupported durable format"))
 	}
-	// A pre-upgrade snapshot may still hold the original creation error.
-	// The generic reconcile wait from an older controller has no diagnostic.
-	a := c.state.Active
-	recoverCreationError := a != nil && a.Phase == "creating" && a.SessionID == "" &&
-		a.CreationError == "" && c.state.NativeError != "" && c.state.NativeError != errCreationNeedsReconciliation.Error()
-	if recoverCreationError {
-		a.CreationError = c.state.NativeError
+	imported, err := c.importLegacyAudit(ctx)
+	if err != nil {
+		return fail(err)
 	}
-	if len(c.state.History) > 0 || recoverCreationError {
+	if len(c.state.History) > 0 || imported {
 		if err := c.save(ctx); err != nil {
 			return fail(err)
 		}
 	}
 	return c, nil
+}
+
+// Old creating snapshots stored the pending trigger and the receipts but did
+// not associate them. Import only an unambiguous first audit, or retain the
+// cutoff so an operator can reconcile the original receipt from its evidence.
+func (c *Controller) importLegacyAudit(ctx context.Context) (bool, error) {
+	s := &c.state
+	a := s.Active
+	if a == nil || a.Phase != "creating" || a.SessionProfile != "" ||
+		s.LegacyAuditThrough != 0 || len(s.PendingAudits) != 0 || !slices.Contains(s.Pending, "audit") ||
+		s.ScheduledHour == "" || s.ScheduledHour != time.Unix(s.LastAudit, 0).UTC().Format("2006-01-02T15") {
+		return false, nil
+	}
+	var count int
+	var onlyID sql.NullString
+	err := c.db.QueryRowContext(ctx, `SELECT count(*), min(id) FROM receipts
+		WHERE revision<=? AND json_extract(body,'$.Action')='audit'`, s.Revision).Scan(&count, &onlyID)
+	if err != nil {
+		return false, err
+	}
+	s.LegacyAuditThrough = s.Revision
+	if count == 1 && s.LastAuditCompleted == 0 {
+		original, err := c.legacyAuditReceipt(ctx, onlyID.String)
+		if err != nil {
+			return false, err
+		}
+		c.bindLegacyAudit(original)
+	}
+	return true, nil
+}
+
+func (c *Controller) legacyAuditReceipt(ctx context.Context, id string) (protocol.MaintenanceRequest, error) {
+	var raw []byte
+	err := c.db.QueryRowContext(ctx, `SELECT body FROM receipts WHERE id=? AND revision<=?`, id, c.state.LegacyAuditThrough).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protocol.MaintenanceRequest{}, protocol.Errorf(protocol.CodeInvalidRequest, "original audit receipt must predate the legacy reconciliation")
+	}
+	if err != nil {
+		return protocol.MaintenanceRequest{}, err
+	}
+	var original struct {
+		Action  string
+		Request protocol.MaintenanceRequest
+	}
+	if err := json.Unmarshal(raw, &original); err != nil {
+		return protocol.MaintenanceRequest{}, err
+	}
+	if original.Action != "audit" || original.Request.RequestID != id {
+		return protocol.MaintenanceRequest{}, protocol.Errorf(protocol.CodeInvalidRequest, "receipt does not identify an original audit request")
+	}
+	return original.Request, nil
+}
+
+func (c *Controller) bindLegacyAudit(original protocol.MaintenanceRequest) {
+	if original.ScheduledAudit {
+		c.state.PendingAudits = append([]string{original.RequestID}, c.state.PendingAudits...)
+	}
+	c.state.LegacyAuditThrough = 0
 }
 
 func (c *Controller) Close() error {
@@ -240,6 +295,8 @@ func (c *Controller) Status() protocol.MaintenanceStatus {
 		s.NativeError = errCreationNeedsReconciliation.Error() + ": " + s.Active.CreationError
 	} else if s.Failure != nil {
 		s.NativeError = "maintenance: native turn " + s.Failure.Outcome + "; inspect session history and request audit, resume or backend adoption before retrying"
+	} else if s.LegacyAuditThrough != 0 && s.NativeError == "" {
+		s.NativeError = "maintenance: original legacy audit receipt requires reconciliation"
 	}
 	s.OpenCases = 0
 	for _, v := range s.Cases {

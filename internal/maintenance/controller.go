@@ -161,6 +161,21 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 			v.DeferUntil = req.Until
 		}
 	case "reconcile":
+		if req.AuditRequestID != "" {
+			if c.state.LegacyAuditThrough == 0 || strings.TrimSpace(req.Reason) == "" {
+				err = protocol.Errorf(protocol.CodeInvalidRequest, "a pending legacy audit and original receipt correlation are required")
+				break
+			}
+			var original protocol.MaintenanceRequest
+			original, err = c.legacyAuditReceipt(ctx, req.AuditRequestID)
+			if err != nil {
+				break
+			}
+			c.bindLegacyAudit(original)
+			if req.CreationID == "" && req.SessionID == "" && req.ExitEvidence == "" && req.TurnID == "" {
+				break
+			}
+		}
 		err = c.reconcileNative(req)
 	case "upgrade-plan":
 		c.state.Upgrade, err = c.planUpgrade(req.RequestID, req.ReleaseDir)
@@ -271,7 +286,6 @@ func (c *Controller) reconcileNative(req protocol.MaintenanceRequest) error {
 	active.SessionID = req.SessionID
 	active.Phase = "idle"
 	active.ReconciledBy = req.RequestID
-	active.SessionProfile = ""
 	c.state.Active = &active
 	c.state.Predecessor = nil
 	c.state.NativeError = ""
@@ -499,40 +513,61 @@ func (c *Controller) Step(ctx context.Context) error {
 		return c.save(ctx)
 	}
 	reviewQueued := c.state.Review != nil && c.state.Review.Phase == "queued"
-	if c.state.Paused || len(c.state.Pending) == 0 && !reviewQueued {
+	reasons := slices.Clone(c.state.Pending)
+	if c.state.LegacyAuditThrough != 0 {
+		reasons = withoutAudit(reasons)
+	}
+	if c.state.Paused || len(reasons) == 0 && !reviewQueued {
 		return nil
 	}
-	if c.state.Active == nil {
-		instructions, err := os.ReadFile(c.cfg.InstructionsFile)
+	scheduled := !reviewQueued && slices.Contains(reasons, "audit") && len(c.state.PendingAudits) != 0
+	a := c.state.Active
+	// An explicitly adopted legacy creation is allowed its original first
+	// input. Without a recorded profile it will not be kept for later reuse.
+	if scheduled && a != nil && (a.SessionProfile != "" || a.ReconciledBy == "") {
+		_, profile, err := c.auditThreadProfile()
 		if err != nil {
 			return err
 		}
-		profile := digest(struct {
-			Backend                 protocol.MaintenanceBackend
-			Workspace, Instructions string
-		}{c.state.Backend, c.cfg.Workspace, string(instructions)})
-		if !reviewQueued && len(c.state.PendingAudits) != 0 && c.state.IdleAuditSession != nil {
+		if a.SessionProfile != profile {
+			// Let the original inline repair finish without consuming the timer.
+			reasons = withoutAudit(reasons)
+			if len(reasons) == 0 {
+				c.clearAuditThread(a.SessionID)
+				c.finish(false)
+				return c.save(ctx)
+			}
+		}
+	}
+	if a == nil {
+		instructions, profile, err := c.auditThreadProfile()
+		if err != nil {
+			return err
+		}
+		if scheduled && c.state.IdleAuditSession != nil {
 			wait, err := c.selectAuditThread(ctx, profile)
 			if err != nil || wait {
 				return err
 			}
 		}
 		if c.state.Active == nil {
-			return c.createThread(ctx, string(instructions), profile)
+			return c.createThread(ctx, instructions, profile)
 		}
+		a = c.state.Active
 	}
-	a := c.state.Active
 	if a.InputID != "" {
 		return nil
 	}
-	if c.state.Review != nil && c.state.Review.Phase == "queued" {
+	if reviewQueued {
 		return c.startReview(ctx)
 	}
 	a.InputID = c.opts.ID()
-	a.InputReasons = slices.Clone(c.state.Pending)
+	a.InputReasons = reasons
 	a.Phase = "sending"
-	a.Prompt = fmt.Sprintf("Maintain Tend within the configured instructions. Triggers: %s. Read current evidence with `tend maintenance status --socket %s`, `tend maintenance cases --socket %s` and the configured Tend owner CLI. Diagnose before changing business state; healthy waits need no intervention. Repair detector omissions and add fault/healthy regressions. Resolve or defer diagnosed cases through the CLI. This is one bounded inspection; finish when no actionable work remains. Do not create another maintenance session.", strings.Join(c.state.Pending, ", "), shellArg(c.cfg.ControlSocket), shellArg(c.cfg.ControlSocket))
-	c.state.Pending = nil
+	a.Prompt = fmt.Sprintf("Maintain Tend within the configured instructions. Triggers: %s. Read current evidence with `tend maintenance status --socket %s`, `tend maintenance cases --socket %s` and the configured Tend owner CLI. Diagnose before changing business state; healthy waits need no intervention. Repair detector omissions and add fault/healthy regressions. Resolve or defer diagnosed cases through the CLI. This is one bounded inspection; finish when no actionable work remains. Do not create another maintenance session.", strings.Join(reasons, ", "), shellArg(c.cfg.ControlSocket), shellArg(c.cfg.ControlSocket))
+	c.state.Pending = slices.DeleteFunc(c.state.Pending, func(reason string) bool {
+		return slices.Contains(reasons, reason)
+	})
 	if slices.Contains(a.InputReasons, "audit") {
 		if len(c.state.PendingAudits) > 0 {
 			a.ScheduledAuditID = c.state.PendingAudits[0]
@@ -578,6 +613,23 @@ func (c *Controller) Step(ctx context.Context) error {
 	a.TurnID = id
 	a.Phase = "running"
 	return c.save(ctx)
+}
+
+func withoutAudit(reasons []string) []string {
+	return slices.DeleteFunc(reasons, func(reason string) bool { return reason == "audit" })
+}
+
+func (c *Controller) auditThreadProfile() (instructions, profile string, err error) {
+	raw, err := os.ReadFile(c.cfg.InstructionsFile)
+	if err != nil {
+		return "", "", err
+	}
+	instructions = string(raw)
+	profile = digest(struct {
+		Backend                 protocol.MaintenanceBackend
+		Workspace, Instructions string
+	}{c.state.Backend, c.cfg.Workspace, instructions})
+	return instructions, profile, nil
 }
 
 func (c *Controller) createThread(ctx context.Context, instructions, profile string) error {

@@ -104,6 +104,8 @@ tend maintenance reconcile --revision "$CURRENT_REVISION" --request-id "$RECONCI
 
 `--reason` 记录如何把线程分配关联到原创建。`--exit-evidence` 与 `--verification` 分别引用原生退出和未执行的证据。超时、断开和查无记录均不足以结清。控制器核对当前修订、原创建身份和未提交输入的持久状态，历史及收据一并写入，保留原待办。暂停只停止新模型调度，当前原生工作仍可观察；部署层停止 timer 时保留状态和配置。
 
+旧版创建状态没有记录定时待办与请求 ID 的关联。状态显示 `legacy_audit_through` 时，先从原调度记录核对待办对应的命令收据，并用 `maintenance request --id` 核对原输入。可在创建对账时附加 `--audit-request-id "$ORIGINAL_AUDIT_REQUEST_ID"`，也可另行执行 `reconcile --audit-request-id "$ORIGINAL_AUDIT_REQUEST_ID" --reason "$AUDIT_CORRELATION"`。在原身份明确前，后续定时请求继续排队，已有维修可照常续行。
+
 原生 turn 失败或被人工中断时，历史保存真实 outcome、原 turn/input 和触发索引，
 `status.failure` 与诊断概览报告故障，待办保留。普通程序检测不再次调用模型；新的
 `audit`、`resume` 或显式 backend 配置才允许新尝试，原来的人工暂停仍需 `resume`。

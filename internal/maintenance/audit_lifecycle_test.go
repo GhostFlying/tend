@@ -383,3 +383,132 @@ func (f *auditNativeFixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+func TestFault_MaintenanceLegacyCreatingRetainsOriginalAuditReceipt(t *testing.T) {
+	for _, ambiguous := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ambiguous=%t", ambiguous), func(t *testing.T) {
+			c, n, cfg, opts := fixture(t)
+			ctx := t.Context()
+			original := protocol.MaintenanceRequest{RequestID: "legacy-timer", ExpectedRevision: c.Status().Revision, ScheduledAudit: true}
+			if _, err := c.Command(ctx, "audit", original); err != nil {
+				t.Fatal(err)
+			}
+			if ambiguous {
+				// A legacy no-op duplicate still had a receipt. Without the
+				// original scheduler evidence the two cannot be attributed.
+				command(t, c, "audit", protocol.MaintenanceRequest{ScheduledAudit: true})
+			}
+			c.state.PendingAudits = nil
+			c.state.Active = &protocol.MaintenanceSession{
+				ID: "legacy-creation", Backend: cfg.Backend, Phase: "creating", StartedAt: opts.Now().Unix(),
+			}
+			c.state.NativeError = "read failure from an earlier operation"
+			if err := c.save(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			c.lock = nil
+			restarted, err := Open(ctx, cfg, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			if s := restarted.Status(); s.Active.CreationError != "" {
+				t.Fatalf("unattributed diagnostic assigned to a legacy creation: %+v", s.Active)
+			}
+			exit := protocol.MaintenanceRequest{
+				CreationID: "legacy-creation", SessionID: "legacy-native",
+				Reason: "matched original thread allocation", ExitEvidence: "original loop exited", Verification: "no turn submitted",
+			}
+			command(t, restarted, "reconcile", exit)
+			if ambiguous {
+				restarted.opts.Now = func() time.Time { return opts.Now().Add(2 * time.Hour) }
+				next := protocol.MaintenanceRequest{RequestID: "later-timer", ExpectedRevision: restarted.Status().Revision, ScheduledAudit: true}
+				if _, err := restarted.Command(ctx, "audit", next); err != nil {
+					t.Fatal(err)
+				}
+				step(t, restarted)
+				if s := restarted.Status(); s.LegacyAuditThrough == 0 || s.Active != nil || n.created != 0 {
+					t.Fatalf("new timer displaced the original pending audit: %+v", s)
+				}
+				wrong := protocol.MaintenanceRequest{
+					RequestID: "wrong-correlation", ExpectedRevision: restarted.Status().Revision,
+					AuditRequestID: next.RequestID, Reason: "newer receipt",
+				}
+				if _, err := restarted.Command(ctx, "reconcile", wrong); err == nil {
+					t.Fatal("newer receipt was accepted as the original legacy audit")
+				}
+				command(t, restarted, "reconcile", protocol.MaintenanceRequest{
+					AuditRequestID: original.RequestID, Reason: "matched original dispatch in the legacy scheduler log",
+				})
+			}
+			step(t, restarted)
+			step(t, restarted)
+			a := restarted.Status().Active
+			if n.started != 1 || a.ScheduledAuditID != original.RequestID || a.Audit == nil ||
+				!strings.Contains(a.Prompt, "Independently look for missed maintenance work") {
+				t.Fatalf("legacy pending audit lost its identity or independent prompt: %+v", a)
+			}
+			n.complete, n.busy = true, false
+			step(t, restarted)
+			history, _, _, err := restarted.History(ctx, 0, 10)
+			if err != nil || len(history) != 2 || history[1].ScheduledAuditID != original.RequestID ||
+				history[1].TurnID != a.TurnID || history[1].Audit == nil || history[1].Outcome != "completed" {
+				t.Fatalf("legacy timer result is not traceable: %+v, %v", history, err)
+			}
+			if ambiguous {
+				step(t, restarted)
+				if a := restarted.Status().Active; n.started != 2 || a.ScheduledAuditID != "later-timer" {
+					t.Fatalf("new timer did not remain separately queued: %+v", a)
+				}
+			}
+			receipt, err := restarted.Receipt(ctx, original.RequestID)
+			if err != nil || receipt.Request == nil || *receipt.Request != original {
+				t.Fatalf("original audit receipt changed: %+v, %v", receipt, err)
+			}
+		})
+	}
+}
+
+func TestMaintenanceIncompatibleAuditWaitsForOriginalReviewContinuation(t *testing.T) {
+	c, n, cfg, _ := fixture(t)
+	now := c.opts.Now()
+	c.opts.Now = func() time.Time { return now }
+	command(t, c, "audit", protocol.MaintenanceRequest{ScheduledAudit: true})
+	step(t, c)
+	step(t, c)
+	first := c.Status().Active
+	command(t, c, "review", protocol.MaintenanceRequest{Base: "main", Head: strings.Repeat("a", 40)})
+	n.complete, n.busy = true, false
+	step(t, c)
+	step(t, c)
+	if n.reviewed != 1 || n.thread.ID != first.SessionID {
+		t.Fatal("inline review did not stay on the original thread")
+	}
+
+	now = now.Add(2 * time.Hour)
+	command(t, c, "audit", protocol.MaintenanceRequest{ScheduledAudit: true})
+	second := c.Status().PendingAudits[0]
+	n.complete, n.busy = true, false
+	step(t, c)
+	if err := os.WriteFile(cfg.InstructionsFile, []byte("Changed maintenance instructions."), 0600); err != nil {
+		t.Fatal(err)
+	}
+	step(t, c)
+	repair := c.Status().Active
+	if repair.SessionID != first.SessionID || repair.ScheduledAuditID != "" || slices.Contains(repair.InputReasons, "audit") ||
+		!strings.Contains(repair.Prompt, "read the review output") || !slices.Contains(c.Status().PendingAudits, second) {
+		t.Fatalf("original repair or queued timer lost identity: %+v", repair)
+	}
+	n.complete, n.busy = true, false
+	step(t, c)
+	step(t, c)
+	step(t, c)
+	step(t, c)
+	a := c.Status().Active
+	if a.SessionID == first.SessionID || a.ScheduledAuditID != second || n.created != 2 || n.started != 4 {
+		t.Fatalf("scheduled work did not switch to a compatible thread after repair: %+v", a)
+	}
+}

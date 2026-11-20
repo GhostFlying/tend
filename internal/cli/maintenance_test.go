@@ -47,9 +47,9 @@ func TestMaintenanceCommandsKeepOriginalCLIInput(t *testing.T) {
 		}},
 		{"resolve", []string{"--id", "case-1", "--reason", "complete", "--verification", "owner turn"}, func(r protocol.MaintenanceRequest) bool { return r.Verification == "owner turn" }},
 		{"audit", []string{"--scheduled"}, func(r protocol.MaintenanceRequest) bool { return r.ScheduledAudit }},
-		{"reconcile", []string{"--creation-id", "original-creation", "--session-id", "original-thread", "--reason", "matched allocation", "--exit-evidence", "native exit receipt", "--verification", "no turn submitted"}, func(r protocol.MaintenanceRequest) bool {
+		{"reconcile", []string{"--creation-id", "original-creation", "--session-id", "original-thread", "--reason", "matched allocation", "--exit-evidence", "native exit receipt", "--verification", "no turn submitted", "--audit-request-id", "original-audit"}, func(r protocol.MaintenanceRequest) bool {
 			return r.CreationID == "original-creation" && r.SessionID == "original-thread" &&
-				r.Reason == "matched allocation" && r.ExitEvidence == "native exit receipt" && r.Verification == "no turn submitted"
+				r.Reason == "matched allocation" && r.ExitEvidence == "native exit receipt" && r.Verification == "no turn submitted" && r.AuditRequestID == "original-audit"
 		}},
 	} {
 		t.Run(tt.action, func(t *testing.T) {
