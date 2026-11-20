@@ -288,6 +288,10 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
  (e.kind IN ('issue.closed','issue.cancelled','issue.assigned','issue.manager_claimed','issue.manager_migration_cancelled') OR (e.kind='issue.status_changed' AND json_extract(e.body_json,'$.state') IN ('closed','cancelled'))))
  )
  UNION ALL
+ SELECT e.event_seq,e.kind,e.object_id,e.created_at FROM issue_owner_results r
+ JOIN events e ON e.object_type='artifact' AND e.object_id=r.artifact_id AND e.kind='issue.result_submitted'
+ WHERE r.issue_id=? AND e.event_seq>(SELECT since FROM query)
+ UNION ALL
  SELECT e.event_seq,e.kind,e.object_id,e.created_at
  FROM (SELECT DISTINCT s.event_id FROM background_batches b JOIN background_sources s USING(batch_id) WHERE b.work_item_id=?) linked
  CROSS JOIN events e ON e.event_id=linked.event_id
@@ -301,7 +305,7 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
  )
  SELECT position,kind,object_id,created_at FROM entries
  WHERE position<=? AND position>=? AND (?=0 OR position<?) ORDER BY position DESC LIMIT ?`,
-		query.Readable, query.Since, out.EventSeq, id, id, conversation, string(rawKinds), id, id, id, id, id, id, id,
+		query.Readable, query.Since, out.EventSeq, id, id, conversation, string(rawKinds), id, id, id, id, id, id, id, id,
 		out.EventSeq, query.From, query.Before, query.Before, limit+1)
 	if err != nil {
 		return out, fmt.Errorf("views: issue activity: %w", err)
@@ -491,7 +495,7 @@ func ReadIssueActivity(ctx context.Context, q store.Querier, id string, query Is
 				if entry.TaskID == "" {
 					_ = q.QueryRowContext(ctx, `SELECT task_id FROM tasks WHERE task_id=? UNION ALL SELECT task_id FROM runs WHERE run_id=? LIMIT 1`, r.id, r.id).Scan(&entry.TaskID)
 				}
-				if r.kind == "artifact.submitted" {
+				if r.kind == "artifact.submitted" || r.kind == "issue.result_submitted" {
 					entry.Title = "已交付成果"
 					if entry.ArtifactID == "" {
 						entry.ArtifactID = r.id
