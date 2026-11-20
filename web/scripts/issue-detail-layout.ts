@@ -979,18 +979,48 @@ async function verifyShortNumbers() {
         });
         await page.goto(`${base}/issues/${issue.issue_id}?message=${deferredToolID}`);
         await processContinuation;
-        await page.waitForFunction((id) => {
-          const tool = document.querySelector(`[data-tool-item="${id}"]`);
-          const bounds = tool?.getBoundingClientRect();
-          const scrollport = tool?.closest("[data-issue-scroll]")?.getBoundingClientRect();
-          return (
-            !!bounds &&
-            !!scrollport &&
-            bounds.bottom > scrollport.top &&
-            bounds.top < scrollport.bottom
-          );
-        }, deferredToolID);
+        const waitForDeferredToolInView = (tab = page) =>
+          tab.waitForFunction((id) => {
+            const tool = document.querySelector(`[data-tool-item="${id}"]`);
+            const bounds = tool?.getBoundingClientRect();
+            const scrollport = tool?.closest("[data-issue-scroll]")?.getBoundingClientRect();
+            return (
+              !!bounds &&
+              !!scrollport &&
+              bounds.bottom > scrollport.top &&
+              bounds.top < scrollport.bottom
+            );
+          }, deferredToolID);
+        await waitForDeferredToolInView();
         console.log(`PASS scoped deferred tool anchor before publication (${width}px)`);
+        const recoveryPage = await context.newPage();
+        recoveryPage.setDefaultTimeout(10_000);
+        let failDeferredPage = true;
+        let deferredReads = 0;
+        await recoveryPage.route(`**${blockPath}?*`, (route) => {
+          const cursor = new URL(route.request().url()).searchParams.get("process_after");
+          if (cursor !== "14") return route.fallback();
+          deferredReads++;
+          if (!failDeferredPage) return route.fallback();
+          return route.fulfill({ status: 503, json: { error: { code: "unavailable" } } });
+        });
+        try {
+          await recoveryPage.goto(`${base}/issues/${issue.issue_id}?message=${deferredToolID}`);
+          const recovery = recoveryPage
+            .getByRole("status")
+            .filter({ hasText: "暂时无法定位链接中的工具" });
+          const retry = recovery.getByRole("button", { name: "重试", exact: true });
+          await retry.waitFor();
+          const failedAttempts = deferredReads;
+          failDeferredPage = false;
+          await retry.click();
+          await waitForDeferredToolInView(recoveryPage);
+          await recovery.waitFor({ state: "hidden" });
+          assert(deferredReads > failedAttempts);
+        } finally {
+          await recoveryPage.close();
+        }
+        console.log(`PASS retry deferred tool anchor without opening the trace (${width}px)`);
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");
         const composer = detail.getByRole("textbox", { name: "消息", exact: true });

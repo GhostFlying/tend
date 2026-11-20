@@ -158,7 +158,10 @@ describe("work-item presentation", () => {
     },
   );
   test.each(["short", "all"] as const)("short references leave URL text intact (%s)", (mode) => {
-    const links = "https://example.test/?issue=T123 https://example.test/#t234";
+    const links =
+      "https://example.test/?issue=T123 https://example.test/#t234 " +
+      "mailto:ops@example.org?subject=T345 ssh://git@example.org/repo?label=T567 " +
+      "(ssh://[::1]/repo(T789)?labels[]=T890)";
     expect(splitWorkItemIds(`${links}，继续 T456。`, mode)).toEqual([
       `${links}，继续 `,
       { workItemId: "T456" },
