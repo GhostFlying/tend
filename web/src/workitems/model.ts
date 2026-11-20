@@ -130,6 +130,14 @@ export function splitWorkItemIds(
   const fileMarker = /[/\\]|[\p{L}\p{N}_-]\.[\p{L}\p{N}_]/u;
   const urls = mode === "legacy" ? undefined : markdownParser.linkify.match(text)?.values();
   let url = urls?.next().value;
+  // The Markdown linkifier omits some schemes and stops before mailto queries.
+  const explicitAddresses =
+    mode === "legacy"
+      ? undefined
+      : text.matchAll(
+          /\b(?:[a-z][a-z0-9+.-]*:\/\/|mailto:)(?:[^\s<>"'`()[\]{}，。！？；、]|\([^()\s<>"'`]*\)|\[[^[\]\s<>"'`]*\])+/gi,
+        );
+  let address = explicitAddresses?.next().value;
   let word = fileWords?.next().value;
   let isFileWord = word !== undefined && fileMarker.test(word[0]);
   const out: (string | { workItemId: string })[] = [];
@@ -138,6 +146,9 @@ export function splitWorkItemIds(
     if (!match[0].startsWith("wi_")) {
       while (url && url.lastIndex <= match.index) url = urls?.next().value;
       if (url && url.index <= match.index) continue;
+      while (address && address.index + address[0].length <= match.index)
+        address = explicitAddresses?.next().value;
+      if (address && address.index <= match.index) continue;
       while (word && word.index + word[0].length <= match.index) {
         word = fileWords?.next().value;
         isFileWord = word !== undefined && fileMarker.test(word[0]);

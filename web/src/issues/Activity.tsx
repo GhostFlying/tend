@@ -57,8 +57,12 @@ type ProcessScrollPosition = ScrollAnchor | "end";
 
 function findActivityTarget(scroll: RefObject<HTMLDivElement | null>, messageID: string) {
   const root = scroll.current;
-  const target = root?.querySelector<HTMLElement>(`[data-scroll-id="${CSS.escape(messageID)}"]`);
-  return root && target ? { root, target } : undefined;
+  if (!root) return;
+  const escapedID = CSS.escape(messageID);
+  const target = root.querySelector<HTMLElement>(`[data-scroll-id="${escapedID}"]`);
+  if (target) return { root, target, recovery: false };
+  const error = root.querySelector<HTMLElement>(`[data-process-anchor-error="${escapedID}"]`);
+  return error ? { root, target: error, recovery: true } : undefined;
 }
 
 export function IssueActivity({
@@ -101,9 +105,11 @@ export function IssueActivity({
   const dataFrame = useRef(0);
   const expectedScroll = useRef<number | null>(null);
   const located = useRef<string | undefined>(undefined);
+  const recoveryLocated = useRef<string | undefined>(undefined);
   const skippedAnchor = useRef<string | undefined>(undefined);
   useEffect(() => {
     located.current = undefined;
+    recoveryLocated.current = undefined;
     skippedAnchor.current = undefined;
   }, [targetMessage]);
   const correctScroll = useCallback((node: HTMLElement, correct: () => void) => {
@@ -569,16 +575,18 @@ export function IssueActivity({
       return;
     const anchor = findActivityTarget(scroll, targetMessage);
     if (!anchor) return;
-    const { root, target } = anchor;
+    const { root, target, recovery } = anchor;
     const frame = requestAnimationFrame(() => {
       if (
         located.current === targetMessage ||
+        (recovery && recoveryLocated.current === targetMessage) ||
         skippedAnchor.current === targetMessage ||
         !target.isConnected ||
         !target.getClientRects().length
       )
         return;
-      located.current = targetMessage;
+      if (recovery) recoveryLocated.current = targetMessage;
+      else located.current = targetMessage;
       reading.pauseFollowing();
       following.current = false;
       correctScroll(root, () => target.scrollIntoView({ block: "center" }));
@@ -899,10 +907,11 @@ function ActivityBlock({
     else if (value.more && !value.items.some((item) => item.message_id === processTarget))
       requestProcess(value.depth + 1);
   }, [processTarget, process.error, process.value, requestProcess]);
+  const anchorLoaded = process.value?.items.some((item) => item.message_id === processTarget);
+  const anchorError = readable && processTarget && !anchorLoaded && process.error;
   useEffect(() => {
-    if (processTarget && process.value?.items.some((item) => item.message_id === processTarget))
-      return onAnchorReady();
-  }, [processTarget, process.value, onAnchorReady]);
+    if (processTarget && (anchorLoaded || anchorError)) return onAnchorReady();
+  }, [processTarget, anchorLoaded, anchorError, process.value, onAnchorReady]);
   const processBlock = readable
     ? process.value
       ? {
@@ -981,22 +990,29 @@ function ActivityBlock({
       data-scroll-id={entry.id}
       data-discussion-turn={entry.id}
     >
-      {standaloneError && (
-        <p role="status" className={styles.error}>
-          {process.error ?? standaloneError}
-          <button
-            disabled={readable && process.loading}
-            onClick={() => {
-              if (readable) {
-                requestProcess();
-                setTraceOpen(true);
-              } else if (!opened) setOpened(true);
-              else void continuation.refresh();
-            }}
-          >
-            重新读取公开过程
-          </button>
+      {anchorError ? (
+        <p role="status" className={styles.error} data-process-anchor-error={processTarget}>
+          公开过程读取失败，暂时无法定位链接中的工具。
+          <button onClick={() => requestProcess()}>重试</button>
         </p>
+      ) : (
+        standaloneError && (
+          <p role="status" className={styles.error}>
+            {process.error ?? standaloneError}
+            <button
+              disabled={readable && process.loading}
+              onClick={() => {
+                if (readable) {
+                  requestProcess();
+                  setTraceOpen(true);
+                } else if (!opened) setOpened(true);
+                else void continuation.refresh();
+              }}
+            >
+              重新读取公开过程
+            </button>
+          </p>
+        )
       )}
       {displayRows.map((row) => {
         switch (row.kind) {
@@ -1106,7 +1122,7 @@ function ActivityBlock({
                           footer: (
                             <>
                               {process.loading && <p role="status">正在读取公开过程…</p>}
-                              {process.error && !summaryError && (
+                              {process.error && !summaryError && !anchorError && (
                                 <p role="status">
                                   公开过程读取失败
                                   <button onClick={() => requestProcess()}>重试</button>
