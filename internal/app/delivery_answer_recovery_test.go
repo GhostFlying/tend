@@ -98,6 +98,43 @@ func TestAttentionViewClassifiesDeliveryByOriginalDuty(t *testing.T) {
 	}
 }
 
+func TestDeferredDeliveryReceiptRetainsItsOriginAfterResuming(t *testing.T) {
+	h, issue, task, candidate := deliveryFixture(t)
+	duty := prepareDeliveryForTest(t, h, issue.IssueID, task, candidate)
+	const note = "Resume after verification"
+	answerDeliveryForTest(t, h, duty, "defer", note)
+	op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{
+		TaskID: task, Action: "resume",
+		IssueControlPayload: protocol.IssueControlPayload{Reason: "Owner resumes deferred delivery"},
+	})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		view, err := views.Attention(t.Context(), tx.Q(), duty.AttentionID)
+		if err != nil {
+			return err
+		}
+		current, err := store.DecisionHasDeliveryDuty(t.Context(), tx.Q(), view.DecisionID)
+		if err != nil {
+			return err
+		}
+		if current || !view.DeliveryDecision || view.Status != "resolved" || view.Decision == nil || view.Decision.Version != 2 {
+			t.Fatalf("original receipt should be recognized without a current delivery duty: view=%+v current=%v", view, current)
+		}
+		var recorded decisionAnswer
+		if err := json.Unmarshal(view.Decision.Answer, &recorded); err != nil {
+			return err
+		}
+		if recorded.Option != "defer" || recorded.Text != note {
+			t.Fatalf("original recorded answer changed: %+v", recorded)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeliveryMixedAnswerRejectsApprovalButRetainsExplicitDeferral(t *testing.T) {
 	for _, entry := range []string{"decision", "attention", "from-message"} {
 		for _, option := range []string{"approve", "defer", "end_delivery"} {

@@ -102,6 +102,12 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 		if e != nil {
 			return v, e
 		}
+		if !v.DeliveryDecision && d.Status == store.DecisionAnswered {
+			v.DeliveryDecision, e = store.HasRecordedDeliveryAnswer(ctx, q, d.DecisionID)
+			if e != nil {
+				return v, e
+			}
+		}
 		if v.TaskContext != nil {
 			v.TaskContext.QuestionCurrent = d.Status == store.DecisionOpen && d.AskedRevision.Valid && d.AskedRevision.Int64 == taskRevision
 			known, obsolete, err := store.TaskRuleQuestionApplicability(ctx, q, d.DecisionID)
