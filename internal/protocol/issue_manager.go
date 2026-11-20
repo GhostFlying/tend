@@ -89,7 +89,8 @@ type ManagerNativeRequest struct {
 // The durable command and its retry identity exclude these options.
 type ManagerNativeClaimResult struct {
 	ManagerNativeRequest
-	AcceptsCloseProcessText bool `json:"accepts_close_process_text,omitempty"`
+	AcceptsCloseProcessText      bool `json:"accepts_close_process_text,omitempty"`
+	AcceptsDisconnectProcessText bool `json:"accepts_disconnect_process_text,omitempty"`
 }
 
 const (
