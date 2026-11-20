@@ -61,6 +61,13 @@ func TestCapabilityBindingsExerciseRealDispatch(t *testing.T) {
 		mu.Lock()
 		calls = append(calls, recorded{r.Method, r.URL.Path, r.Header.Get("Authorization"), body})
 		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/external-waits") {
+			if query := r.URL.Query(); query.Get("run_id") != "original" || query.Get("status") != "waiting" {
+				t.Errorf("wait capability did not send both filters: %v", query)
+			}
+			fmt.Fprint(w, `[]`)
+			return
+		}
 		if r.URL.Path == "/upgrades/recovery/status" {
 			fmt.Fprint(w, `{"plan":{"recovery_id":"forward"},"linked":true}`)
 			return
