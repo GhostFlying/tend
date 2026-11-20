@@ -105,6 +105,7 @@ type MaintenanceSession struct {
 }
 
 type MaintenanceStatus struct {
+	LegacyAuditThrough int64                        `json:"legacy_audit_through,omitempty"`
 	IdleAuditSession   *MaintenanceAuditSession     `json:"idle_audit_session,omitempty"`
 	PendingAudits      []string                     `json:"pending_audits,omitempty"`
 	LastSnapshotAt     int64                        `json:"last_snapshot_at,omitempty"`
@@ -162,6 +163,7 @@ type MaintenanceOverview struct {
 }
 
 type MaintenanceRequest struct {
+	AuditRequestID   string              `json:"audit_request_id,omitempty"`
 	CreationID       string              `json:"creation_id,omitempty"`
 	ExitEvidence     string              `json:"exit_evidence,omitempty"`
 	ScheduledAudit   bool                `json:"scheduled_audit,omitempty"`
