@@ -52,26 +52,57 @@ func (r *Runner) sendEvent(ctx context.Context, as protocol.Assignment, env *pro
 	return nil
 }
 
-func (r *Runner) settledEvents(ctx context.Context) {
+func (r *Runner) wakeEventSync() {
+	select {
+	case r.eventWake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *Runner) syncJournalEvents(ctx context.Context) {
+	var prune <-chan time.Time
+	pruneSpool := func() {
+		prune = nil
+		if _, err := r.cfg.Journal.PruneSpool(ctx); err != nil && ctx.Err() == nil {
+			r.cfg.Log.WarnContext(ctx, "prune acknowledged run event originals", "err", err)
+			prune = time.After(time.Minute)
+		}
+	}
 	for ctx.Err() == nil {
-		runs, err := r.cfg.Journal.SettledEventRuns(ctx)
+		select {
+		case <-prune:
+			pruneSpool()
+		default:
+		}
+		runs, err := r.cfg.Journal.PendingEventRuns(ctx)
 		if err != nil {
-			r.cfg.Log.ErrorContext(ctx, "read pending settled events", "err", err)
+			r.cfg.Log.ErrorContext(ctx, "read pending run events", "err", err)
 		}
+		progress := false
 		for _, as := range runs {
-			if err := r.flushEvents(ctx, as); err != nil && ctx.Err() == nil {
-				r.cfg.Log.WarnContext(ctx, "settled event sync pending", "run_id", as.RunID, "err", err)
+			sent, err := r.flushEventBatch(ctx, as)
+			progress = progress || sent
+			if err != nil && ctx.Err() == nil {
+				r.cfg.Log.WarnContext(ctx, "run event sync pending", "run_id", as.RunID, "err", err)
 			}
 		}
-		if len(runs) > 0 && ctx.Err() == nil {
-			if _, err := r.cfg.Journal.PruneSpool(ctx); err != nil {
-				r.cfg.Log.WarnContext(ctx, "event spool cleanup pending", "err", err)
+		if progress {
+			if prune == nil {
+				prune = time.After(time.Second)
 			}
+			continue
+		}
+		delay := r.cfg.EventFlush
+		if len(runs) > 0 {
+			delay = min(delay, r.cfg.RetryDelay)
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(r.cfg.RetryDelay):
+		case <-prune:
+			pruneSpool()
+		case <-r.eventWake:
+		case <-time.After(delay):
 		}
 	}
 }

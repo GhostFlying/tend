@@ -31,7 +31,7 @@ func TestSettledRunRetainsCompleteEventUntilAcknowledged(t *testing.T) {
 	if err := j.Done(ctx, as.RunID); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := j.SettledEventRuns(ctx)
+	pending, err := j.PendingEventRuns(ctx)
 	if err != nil || len(pending) != 1 || pending[0].RunID != as.RunID {
 		t.Fatalf("lost pending execution: %v %v", pending, err)
 	}
@@ -42,7 +42,7 @@ func TestSettledRunRetainsCompleteEventUntilAcknowledged(t *testing.T) {
 	if err := j.AckEvents(ctx, as.RunID, 2); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = j.SettledEventRuns(ctx)
+	pending, err = j.PendingEventRuns(ctx)
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("acknowledged queue: %v %v", pending, err)
 	}

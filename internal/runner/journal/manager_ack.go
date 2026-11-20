@@ -42,9 +42,9 @@ func (j *Journal) ManagerAcknowledgementRuns(ctx context.Context) ([]protocol.As
 	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT run_id FROM manager_receipt_ack_ids) ORDER BY run_id`)
 }
 
-// SettledEventRuns finds only outstanding tails, including after restart.
-func (j *Journal) SettledEventRuns(ctx context.Context) ([]protocol.Assignment, error) {
-	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT DISTINCT run_id FROM events) AND phase='done' AND json_extract(assignment_json,'$.event_sync')=1 ORDER BY run_id`)
+// PendingEventRuns finds only outstanding tails, including after restart.
+func (j *Journal) PendingEventRuns(ctx context.Context) ([]protocol.Assignment, error) {
+	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT DISTINCT run_id FROM events) AND json_extract(assignment_json,'$.event_sync')=1 ORDER BY run_id`)
 }
 
 func (j *Journal) assignmentsFor(ctx context.Context, query string) ([]protocol.Assignment, error) {

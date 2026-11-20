@@ -1421,11 +1421,11 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)
 		}
-		lease, err := store.GetLeaseByRun(ctx, tx.Q(), runID)
-		if err != nil {
+		var released bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM leases WHERE run_id=? AND status='released')`, runID).Scan(&released); err != nil {
 			return err
 		}
-		historical := lease.Status == store.LeaseReleased || run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed
+		historical := released || run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed
 		res.Accepted = 0
 		for _, e := range events {
 			previous, seen, err := store.RunLogAt(ctx, tx.Q(), runID, e.Seq)
@@ -1461,14 +1461,14 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 					return err
 				}
 			}
+			if err := concurrencyRunFeedback(ctx, tx, run, e, now, observedAt); err != nil {
+				return err
+			}
 			if historical {
 				if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 					return err
 				}
 				continue
-			}
-			if err := concurrencyRunFeedback(ctx, tx, run, e, now, observedAt); err != nil {
-				return err
 			}
 			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
 				return err
