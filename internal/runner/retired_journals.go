@@ -14,8 +14,8 @@ import (
 )
 
 type retiredCursor struct {
-	after                  string
-	archiveDone, usageDone bool
+	after                              string
+	archiveDone, usageDone, eventsDone bool
 }
 
 // An acknowledged physical exit transfers only auxiliary work. Never start a
@@ -44,7 +44,7 @@ func (r *Runner) maintainRetiredJournals(ctx context.Context) {
 		for _, id := range state.RetiredJournals {
 			c := cursors[id]
 			work := pending[id]
-			if id == state.CurrentJournal || c.archiveDone && c.usageDone && !work.Workspace && len(work.Usage) == 0 {
+			if id == state.CurrentJournal || c.archiveDone && c.usageDone && c.eventsDone && !work.Workspace && len(work.Usage) == 0 {
 				continue
 			}
 			c, err = r.serviceRetiredJournal(ctx, id, c, work)
@@ -81,6 +81,20 @@ func (r *Runner) serviceRetiredJournal(ctx context.Context, id string, c retired
 	archivesEnabled := r.previewDeployment != "" && len(cfg.RolloutRoots) > 0
 	r.controlMu.Unlock()
 	var failures []error
+	if !c.eventsDone {
+		runs, err := j.PendingEventRuns(ctx)
+		for _, as := range runs {
+			if e := retained.flushEvents(ctx, as); e != nil {
+				err = errors.Join(err, e)
+			}
+		}
+		if err == nil {
+			_, err = j.PruneSpool(ctx)
+		}
+		c.eventsDone = err == nil
+		failures = append(failures, err)
+	}
+
 	if work.Workspace {
 		failures = append(failures, retained.maintainWorkspaces(ctx))
 	}

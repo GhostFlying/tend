@@ -189,6 +189,7 @@ type Runner struct {
 	reconcile      chan struct{}
 	pauseWake      chan struct{}
 	workspaceWake  chan struct{}
+	eventWake      chan struct{}
 	heartbeatWake  chan struct{}
 	helloGate      chan struct{}
 
@@ -277,6 +278,7 @@ func New(cfg Config) *Runner {
 		bootstrapMaintenance: cfg.InitialMaintenance,
 		c: &client{base: cfg.ServerURL, http: cfg.HTTPClient, hostID: cfg.HostID, token: cfg.HostToken, log: cfg.Log, now: cfg.Now,
 			timeout: cfg.RequestTimeout},
+		eventWake:      make(chan struct{}, 1),
 		reconcile:      make(chan struct{}, 1),
 		pauseWake:      make(chan struct{}, 1),
 		pauseRetries:   map[string]pauseRetry{},
@@ -328,7 +330,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	factLoopsStarted := !r.boundedRecoveryPending()
 	if factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
-		r.wg.Go(func() { r.settledEvents(ctx) })
+		r.wg.Go(func() { r.syncJournalEvents(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 		if err := r.resendClaims(ctx); err != nil {
 			return err
@@ -354,7 +356,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if !factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
-		r.wg.Go(func() { r.settledEvents(ctx) })
+		r.wg.Go(func() { r.syncJournalEvents(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}
 	if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {

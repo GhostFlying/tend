@@ -515,6 +515,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			return err
 		}
 		if as.EventSync {
+			r.wakeEventSync()
 			return nil
 		}
 		flushCtx, cancel := context.WithTimeout(eventCtx, stopFlush)
@@ -695,6 +696,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			appendErr = r.recordRolloutEvent(ctx, as.RunID, ev)
 			if appendErr == nil {
 				appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: ev.Body})
+				if appendErr == nil && as.EventSync {
+					r.wakeEventSync()
+				}
 			}
 		}
 	}
@@ -1331,6 +1335,7 @@ const stopFlush = 5 * time.Second
 // failed uploads retain the original event identities for the next recovery.
 func (r *Runner) flushFinalEvents(ctx context.Context, as protocol.Assignment) {
 	if as.EventSync {
+		r.wakeEventSync()
 		return
 	}
 	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopFlush)
@@ -1342,6 +1347,10 @@ func (r *Runner) flushFinalEvents(ctx context.Context, as protocol.Assignment) {
 
 // uploadEvents uploads a run's events every EventFlush until ctx ends.
 func (r *Runner) uploadEvents(ctx context.Context, as protocol.Assignment) {
+	// The journal sender remains active between worker attempts.
+	if as.EventSync {
+		return
+	}
 	// failing is set from the first failure until an upload succeeds, so
 	// an outage is logged once rather than on every attempt.
 	failing := false
@@ -1368,27 +1377,33 @@ const maxBatchBody = 1 << 20
 // flushEvents uploads every pending event of a run in batches bounded by
 // count and size.
 func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error {
-	r.wakeRolloutArchive()
 	for {
-		pending, err := r.cfg.Journal.PendingEventBatch(ctx, as.RunID, 200, maxBatchBody)
-		if err != nil || len(pending) == 0 {
-			return err
-		}
-		operation := protocol.OpRunnerEvents
-		if as.EventSync {
-			operation = protocol.OpRunnerSyncEvents
-		}
-		env, err := r.newEnvelope(operation, runTarget(as), protocol.EventsPayload{Events: pending})
-		if err != nil {
-			return err
-		}
-		if err := r.sendEvent(ctx, as, env); err != nil {
-			return err
-		}
-		if err := r.cfg.Journal.AckEvents(ctx, as.RunID, pending[len(pending)-1].Seq); err != nil {
+		uploaded, err := r.flushEventBatch(ctx, as)
+		if err != nil || !uploaded {
 			return err
 		}
 	}
+}
+
+func (r *Runner) flushEventBatch(ctx context.Context, as protocol.Assignment) (bool, error) {
+	r.wakeRolloutArchive()
+	pending, err := r.cfg.Journal.PendingEventBatch(ctx, as.RunID, 200, maxBatchBody-256)
+	if err != nil || len(pending) == 0 {
+		return false, err
+	}
+	operation := protocol.OpRunnerEvents
+	if as.EventSync {
+		operation = protocol.OpRunnerSyncEvents
+	}
+	env, err := r.newEnvelope(operation, runTarget(as), protocol.EventsPayload{Events: pending})
+	if err != nil {
+		return false, err
+	}
+	if err := r.sendEvent(ctx, as, env); err != nil {
+		return false, err
+	}
+	err = r.cfg.Journal.AckEvents(ctx, as.RunID, pending[len(pending)-1].Seq)
+	return err == nil, err
 }
 
 func (r *Runner) stopRequested(ctx context.Context, a *active) bool {

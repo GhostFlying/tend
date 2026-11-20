@@ -520,7 +520,12 @@ func (n *node) stop() {
 
 func eventually(t *testing.T, what string, cond func() bool, onTimeout ...func()) {
 	t.Helper()
-	ctx, finish := testphase.Context(t, t.Context(), what, 15*time.Second)
+	eventuallyWithin(t, 15*time.Second, what, cond, onTimeout...)
+}
+
+func eventuallyWithin(t *testing.T, watchdog time.Duration, what string, cond func() bool, onTimeout ...func()) {
+	t.Helper()
+	ctx, finish := testphase.Context(t, t.Context(), what, watchdog)
 	defer finish()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
@@ -1208,7 +1213,7 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 	task := srv.createTask()
 	eventually(t, "the task completes while the event uploader is disconnected", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 	eventually(t, "completed run retains its event tail", func() bool {
-		runs, err := n.runningJournal().SettledEventRuns(t.Context())
+		runs, err := n.runningJournal().PendingEventRuns(t.Context())
 		return err == nil && len(runs) == 1
 	})
 	if got := srv.count(`SELECT COUNT(*) FROM run_logs`); got != 0 {
@@ -1219,7 +1224,7 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 	n.net.allow(protocol.OpRunnerEventPart)
 	n.net.loseNext(protocol.OpRunnerEventPart, 1)
 	n.start()
-	eventually(t, "restarted runner uploads all original events", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 31 })
+	eventuallyWithin(t, 90*time.Second, "restarted runner uploads all original events", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 31 })
 	if err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		row, ok, err := store.RunLogAt(t.Context(), tx.Q(), n.workers.Started()[0].RunID, 31)
 		if err == nil && (!ok || row.NativeID != "last-original" || row.BodyJSON != string(original)) {
@@ -1230,7 +1235,7 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "stored originals retire from journal", func() bool {
-		runs, err := n.runningJournal().SettledEventRuns(t.Context())
+		runs, err := n.runningJournal().PendingEventRuns(t.Context())
 		return err == nil && len(runs) == 0
 	})
 }

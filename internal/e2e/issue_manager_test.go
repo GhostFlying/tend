@@ -993,8 +993,23 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	if s.count(`SELECT COUNT(*) FROM token_usage_current WHERE source='native-close'`) == 0 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE applied=0`) != 0 {
 		t.Fatal("final native usage was not applied before manager slot release")
 	}
-	if !delivery && !recoverRate && !loseStart && archiveMode == "" && s.count(`SELECT COUNT(*) FROM manager_native_events WHERE body_json LIKE '%tend:inline-image-url:sha256:%' AND length(body_json)<2048`) == 0 {
-		t.Fatal("large native image evidence did not cross the authenticated runner RPC")
+	if !delivery && !recoverRate && !loseStart && archiveMode == "" {
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			var retained string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM manager_native_events WHERE json_extract(body_json,'$.native.ItemID')='large-image-item' LIMIT 1`).Scan(&retained); err != nil {
+				return err
+			}
+			if len(retained) > 4096 {
+				return errors.New("large image was stored inline")
+			}
+			original, err := store.ResolveJSON(ctx, tx.Q(), retained)
+			if err == nil && !strings.Contains(original, "data:image/png;base64,"+strings.Repeat("A", 5<<20)) {
+				return errors.New("retained native image differs from original")
+			}
+			return err
+		}); err != nil {
+			t.Fatal("large native image evidence", err)
+		}
 	}
 }
 
