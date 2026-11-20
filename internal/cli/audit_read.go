@@ -137,6 +137,7 @@ Read one Issue. Use --revision for a historical Issue revision.
 Common audit fields: issue_id, revision, assignment_epoch, effective_work_status,
 manager, responsibility_runs, tasks, progress, depends_on, delivery_duties.
 
+  ` + issueShowExample + ` | jq '.depends_on // []'
   tend issue show "$ISSUE_ID" --fields issue_id,effective_work_status,manager
 `
 	case "task show":
@@ -245,10 +246,12 @@ pass its position to --notification. If next is present, use it as --after.
 	case "issue deliveries":
 		return `Usage: tend issue deliveries <issue-id> [--json]
 
-Read the Issue's recorded delivery observations as JSON. Use the delivery_id
+Read recorded delivery observations for one Issue as JSON. Use the delivery_id
 and the recorded head, base/target and CI state to identify the candidate.
 This read uses no pagination and queues no provider refresh. The write command
 issue refresh-delivery queues a new observation.
+
+  tend issue deliveries "$ISSUE_ID" --json
 `
 	}
 	return ""
