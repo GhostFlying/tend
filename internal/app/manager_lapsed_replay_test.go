@@ -470,6 +470,15 @@ func TestDatabaseReplayExtendsPublishedInterruptedBackgroundPrefix(t *testing.T)
 }
 
 func TestWorkerBackgroundLegacyPrefixStaysOutOfConversation(t *testing.T) {
+	for _, continued := range []bool{false, true} {
+		t.Run(fmt.Sprintf("continued=%t", continued), func(t *testing.T) {
+			checkWorkerBackgroundLegacyPrefix(t, continued)
+		})
+	}
+}
+
+func checkWorkerBackgroundLegacyPrefix(t *testing.T, continued bool) {
+	t.Helper()
 	h := newHarness(t)
 	work := h.createWork(workPlan())
 	h.followup(work, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
@@ -484,9 +493,16 @@ func TestWorkerBackgroundLegacyPrefixStaysOutOfConversation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	payload := map[string]any{"body": "old partial", "reply_to": turn.MessageID, "turn_id": turn.TurnID, "item_id": "original-item", "status": protocol.AssistantStreaming}
+	nativeTurn := turn.TurnID
+	var deliveryTurn string
+	if continued {
+		nativeTurn = "continued-worker-turn"
+		deliveryTurn = turn.TurnID
+	}
+	payload := map[string]any{"body": "old partial", "reply_to": turn.MessageID, "turn_id": nativeTurn, "item_id": "original-item", "status": protocol.AssistantStreaming}
 	record := func(command RecordAgentMessage) {
 		t.Helper()
+		command.DeliveryTurn = deliveryTurn
 		if op := h.exec(mainAgent, h.env(command.Operation(), protocol.Target{Type: "message"}, payload, nil), command); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
@@ -496,7 +512,7 @@ func TestWorkerBackgroundLegacyPrefixStaysOutOfConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=? AND body='old partial'`, turn.MessageID) != 0 ||
-		h.countWhere(`SELECT COUNT(*) FROM background_replies WHERE thread_id=? AND turn_id=? AND body='old partial'`, turn.ThreadID, turn.TurnID) != 1 {
+		h.countWhere(`SELECT COUNT(*) FROM background_replies WHERE thread_id=? AND turn_id=? AND body='old partial'`, turn.ThreadID, nativeTurn) != 1 {
 		t.Fatal("the historical partial entered ordinary output or disappeared")
 	}
 	payload["body"], payload["status"] = "native complete item", protocol.AssistantCompleted
