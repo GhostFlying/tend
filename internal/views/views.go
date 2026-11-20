@@ -408,6 +408,15 @@ func RunLogs(ctx context.Context, q store.Querier, runID string, after int64, li
 // the latest (D69).
 func Conversation(ctx context.Context, q store.Querier, before, after int64, limit int, session ...string) (protocol.ConversationPage, error) {
 	rows, err := store.ListConversation(ctx, q, before, after, limit+1, session...)
+	return conversationPage(ctx, q, rows, after, limit, err)
+}
+
+func ChatConversation(ctx context.Context, q store.Querier, before, after int64, limit int, session string) (protocol.ConversationPage, error) {
+	rows, err := store.ListChatMessages(ctx, q, before, after, limit+1, session)
+	return conversationPage(ctx, q, rows, after, limit, err)
+}
+
+func conversationPage(ctx context.Context, q store.Querier, rows []store.ConversationRow, after int64, limit int, err error) (protocol.ConversationPage, error) {
 	if err != nil {
 		return protocol.ConversationPage{}, err
 	}
@@ -580,29 +589,55 @@ func conversationItem(ctx context.Context, q store.Querier, r store.Conversation
 // Events reads up to limit ledger events after seq for the owner's event
 // stream, with the current conversation item of conversation events.
 func Events(ctx context.Context, q store.Querier, after int64, limit int) ([]protocol.LedgerEvent, error) {
+	events, _, _, err := readEvents(ctx, q, after, limit, false)
+	return events, err
+}
+
+// ChatEvents advances across every ledger position, including messages omitted
+// from the stream. The caller sends a checkpoint when an omitted event ends a batch.
+func ChatEvents(ctx context.Context, q store.Querier, after int64, limit int) ([]protocol.LedgerEvent, int64, int, error) {
+	return readEvents(ctx, q, after, limit, true)
+}
+
+func readEvents(ctx context.Context, q store.Querier, after int64, limit int, chat bool) ([]protocol.LedgerEvent, int64, int, error) {
 	rows, err := store.ListEvents(ctx, q, after, limit)
 	if err != nil {
-		return nil, err
+		return nil, after, 0, err
 	}
 	out := make([]protocol.LedgerEvent, 0, len(rows))
 	for _, e := range rows {
+		after = e.Seq
 		ev := protocol.LedgerEvent{EventSeq: e.Seq, ObjectType: e.ObjectType, ObjectID: e.ObjectID, Kind: e.Kind, CreatedAt: time.UnixMilli(e.CreatedAt).UTC()}
 		if e.ObjectType == "message" {
+			if chat {
+				conversation, visible, err := store.ChatMessageIndex(ctx, q, e.ObjectID)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return nil, after, 0, err
+				}
+				if !visible || e.Kind == "conversation.process_changed" {
+					if strings.HasPrefix(conversation, "issue:") || (conversation != "" &&
+						(e.Kind == "conversation.message_state" || e.Kind == "conversation.processing_stopped" || e.Kind == "messaging.interaction_changed")) {
+						ev.ConversationID = conversation
+						out = append(out, ev)
+					}
+					continue
+				}
+			}
 			r, err := store.GetConversationItem(ctx, q, e.ObjectID)
 			switch {
 			case err == nil:
 				it, err := conversationItem(ctx, q, r)
 				if err != nil {
-					return nil, err
+					return nil, after, 0, err
 				}
 				ev.Item = &it
 			case !errors.Is(err, store.ErrNotFound):
-				return nil, err
+				return nil, after, 0, err
 			}
 		}
 		out = append(out, ev)
 	}
-	return out, nil
+	return out, after, len(rows), nil
 }
 
 // TaskRelations reads declarations and backlinks without recursively expanding them.

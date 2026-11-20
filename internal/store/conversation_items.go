@@ -111,30 +111,70 @@ type ConversationRow struct {
 	DecisionJSON string
 }
 
+const conversationMessageState = `COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
+		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), '')`
+
+// MessageState reads the persisted processing receipt without loading the message body.
+func MessageState(ctx context.Context, q Querier, id string) (string, error) {
+	var state string
+	err := q.QueryRowContext(ctx, `SELECT `+conversationMessageState+` FROM conversation_messages m WHERE m.message_id=?`, id).Scan(&state)
+	if err != nil {
+		return "", notFound(err, "message state "+id)
+	}
+	return state, nil
+}
+
 // conversationCols selects a ConversationRow from conversation_messages m.
 const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESCE(m.reply_to, ''), m.created_at,
-	COALESCE((SELECT json_extract(e.body_json, '$.state') FROM events e WHERE e.object_type = 'message'
-		AND e.object_id = m.message_id AND e.kind = 'conversation.message_state' ORDER BY e.event_seq DESC LIMIT 1), ''),
+	` + conversationMessageState + `,
 	u.turn_id, u.item_id, u.tool, u.input, u.output, u.status, u.updated_at, COALESCE(m.decision_json, ''), COALESCE(a.status, ''), COALESCE(a.revision, 0), m.conversation_id
 	FROM conversation_messages m LEFT JOIN conversation_tool_uses u ON u.message_id = m.message_id LEFT JOIN conversation_agent_messages a ON a.message_id = m.message_id`
+
+// chatVisibleMessage is shared by Chat history and live updates. Other owner
+// and diagnostic projections still read the original conversation rows.
+const chatVisibleMessage = `m.kind='message' AND (
+	m.author<>'system' OR
+	EXISTS(SELECT 1 FROM issue_completion_reports c WHERE c.published_message_id=m.message_id) OR
+	EXISTS(SELECT 1 FROM work_item_choices c WHERE c.message_id=m.message_id AND c.status='open')
+)`
+
+// ChatMessageIndex reads visibility and scope without resolving message bodies
+// or joining tool records. Process changes can still invalidate Issue activity.
+func ChatMessageIndex(ctx context.Context, q Querier, id string) (conversation string, visible bool, err error) {
+	err = q.QueryRowContext(ctx, `SELECT m.conversation_id, (`+chatVisibleMessage+`) FROM conversation_messages m WHERE m.message_id=?`, id).Scan(&conversation, &visible)
+	if err != nil {
+		return "", false, notFound(err, "chat message "+id)
+	}
+	return conversation, visible, nil
+}
+
+// ListChatMessages pages by original message sequence after applying visibility.
+func ListChatMessages(ctx context.Context, q Querier, before, after int64, limit int, conversation string) ([]ConversationRow, error) {
+	return listConversation(ctx, q, before, after, limit, ConversationID(conversation), " AND "+chatVisibleMessage)
+}
 
 // ListConversation returns up to limit conversation items in order:
 // those after seq after when after is positive, else those before seq
 // before when before is positive, else the latest.
 func ListConversation(ctx context.Context, q Querier, before, after int64, limit int, session ...string) ([]ConversationRow, error) {
-	var query string
-	var args []any
 	id := "main"
 	if len(session) > 0 {
 		id = ConversationID(session[0])
 	}
+	return listConversation(ctx, q, before, after, limit, id, "")
+}
+
+func listConversation(ctx context.Context, q Querier, before, after int64, limit int, id, filter string) ([]ConversationRow, error) {
+	base := "SELECT " + conversationCols + " WHERE m.conversation_id=?" + filter
+	var query string
+	var args []any
 	switch {
 	case after > 0:
-		query, args = `SELECT `+conversationCols+` WHERE m.conversation_id=? AND m.seq > ? ORDER BY m.seq LIMIT ?`, []any{id, after, limit}
+		query, args = base+" AND m.seq > ? ORDER BY m.seq LIMIT ?", []any{id, after, limit}
 	case before > 0:
-		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.conversation_id=? AND m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{id, before, limit}
+		query, args = "SELECT * FROM ("+base+" AND m.seq < ? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1", []any{id, before, limit}
 	default:
-		query, args = `SELECT * FROM (SELECT `+conversationCols+` WHERE m.conversation_id=? ORDER BY m.seq DESC LIMIT ?) ORDER BY 1`, []any{id, limit}
+		query, args = "SELECT * FROM ("+base+" ORDER BY m.seq DESC LIMIT ?) ORDER BY 1", []any{id, limit}
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {

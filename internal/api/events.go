@@ -45,6 +45,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	query := r.URL.Query()
 	hasAfter := query.Has("after")
+	messaging := strings.HasPrefix(r.URL.Path, "/api/v1/messaging/")
+	chat := !messaging && query.Get("projection") == "chat"
+	if !messaging && !chat && query.Get("projection") != "" {
+		diagnostic.reason = "invalid_projection"
+		diagnostic.status = s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "unknown event projection"))
+		return
+	}
 	after, err := intParam(query.Get("after"))
 	if err != nil {
 		diagnostic.reason = "invalid_cursor"
@@ -114,7 +121,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		// read is not missed.
 		changed := s.app.Changes().Wait()
 		var batch []protocol.LedgerEvent
-		var resetAt int64
+		var resetAt, through int64
+		var scanned int
 		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 			expired, err := store.RefreshCursorExpired(ctx, tx.Q(), after)
 			if err != nil {
@@ -124,7 +132,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				resetAt, err = store.LatestEventSeq(ctx, tx.Q())
 				return err
 			}
-			batch, err = views.Events(ctx, tx.Q(), after, eventBatch)
+			if chat {
+				batch, through, scanned, err = views.ChatEvents(ctx, tx.Q(), after, eventBatch)
+			} else {
+				batch, err = views.Events(ctx, tx.Q(), after, eventBatch)
+				scanned = len(batch)
+			}
 			return err
 		}); err != nil {
 			diagnostic.reason = "read_failed"
@@ -151,7 +164,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		for _, ev := range batch {
 			after = ev.EventSeq
 			var payload any = ev
-			if strings.HasPrefix(r.URL.Path, "/api/v1/messaging/") {
+			if messaging {
 				kind := ev.Kind
 				if kind == "conversation.message" {
 					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
@@ -187,7 +200,15 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if len(batch) > 0 {
+		if chat && through > after {
+			after = through
+			if writeEvent(w, "cursor", after, protocol.StreamStart{EventSeq: after}) != nil {
+				diagnostic.reason = "ledger_write_failed"
+				return
+			}
+			writtenThrough = after
+		}
+		if scanned > 0 {
 			if err := response.Flush(); err != nil {
 				diagnostic.reason = "ledger_write_failed"
 				return
@@ -198,7 +219,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if refreshThrough > 0 {
 				s.refreshAck.offer(refreshThrough)
 			}
-			if len(batch) == eventBatch {
+			if scanned == eventBatch {
 				continue
 			}
 		}

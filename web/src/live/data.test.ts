@@ -102,7 +102,7 @@ describe("LiveData", () => {
     void live.reload();
     expect(api.pending()).toEqual([
       "/api/v1/snapshot",
-      "/api/v1/conversation?limit=50&projection=issues&conversation_id=main",
+      "/api/v1/conversation?projection=chat&limit=50&conversation_id=main",
     ]);
     await api.answer("/api/v1/snapshot", snapshot);
     await api.answer("/api/v1/conversation", { items: [owner(1, "replied")], more: true });
@@ -447,7 +447,7 @@ describe("LiveData", () => {
     expect(live.conversation.get().before).toBe(51);
     void live.loadEarlier();
     expect(api.pending()).toContain(
-      "/api/v1/conversation?before=51&limit=50&projection=issues&conversation_id=main",
+      "/api/v1/conversation?projection=chat&before=51&limit=50&conversation_id=main",
     );
     await api.answer("/api/v1/conversation", {
       items: Array.from({ length: 50 }, (_, i) => owner(i + 1, "replied")),
@@ -459,29 +459,38 @@ describe("LiveData", () => {
     await live.stop();
   });
 
-  test.each(["tools", "queued"])("latest %s page reads back to the active owner", async (kind) => {
+  test("latest replies render without reading back to the active input or refreshing on tools", async () => {
     const api = new FakeApi();
-    const live = new LiveData(api);
+    const live = new LiveData(api, "issue:one");
+    const queuePage = { items: [], enabled: true, total: 0, event_seq: 1 };
+    live.queueView.start();
     void live.reload();
     await api.answer("/api/v1/snapshot", snapshot);
-    const recent = Array.from({ length: 50 }, (_, i) =>
-      kind === "queued"
-        ? owner(i + 2)
-        : {
-            ...owner(i + 2),
-            author: "main_agent",
-            kind: "tool_use",
-            reply_to: "msg_1",
-            state: undefined,
-          },
-    );
-    await api.answer("/api/v1/conversation", { items: recent, more: true });
-    expect(api.pending()).toContain(
-      "/api/v1/conversation?before=2&limit=50&projection=issues&conversation_id=main",
-    );
-    live.apply(messageEvent(103, owner(1, "processing"), "conversation.message_state"));
-    await api.answer("/api/v1/conversation", { items: [owner(1)], more: false });
-    expect(processing(live.conversation.get().items)?.message_id).toBe("msg_1");
+    const recent = Array.from({ length: 50 }, (_, i) => ({
+      ...assistant(i + 2, 1, "Visible", "completed"),
+      reply_to: "msg_1",
+    }));
+    await api.answer("/api/v1/conversation?projection=chat", { items: recent, more: true });
+    expect(live.conversation.get().items).toHaveLength(50);
+    expect(live.conversation.get().before).toBe(2);
+    expect(api.calls.some((path) => path.includes("before="))).toBe(false);
+    await api.answer("/api/v1/conversation/queue?category=owner", {
+      ...queuePage,
+      interruptible_message_id: "msg_1",
+    });
+    await api.answer("/api/v1/conversation/queue?category=withdrawn", queuePage);
+    expect(live.queueView.state.get().pages.owner?.interruptible_message_id).toBe("msg_1");
+    const count = api.calls.length;
+    live.apply({
+      event_seq: 100,
+      object_id: "tool",
+      object_type: "message",
+      kind: "conversation.tool_use",
+      created_at: "2026-10-22T10:00:05Z",
+      conversation_id: "issue:one",
+    });
+    expect(api.calls).toHaveLength(count);
+    expect(live.conversation.get().items).toHaveLength(50);
     await live.stop();
   });
 
@@ -542,7 +551,10 @@ test("cumulative assistant text keeps its identity through replay, pagination an
   });
   void live.loadEarlier();
   live.apply(messageEvent(61, { ...partial, body: "正在写一段完整的正文" }));
-  await api.answer("/api/v1/conversation?before", { items: [owner(58, "replied")], more: false });
+  await api.answer("/api/v1/conversation?projection=chat&before", {
+    items: [owner(58, "replied")],
+    more: false,
+  });
   live.apply(
     messageEvent(62, { ...partial, body: "正在写一段完整的正文", assistant_state: "interrupted" }),
   );
@@ -599,7 +611,7 @@ test("a newer earlier-page item beats an older stream item already shown", async
   void live.loadEarlier();
   live.apply(messageEvent(10, assistant(58, 2, "older live text")));
   const current = assistant(58, 3, "newer saved text");
-  await api.answer("/api/v1/conversation?before", {
+  await api.answer("/api/v1/conversation?projection=chat&before", {
     items: [owner(57, "replied"), current],
     more: false,
   });
@@ -773,47 +785,6 @@ test("outside-snapshot references refresh on other workspace, host and run facts
   } finally {
     await live.stop();
   }
-});
-
-test("choice updates refresh retained transcript cards and resist older pages", async () => {
-  const choice = {
-    choice_id: "choice",
-    work_item_id: "work",
-    version: 1,
-    status: "open",
-    question: "Continue?",
-    source_id: "source",
-    message_id: "notice",
-    created_at: 1,
-    updated_at: 1,
-  } as WorkItemChoice;
-  const trigger: ConversationItem = {
-    ...owner(1),
-    message_id: "notice",
-    author: "system",
-    choices: [choice],
-  };
-  const api: Reader = {
-    async get<T>(path: string): Promise<T> {
-      if (path.includes("work-item-choices"))
-        return { ...choice, version: 2, status: "withdrawn" } as T;
-      if (path.includes("transcript"))
-        return {
-          blocks: [{ position: 1, notice_only: true, trigger, items: [], more: false }],
-          more: false,
-          event_seq: 2,
-        } as T;
-      return { enabled: true, items: [], total: 0, event_seq: 2 } as T;
-    },
-  };
-  const live = new LiveData(api);
-  live.queueView.start();
-  await live.queueView.refresh();
-  await live.choiceChanged("choice");
-  expect(live.queueView.state.get().blocks[0]?.trigger.choices?.[0]?.status).toBe("withdrawn");
-  await live.queueView.refresh();
-  expect(live.queueView.state.get().blocks[0]?.trigger.choices?.[0]?.status).toBe("withdrawn");
-  await live.stop();
 });
 
 test("turn state events refresh an open followup projection", async () => {
@@ -1098,25 +1069,11 @@ test("raw stream content preserves canonical links until the scoped HTTP associa
     kind: "conversation.associations_changed",
     created_at: "2026-10-29T00:00:00Z",
   });
-  expect(
-    api.calls.some((path) => {
-      const url = new URL(path, "https://test.invalid");
-      return (
-        url.pathname === "/api/v1/conversation" &&
-        url.searchParams.get("projection") === "issues" &&
-        url.searchParams.get("conversation_id") === "issue:one"
-      );
-    }),
-  ).toBe(true);
-  await api.answer("/api/v1/conversation", {
-    items: [
-      {
-        ...owner(1, "replied"),
-        conversation_id: "issue:one",
-        associations: { ...association, revision: 4, disposition: "unassigned", items: [] },
-      },
-    ],
-    more: false,
+  await api.answer("/api/v1/messages/msg_1/associations?projection=issues", {
+    ...association,
+    revision: 4,
+    disposition: "unassigned",
+    items: [],
   });
   expect(live.conversation.get().items[0]?.associations).toMatchObject({
     revision: 4,

@@ -491,18 +491,15 @@ try {
     for (const [opener, dialogName] of [
       ["来源", "补充来源"],
       ["切换会话：主 Agent", "会话"],
-      ["查看处理记录", "持久处理记录"],
       ["上下文用量 42%", "上下文用量"],
     ]) {
       await navigate(page, "/issues");
       await page.getByRole("heading", { name: "所有 Issue", exact: true }).waitFor();
       await navigate(page, "/diagnostics/main");
       await mainInput.waitFor();
-      if (opener === "来源" || opener === "查看处理记录") {
+      if (opener === "来源") {
         await page.getByRole("button", { name: "更多", exact: true }).click();
-        await page
-          .getByRole("menuitem", { name: opener === "来源" ? "补充来源" : "执行记录", exact: true })
-          .click();
+        await page.getByRole("menuitem", { name: "补充来源", exact: true }).click();
       } else await page.getByRole("button", { name: opener!, exact: true }).click();
       await page.getByRole("dialog", { name: dialogName!, exact: true }).waitFor();
       await page.goBack();
@@ -673,12 +670,15 @@ try {
     await page.unroute(route);
 
     await page.getByRole("button", { name: "更多", exact: true }).click();
-    await page.getByRole("menuitem", { name: "执行记录", exact: true }).click();
+    assert.equal(await page.getByRole("menuitem", { name: "执行记录", exact: true }).count(), 0);
+    await navigate(page, "/diagnostics");
+    await page.getByRole("button", { name: "主 Agent 执行记录", exact: true }).click();
     await page.getByRole("dialog", { name: "持久处理记录" }).waitFor();
     await page
       .getByRole("dialog", { name: "持久处理记录" })
       .getByRole("button", { name: "关闭" })
       .click();
+    await navigate(page, "/diagnostics/main");
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       false,

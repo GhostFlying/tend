@@ -275,7 +275,8 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       ["conversation.interrupt_reply", "conversation.withdraw_message"].includes(e.operation) &&
       id
     ) {
-      const current = await sender.get<BusinessMessage>(`/api/v1/messages/${encoded}`);
+      const projection = e.operation === "conversation.interrupt_reply" ? "?projection=state" : "";
+      const current = await sender.get<BusinessMessage>(`/api/v1/messages/${encoded}${projection}`);
       if (current?.message_id !== id) return unknown();
       if (
         (e.operation === "conversation.withdraw_message" && current.control?.withdrawn_at) ||

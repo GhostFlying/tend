@@ -169,6 +169,25 @@ export function UrgentMessage({ item, author }: { item: ConversationItem; author
   );
 }
 
+export function ChatReplies({ items }: { items: readonly ConversationItem[] }) {
+  const processing = groupedProcessing(items);
+  const prefix = useId();
+  return (
+    <div className={styles.agent}>
+      {items.map((item) => (
+        <AgentItem
+          key={item.message_id}
+          item={item}
+          processing={processing.get(item.message_id) ?? null}
+          hidden={false}
+          id={`${prefix}-item-${item.message_id}`}
+          onToolOpenChange={() => {}}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function AgentTurn({
   entry,
   proseClassName,
@@ -432,9 +451,11 @@ export function SystemMessage({
           {messageStateLabels[item.state]}
         </div>
       )}
-      {item.choices?.map((choice) => (
-        <ChoiceCard key={choice.choice_id} choice={choice} />
-      ))}
+      {item.choices
+        ?.filter((choice) => presentation === "issue" || choice.status === "open")
+        .map((choice) => (
+          <ChoiceCard key={choice.choice_id} choice={choice} />
+        ))}
       {item.upgrade_id && (
         <Button
           variant="link"

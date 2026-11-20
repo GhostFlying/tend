@@ -413,6 +413,8 @@ type LedgerEvent struct {
 	ObjectID   string    `json:"object_id"`
 	Kind       string    `json:"kind"`
 	CreatedAt  time.Time `json:"created_at"`
+	// ConversationID scopes a message invalidation without a body in the Chat stream.
+	ConversationID string `json:"conversation_id,omitempty"`
 	// Item is the conversation item a conversation event is about.
 	Item *ConversationItem `json:"item,omitempty"`
 }

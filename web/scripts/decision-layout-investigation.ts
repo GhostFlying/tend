@@ -258,8 +258,8 @@ function snapshot(): Snapshot {
 }
 
 function conversation() {
-  if (sharedTranscript) return sharedHistory.slice(0, 5);
-  const items = [...history, ...appendedHistory];
+  if (sharedTranscript) return sharedHistory;
+  const items = [...history.filter((item) => !item.tool), ...appendedHistory];
   if (!pendingOption) return items;
   return [
     ...items,
@@ -423,57 +423,6 @@ const server = createServer(async (req, res) => {
       total: items.length,
     });
   }
-  if (sharedTranscript && path === "/api/v1/conversation/blocks/msg_shared_1")
-    return sendJSON(res, {
-      position: 1,
-      trigger: sharedHistory[0],
-      items: [sharedHistory[5]],
-      more: false,
-      next_seq: 6,
-    });
-  if (sharedTranscript && path === "/api/v1/conversation/transcript")
-    return sendJSON(res, {
-      blocks: [
-        {
-          position: 1,
-          trigger: sharedHistory[0],
-          items: [sharedHistory[2], sharedHistory[4]],
-          more: true,
-          next_seq: 5,
-        },
-        {
-          position: 2,
-          trigger: sharedHistory[1],
-          items: [sharedHistory[2], sharedHistory[4]],
-          more: false,
-          next_seq: 5,
-        },
-        {
-          position: 4,
-          trigger: sharedHistory[3],
-          items: [sharedHistory[4]],
-          more: false,
-          next_seq: 5,
-        },
-      ],
-      event_seq: eventSeq,
-      more: false,
-    });
-  if (path === "/api/v1/conversation/transcript")
-    return sendJSON(res, {
-      blocks: [...history, ...appendedHistory].reduce<unknown[]>((blocks, item, index, items) => {
-        if (index % 2 === 0)
-          blocks.push({
-            position: index / 2 + 1,
-            trigger: item,
-            items: [items[index + 1]!],
-            more: false,
-          });
-        return blocks;
-      }, []),
-      event_seq: eventSeq,
-      more: false,
-    });
   if (path === "/api/v1/events") {
     res.setHeader("Content-Type", "text/event-stream");
     res.write(`event: start\ndata: ${JSON.stringify({ event_seq: eventSeq })}\n\n`);
@@ -511,6 +460,21 @@ const executablePath = process.env.TEND_DECISION_BROWSER_PATH ?? process.env.TEN
 const browser = await browserType.launch({ ...(executablePath ? { executablePath } : {}) });
 
 function publish(kind = "decision.updated") {
+  if (kind === "conversation.message") {
+    for (const item of conversation()) {
+      const event = {
+        event_seq: ++eventSeq,
+        object_type: "message",
+        object_id: item.message_id,
+        kind,
+        created_at: item.created_at,
+        item,
+      };
+      for (const stream of streams)
+        stream.write("event: ledger\ndata: " + JSON.stringify(event) + "\n\n");
+    }
+    return;
+  }
   eventSeq++;
   const event = {
     event_seq: eventSeq,
@@ -998,49 +962,6 @@ async function checkJumpRecovery() {
   }
 }
 
-async function checkTranscriptExpansionWithoutFocus() {
-  reset();
-  decisionVisible = false;
-  upgradeVisible = false;
-  const { context, page, errors } = await openPage(390, 844);
-  try {
-    const transcript = page.getByRole("region", { name: "对话记录" });
-    await transcript.getByRole("button", { name: /查看过程.*1 步/ }).click();
-    const tool = transcript.getByRole("button", { name: /review tool/ });
-    await tool.waitFor();
-    const before = await rect(tool);
-    await tool.evaluate((button) => {
-      button.addEventListener("mousedown", (event) => event.preventDefault(), { once: true });
-    });
-    await tool.click();
-    assert.equal(
-      await tool.evaluate((button) => document.activeElement === button),
-      false,
-      "touch-style expansion unexpectedly focused the tool button",
-    );
-    await page.waitForFunction(
-      (button) => button?.getAttribute("aria-expanded") === "true",
-      await tool.elementHandle(),
-    );
-    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => done(undefined))));
-    const after = await rect(tool);
-    const transcriptBox = await rect(transcript);
-    assert(
-      Math.abs(after.top - before.top) <= 2,
-      `unfocused tool moved after expanding output: ${before.top} -> ${after.top}`,
-    );
-    assert(after.top >= transcriptBox.top && after.bottom <= transcriptBox.bottom);
-    const jump = transcript.locator("..").getByRole("button", { name: "跳到最新" });
-    await jump.waitFor();
-    await jump.click();
-    await jump.waitFor({ state: "hidden" });
-    assert.equal(errors.length, 0, errors.join("\n"));
-    console.log(`PASS unfocused transcript expansion ${browserName}`);
-  } finally {
-    await context.close();
-  }
-}
-
 async function checkFocusedTranscriptResizeFollowing() {
   reset();
   decisionVisible = false;
@@ -1048,10 +969,11 @@ async function checkFocusedTranscriptResizeFollowing() {
   const { context, page, errors } = await openPage(430, 932);
   try {
     const transcript = page.getByRole("region", { name: "对话记录" });
-    await transcript.getByRole("button", { name: /查看过程.*1 步/ }).click();
-    const tool = transcript.getByRole("button", { name: /review tool/ });
-    await tool.waitFor();
-    await tool.focus();
+    const oldMessage = transcript.locator('[data-scroll-id="msg_fixture_owner_12"]');
+    await oldMessage.evaluate((element) => {
+      element.setAttribute("tabindex", "-1");
+      (element as HTMLElement).focus();
+    });
     await transcript.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -1826,11 +1748,11 @@ async function checkSharedSteerTranscript() {
       const text = await transcript.innerText();
       assert(text.indexOf("SHARED_SUPPLEMENT_INPUT") < text.indexOf("SHARED_REPLY_ONCE"));
       assert(text.indexOf("SHARED_LATER_INPUT") < text.indexOf("SHARED_FINAL_ONCE"));
-      const more = transcript.getByRole("button", { name: "继续读取本轮消息", exact: true });
-      assert.equal(await more.count(), 1, "deduplication lost a source block's continuation");
-      await more.click();
       await transcript.getByText("SHARED_MORE_OUTPUT", { exact: true }).waitFor();
-      assert.equal(await more.count(), 0);
+      assert.equal(
+        await transcript.getByRole("button", { name: "继续读取本轮消息", exact: true }).count(),
+        0,
+      );
       assert.equal(await transcript.getByText("SHARED_REPLY_ONCE", { exact: true }).count(), 1);
       assert.equal(await transcript.getByText("SHARED_FINAL_ONCE", { exact: true }).count(), 1);
       assert.equal(errors.length, 0, errors.join("\n"));
@@ -1853,7 +1775,6 @@ try {
     await checkLayoutMatrix();
     await checkLowHeightAndSharedButtons();
     await checkJumpRecovery();
-    await checkTranscriptExpansionWithoutFocus();
     for (let iteration = 0; iteration < 5; iteration++)
       await checkFocusedTranscriptResizeFollowing();
     await checkDelayedStoredThumbnail();

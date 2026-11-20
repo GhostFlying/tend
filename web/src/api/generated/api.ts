@@ -4895,6 +4895,7 @@ export interface IssueControlPayload {
  * via the `definition` "IssueConversationPage".
  */
 export interface IssueConversationPage {
+  event_seq?: number;
   items: IssueConversationItem[] | null;
   more: boolean;
 }
@@ -4909,6 +4910,7 @@ export interface IssueConversationQueuePage {
   interruptible_message_id?: string;
   items: IssueConversationQueueEntry[] | null;
   next?: number;
+  processing_started_at?: number;
   total: number;
 }
 /**
@@ -6039,6 +6041,7 @@ export interface IssueTranscriptPage {
  * via the `definition` "LedgerEvent".
  */
 export interface LedgerEvent {
+  conversation_id?: string;
   created_at: string;
   event_seq: number;
   item?: ConversationItem;

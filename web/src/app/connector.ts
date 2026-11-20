@@ -20,7 +20,9 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
   const stream = new EventStream({
     open: (after, signal) =>
       client.openStream(
-        after === undefined ? "/api/v1/events" : `/api/v1/events?after=${after}`,
+        after === undefined
+          ? "/api/v1/events?projection=chat"
+          : `/api/v1/events?projection=chat&after=${after}`,
         signal,
       ),
     onStart: (_seq, fresh) => {

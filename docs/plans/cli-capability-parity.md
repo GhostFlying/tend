@@ -331,3 +331,9 @@ merge-only 执行省略 upgrade_id；部署执行可省略该字段以沿用原�
 读取 `issue request`，不重建请求或复发升级。
 
 本机 `upgrade runner-handoff --release <dir> --config <runner-config> --upgrade-id <id>` 以选定完整包、原 host 身份及原批次引导首次并存；支持 `--dry-run` 核对固定的 runner 程序和参数。
+
+Web Chat 使用现有命令的投影选项。`tend conversation history main --projection chat`
+沿原消息序号分页。`tend conversation queue --conversation main --projection chat`
+读取当前 owner 队列和停止目标。`tend ledger watch --projection chat`
+沿原事件序号读取可见消息和 cursor 帧。`tend message original <id> --projection state`
+读取原消息的处理回执。

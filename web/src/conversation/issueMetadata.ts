@@ -13,13 +13,14 @@ export function issueConversationReader(api: Reader, conversationID: string): Re
     get<T>(path: string, signal?: AbortSignal): Promise<T> {
       const url = new URL(path, "https://tend.invalid");
       if (
-        url.pathname === "/api/v1/conversation" ||
-        url.pathname === "/api/v1/conversation/queue" ||
-        url.pathname === "/api/v1/conversation/transcript" ||
-        /^\/api\/v1\/conversation\/blocks\/[^/]+$/.test(url.pathname) ||
-        url.pathname === "/api/v1/agent-conversations" ||
-        /^\/api\/v1\/agent-conversations\/[^/]+$/.test(url.pathname) ||
-        /^\/api\/v1\/messages\/[^/]+\/associations$/.test(url.pathname)
+        !url.searchParams.has("projection") &&
+        (url.pathname === "/api/v1/conversation" ||
+          url.pathname === "/api/v1/conversation/queue" ||
+          url.pathname === "/api/v1/conversation/transcript" ||
+          /^\/api\/v1\/conversation\/blocks\/[^/]+$/.test(url.pathname) ||
+          url.pathname === "/api/v1/agent-conversations" ||
+          /^\/api\/v1\/agent-conversations\/[^/]+$/.test(url.pathname) ||
+          /^\/api\/v1\/messages\/[^/]+\/associations$/.test(url.pathname))
       ) {
         url.searchParams.set("projection", "issues");
         path = url.pathname + url.search;

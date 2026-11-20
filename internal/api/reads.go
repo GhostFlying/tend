@@ -83,7 +83,7 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, err := intParam(query.Get("limit"))
-	if err != nil || before > 0 && after > 0 {
+	if err != nil || limit < 0 || before < 0 || after < 0 || before > 0 && after > 0 {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "give a limit as a number and at most one of before and after"))
 		return
 	}
@@ -91,15 +91,25 @@ func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
 		limit = conversationPageSize
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		if projection := query.Get("projection"); projection != "" && projection != "issues" {
+		var page protocol.ConversationPage
+		var err error
+		switch query.Get("projection") {
+		case "chat":
+			page, err = views.ChatConversation(r.Context(), q, before, after, int(limit), query.Get("conversation_id"))
+		case "", "issues":
+			page, err = views.Conversation(r.Context(), q, before, after, int(limit), query.Get("conversation_id"))
+		default:
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "unknown conversation projection")
 		}
-		page, err := views.Conversation(r.Context(), q, before, after, int(limit), query.Get("conversation_id"))
 		if err != nil {
 			return page, err
 		}
 		items, err := views.OwnerIssueMessages(r.Context(), q, page.Items)
-		return protocol.IssueConversationPage{Items: items, More: page.More}, err
+		out := protocol.IssueConversationPage{Items: items, More: page.More}
+		if err == nil && query.Get("projection") == "chat" {
+			out.EventSeq, err = store.LatestEventSeq(r.Context(), q)
+		}
+		return out, err
 	})
 }
 

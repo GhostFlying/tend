@@ -30,8 +30,9 @@ type IssueConversationItem struct {
 	ConversationContent
 }
 type IssueConversationPage struct {
-	Items []IssueConversationItem `json:"items"`
-	More  bool                    `json:"more"`
+	EventSeq int64                   `json:"event_seq,omitempty"`
+	Items    []IssueConversationItem `json:"items"`
+	More     bool                    `json:"more"`
 }
 type IssueAgentConversation struct {
 	AgentConversationState
@@ -54,6 +55,7 @@ type IssueConversationQueueEntry struct {
 }
 type IssueConversationQueuePage struct {
 	InterruptibleMessageID string                        `json:"interruptible_message_id,omitempty"`
+	ProcessingStartedAt    int64                         `json:"processing_started_at,omitempty"`
 	Active                 *IssueConversationQueueEntry  `json:"active,omitempty"`
 	Enabled                bool                          `json:"enabled"`
 	EventSeq               int64                         `json:"event_seq"`

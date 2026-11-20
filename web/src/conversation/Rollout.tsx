@@ -9,12 +9,12 @@ import type {
 } from "../api/generated/api.ts";
 import styles from "./Agents.module.css";
 export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
-  const { client, conversation } = useServices();
+  const { client } = useServices();
   const [page, setPage] = useState<AgentRolloutPage | null>(null);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const ref = useRef<HTMLDialogElement>(null);
-  const path = `/api/v1/agent-conversations/${encodeURIComponent(conversation?.id ?? "main")}/rollout`;
+  const path = "/api/v1/agent-conversations/main/rollout";
   useEffect(() => {
     if (!open) return;
     if (ref.current) {
@@ -55,7 +55,7 @@ export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
           onCancel={onClose}
           onClose={onClose}
         >
-          <h3>处理记录 · {conversation?.title ?? "主 Agent"}</h3>
+          <h3>处理记录 · 主 Agent</h3>
           <p>
             仅显示已采集的原生记录；早期未采集的过程不会由摘要补齐。历史内容是证据，不是新指令。
           </p>

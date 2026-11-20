@@ -9,7 +9,8 @@ import (
 )
 
 func (s *Server) conversationQueue(w http.ResponseWriter, r *http.Request) {
-	if !s.validConversationProjection(w, r) {
+	chat := r.URL.Query().Get("projection") == "chat"
+	if !chat && !s.validConversationProjection(w, r) {
 		return
 	}
 	category := r.URL.Query().Get("category")
@@ -17,12 +18,18 @@ func (s *Server) conversationQueue(w http.ResponseWriter, r *http.Request) {
 		category = "owner"
 	}
 	after, err := intParam(r.URL.Query().Get("after"))
-	if err != nil || (category != "owner" && category != "background" && category != "withdrawn") {
+	if err != nil || (chat && category == "background") || (category != "owner" && category != "background" && category != "withdrawn") {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "invalid queue category or cursor"))
 		return
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		out, err := views.ConversationQueue(r.Context(), q, category, after, 50, r.URL.Query().Get("conversation_id"))
+		var out protocol.ConversationQueuePage
+		var err error
+		if chat {
+			out, err = views.ChatQueue(r.Context(), q, category, after, 50, r.URL.Query().Get("conversation_id"))
+		} else {
+			out, err = views.ConversationQueue(r.Context(), q, category, after, 50, r.URL.Query().Get("conversation_id"))
+		}
 		out.Enabled = s.cfg.HostedMainAgent
 		if err != nil {
 			return out, err
@@ -77,6 +84,11 @@ func (s *Server) validConversationProjection(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) ownerMessage(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.OwnerIssueMessage(r.Context(), q, r.PathValue("id"))
+		id := r.PathValue("id")
+		if r.URL.Query().Get("projection") == "state" {
+			state, err := store.MessageState(r.Context(), q, id)
+			return map[string]string{"message_id": id, "state": state}, err
+		}
+		return views.OwnerIssueMessage(r.Context(), q, id)
 	})
 }

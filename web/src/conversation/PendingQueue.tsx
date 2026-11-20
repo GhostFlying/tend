@@ -25,7 +25,6 @@ export function PendingQueue({
   const visible = useContext(OverlayVisibility);
   const state = useStore(live.queueView.state);
   const settings = useStore(live.settings.state).view;
-  const handoff = useStore(live.handoff.state).view;
   const local = useStore(queue?.list ?? noOutbox);
   const draftState = useStore(draft.state);
   const withdrawals = useMemo(
@@ -80,7 +79,6 @@ export function PendingQueue({
   const mainConversation = !conversation || conversation.id === "main";
   const owner = state.pages.owner;
   const waiting = owner?.items?.filter((it) => it.status !== "processing") ?? [];
-  const background = conversation?.kind === "consultation" ? state.pages.background : undefined;
   const withdrawn = state.pages.withdrawn;
   const localPending = local.filter((m) => m.state !== "sent");
   const render = (entry: ConversationQueueEntry, canAct: boolean) => (
@@ -139,11 +137,6 @@ export function PendingQueue({
       {mainConversation && settings?.enabled && !settings.available && (
         <p className={styles.note}>托管主 Agent 暂不可用，消息保留在队列中。</p>
       )}
-      {mainConversation && handoff?.pending && (
-        <p className={styles.note}>
-          {handoff.preparing ? "主会话正在准备摘要" : "主会话正在交接"}；待处理消息会继续保留。
-        </p>
-      )}
       {mainConversation && owner && !owner.enabled && (
         <p className={styles.note}>托管主 Agent 未启用，消息暂不自动处理。</p>
       )}
@@ -181,18 +174,6 @@ export function PendingQueue({
           )}
           {owner?.next && <button onClick={() => more("owner")}>加载更多待处理消息</button>}
         </>
-      )}
-      {!!background?.total && (
-        <details>
-          <summary>
-            后台事项 · {background.total}
-            {background.items?.[0]
-              ? ` · 最早 ${new Date(background.items?.[0].item.created_at).toLocaleString()}`
-              : ""}
-          </summary>
-          {background.items?.map((it) => render(it, false))}
-          {background.next && <button onClick={() => more("background")}>加载更多后台事项</button>}
-        </details>
       )}
       {!!withdrawn?.total && (
         <details>

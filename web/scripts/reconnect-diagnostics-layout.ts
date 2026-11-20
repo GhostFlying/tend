@@ -133,7 +133,7 @@ try {
           if (
             cursorRefusal &&
             message.type() === "error" &&
-            message.location().url === origin + "/api/v1/events?after=1" &&
+            message.location().url === origin + "/api/v1/events?projection=chat&after=1" &&
             message.text().includes("409")
           )
             return;
