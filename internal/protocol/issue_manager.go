@@ -158,6 +158,24 @@ type WorkerProcessText struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
+// ValidWorkerProcessText reports whether the diagnostics fit the Run's bounds.
+func ValidWorkerProcessText(parts []WorkerProcessText) bool {
+	if len(parts) == 0 || len(parts) > MaxWorkerProcessTextItems {
+		return false
+	}
+	for _, part := range parts {
+		if len(part.Text) > MaxWorkerProcessTextBytes || !validProcessTextID(part.ThreadID) ||
+			!validProcessTextID(part.TurnID) || !validProcessTextID(part.ItemID) {
+			return false
+		}
+	}
+	return true
+}
+
+func validProcessTextID(id string) bool {
+	return len(id) > 0 && len(id) <= 512
+}
+
 // IssueManagerView separates published category work from its actual assignee.
 type IssueManagerView struct {
 	Observation           *RunSyncObservation `json:"observation,omitempty"`

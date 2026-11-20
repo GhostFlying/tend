@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/GhostFlying/tend/internal/blobstore"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 const derivedEventMarker = "tend:derived-json:v1"
@@ -43,6 +44,14 @@ type preparedEvent struct {
 }
 type preparedEventsKey struct{}
 
+type retainedEventKind int
+
+const (
+	retainedEvent retainedEventKind = iota
+	retainedProviderEvent
+	retainedManagerEvent
+)
+
 // The storage format records which defaults were explicitly present. An absent
 // field remains absent; provider Raw JSON is never stripped with these defaults.
 var nativeEventDefaults = [...]struct {
@@ -57,15 +66,21 @@ var nativeEventDefaults = [...]struct {
 // opaque large text becomes a new original. Provider JSON reuses registered
 // windows or recursively shares its values; wrappers never create new originals.
 func (s *Store) StageEventOriginals(ctx context.Context, stream string, bodies ...[]byte) (context.Context, error) {
-	return s.stageEvents(ctx, stream, false, bodies...)
+	return s.stageEvents(ctx, stream, retainedEvent, bodies...)
+}
+
+// StageManagerEventOriginals keeps bounded process diagnostics in the original
+// event row, so an archive outage cannot block its sequence acknowledgement.
+func (s *Store) StageManagerEventOriginals(ctx context.Context, runID string, body []byte) (context.Context, error) {
+	return s.stageEvents(ctx, "manager-events:"+runID, retainedManagerEvent, body)
 }
 
 // StageRolloutOriginals identifies provider JSON for whole-value window reuse.
 // An unmatched wrapper is reconstructed from its values, not copied as text.
 func (s *Store) StageRolloutOriginals(ctx context.Context, stream string, bodies ...[]byte) (context.Context, error) {
-	return s.stageEvents(ctx, stream, true, bodies...)
+	return s.stageEvents(ctx, stream, retainedProviderEvent, bodies...)
 }
-func (s *Store) stageEvents(ctx context.Context, stream string, provider bool, bodies ...[]byte) (context.Context, error) {
+func (s *Store) stageEvents(ctx context.Context, stream string, kind retainedEventKind, bodies ...[]byte) (context.Context, error) {
 	staged := map[string]preparedEvent{}
 	originals := map[string]preparedOriginal{}
 	if prior, ok := ctx.Value(preparedOriginalKey{}).(map[string]preparedOriginal); ok {
@@ -88,7 +103,7 @@ func (s *Store) stageEvents(ctx context.Context, stream string, provider bool, b
 			continue
 		}
 		p := preparedEvent{OriginalSHA256: hashBytes(hash)}
-		value, err := s.prepareEventValue(ctx, stream, raw, nil, provider, &p)
+		value, err := s.prepareEventValue(ctx, stream, raw, nil, kind, &p)
 		if err != nil {
 			return ctx, err
 		}
@@ -98,7 +113,7 @@ func (s *Store) stageEvents(ctx context.Context, stream string, provider bool, b
 	return context.WithValue(ctx, preparedEventsKey{}, staged), nil
 }
 
-func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte, path []string, provider bool, p *preparedEvent) (any, error) {
+func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte, path []string, kind retainedEventKind, p *preparedEvent) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -106,7 +121,7 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 	if !json.Valid(raw) {
 		return nil, errors.New("store: derived event is not valid JSON")
 	}
-	if len(raw) >= retainBodyThreshold && (provider || len(path) > 0) {
+	if len(raw) >= retainBodyThreshold && (kind == retainedProviderEvent || len(path) > 0) {
 		original, err := s.matchSemanticOriginal(ctx, raw)
 		if err != nil {
 			return nil, err
@@ -147,8 +162,15 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 		})
 		for _, key := range keys {
 			child := fields[key]
+			if kind == retainedManagerEvent && key == "process_text" && inlineManagerProcessText(child) {
+				value[key] = child
+				continue
+			}
 			next := append(append([]string(nil), path...), key)
-			boundary := key == "Raw" && len(path) == 1 && path[0] == "native" || key == "data" && len(path) == 0 && fields["thread_id"] != nil && fields["turn_id"] != nil
+			boundary := retainedEvent
+			if key == "Raw" && len(path) == 1 && path[0] == "native" || key == "data" && len(path) == 0 && fields["thread_id"] != nil && fields["turn_id"] != nil {
+				boundary = retainedProviderEvent
+			}
 			v, err := s.prepareEventValue(ctx, stream, child, next, boundary, p)
 			if err != nil {
 				return nil, err
@@ -175,7 +197,7 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 		}
 		value := make([]any, len(items))
 		for i, child := range items {
-			v, err := s.prepareEventValue(ctx, stream, child, append(append([]string(nil), path...), strconv.Itoa(i)), false, p)
+			v, err := s.prepareEventValue(ctx, stream, child, append(append([]string(nil), path...), strconv.Itoa(i)), retainedEvent, p)
 			if err != nil {
 				return nil, err
 			}
@@ -210,6 +232,18 @@ func (s *Store) prepareEventValue(ctx context.Context, stream string, raw []byte
 		err := dec.Decode(&value)
 		return value, err
 	}
+}
+
+func inlineManagerProcessText(raw json.RawMessage) bool {
+	// Allow worst-case JSON escaping of the four bounded fragments and IDs.
+	const maxEncodedProcessText = 256 << 10
+	if len(raw) > maxEncodedProcessText {
+		return false
+	}
+	var parts []protocol.WorkerProcessText
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(&parts) == nil && protocol.ValidWorkerProcessText(parts)
 }
 
 // A semantic match reuses the original file even when only key order/spacing

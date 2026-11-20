@@ -49,7 +49,7 @@ func (a *App) RecordAgentProcessText(ctx context.Context, conversation string, p
 // Close text is an optional observation on the Run. Keeping it out of the
 // native request result avoids archiving auxiliary text on the close path.
 func retainManagerCloseProcessText(ctx context.Context, tx *store.Tx, run string, seq int64, parts []protocol.WorkerProcessText) error {
-	if !validWorkerProcessText(parts) {
+	if !protocol.ValidWorkerProcessText(parts) {
 		return nil
 	}
 	raw, err := json.Marshal(parts)
@@ -59,21 +59,4 @@ func retainManagerCloseProcessText(ctx context.Context, tx *store.Tx, run string
 	_, err = tx.Exec(ctx, `UPDATE runs SET native_close_process_text_json=? WHERE run_id=? AND native_close_sequence=? AND native_closed_at>0 AND native_close_process_text_json='[]'
 		AND EXISTS(SELECT 1 FROM issue_manager_tasks m WHERE m.task_id=runs.task_id AND m.conversation_id NOT IN ('','main'))`, string(raw), run, seq)
 	return err
-}
-
-func validWorkerProcessText(parts []protocol.WorkerProcessText) bool {
-	if len(parts) == 0 || len(parts) > protocol.MaxWorkerProcessTextItems {
-		return false
-	}
-	for _, part := range parts {
-		if len(part.Text) > protocol.MaxWorkerProcessTextBytes || !validProcessTextID(part.ThreadID) ||
-			!validProcessTextID(part.TurnID) || !validProcessTextID(part.ItemID) {
-			return false
-		}
-	}
-	return true
-}
-
-func validProcessTextID(id string) bool {
-	return len(id) > 0 && len(id) <= 512
 }
