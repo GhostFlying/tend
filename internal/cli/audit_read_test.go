@@ -31,7 +31,7 @@ func TestTaskWaitsFiltersLegacyServerResponse(t *testing.T) {
 				t.Fatal(code, te.errOut.String())
 			}
 			want, err := json.MarshalIndent(check.want, "", "  ")
-			if err != nil || string(te.out.Bytes()) != string(want)+"\n" {
+			if err != nil || te.out.String() != string(want)+"\n" {
 				t.Fatalf("old server response: got %s, want %s, err %v", te.out, want, err)
 			}
 		})
