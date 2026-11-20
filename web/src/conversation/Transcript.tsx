@@ -36,7 +36,9 @@ export function Transcript({ visible }: { visible: boolean }) {
   const conversation = useStore(live.conversation);
   const queueState = useStore(live.queueView.state);
   const owner = queueState.pages.owner;
-  const outbox = useStore(queue?.list ?? noOutbox);
+  const fallbackOutbox = useStore(
+    queueState.supported === false ? (queue?.list ?? noOutbox) : noOutbox,
+  );
   const entries = useMemo(
     () =>
       buildEntries(
@@ -47,9 +49,9 @@ export function Transcript({ visible }: { visible: boolean }) {
               !item.choices?.length ||
               item.choices.some((choice) => choice.status === "open")),
         ),
-        outbox,
+        fallbackOutbox,
       ),
-    [conversation.items, outbox],
+    [conversation.items, fallbackOutbox],
   );
   const active = owner?.active;
   const busy =
