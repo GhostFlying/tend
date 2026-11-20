@@ -195,8 +195,13 @@ export class EventStream {
       if (!this.running) {
         return { kind: "stopped" };
       }
-      if (err instanceof ApiError && refusesCursor(err.status)) {
-        return { kind: "reset", reason: err.message, traceID: err.traceID };
+      if (err instanceof ApiError) {
+        if (refusesCursor(err.status)) {
+          return { kind: "reset", reason: err.message, traceID: err.traceID };
+        }
+        // The error response may have supplied a trace before its body stalled.
+        const reason = silent ? `读取事件流错误响应超时（HTTP ${err.status}）` : err.message;
+        return { kind: "lost", reason, started, traceID: err.traceID };
       }
       if (silent) {
         return {
@@ -205,9 +210,6 @@ export class EventStream {
           started,
           traceID,
         };
-      }
-      if (err instanceof ApiError) {
-        return { kind: "lost", reason: err.message, started, traceID: err.traceID };
       }
       return {
         kind: "lost",

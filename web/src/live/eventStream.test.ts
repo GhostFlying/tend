@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { ApiError, NetworkError } from "../api/client.ts";
+import { ApiClient, ApiError, NetworkError } from "../api/client.ts";
 import type { LedgerEvent } from "../api/generated/api.ts";
 import { EventStream } from "./eventStream.ts";
 
@@ -207,6 +207,56 @@ describe("EventStream", () => {
     expect(lost).toEqual([["事件流心跳超时，期间未收到数据", tend.traceID]]);
     await tick(1_000);
     expect(tend.opens.map((o) => o.after)).toEqual([undefined, 3]);
+  });
+
+  test("a stalled HTTP error body keeps the trace received with its headers", async () => {
+    const traceID = "trc_00000000000000000000000002";
+    const client = new ApiClient({
+      storage: {
+        getItem: (key) => (key === "tend.token" ? "fixture-token" : null),
+        setItem: () => {},
+        removeItem: () => {},
+      },
+      fetch: async (_input, options) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              options?.signal?.addEventListener("abort", () => {
+                controller.error(new DOMException("aborted", "AbortError"));
+              });
+            },
+          }),
+          { status: 500, headers: { "X-Tend-Trace-ID": traceID } },
+        ),
+    });
+    stream = new EventStream({
+      open: (_after, signal) => client.openStream("/api/v1/events", signal),
+      onStart: () => {},
+      onEvent: () => {},
+      onLost: (reason, id) => lost.push([reason, id]),
+      silenceMs: 45_000,
+    });
+    stream.start();
+    await tick(44_999);
+    expect(lost).toEqual([]);
+    await tick(1);
+    expect(lost).toEqual([["读取事件流错误响应超时（HTTP 500）", traceID]]);
+  });
+
+  test("a timeout before response headers has no confirmed trace", async () => {
+    stream = new EventStream({
+      open: (_after, signal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new NetworkError(signal.reason)));
+        }),
+      onStart: () => {},
+      onEvent: () => {},
+      onLost: (reason, traceID) => lost.push([reason, traceID]),
+      silenceMs: 45_000,
+    });
+    stream.start();
+    await tick(45_000);
+    expect(lost).toEqual([["等待事件流响应超时", undefined]]);
   });
 
   test("a failed retry before receiving headers does not reuse the prior trace", async () => {
