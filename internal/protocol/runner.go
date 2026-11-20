@@ -10,6 +10,8 @@ const (
 	OpRunnerClaim         = "runner.claim"
 	OpRunnerHeartbeat     = "runner.heartbeat"
 	OpRunnerEvents        = "runner.events"
+	OpRunnerSyncEvents    = "runner.sync_events"
+	OpRunnerEventPart     = "runner.event_part"
 	OpRunsReportWorkspace = "runs.report_workspace"
 	OpRunsReportStarted   = "runs.report_started"
 	OpRunsSubmitArtifact  = "runs.submit_artifact"
@@ -101,6 +103,8 @@ type HelloResult struct {
 
 // Assignment hands a run to a runner.
 type Assignment struct {
+	// EventSync permits independent, lossless delivery of this Run's journal after stop.
+	EventSync           bool                 `json:"event_sync,omitempty"`
 	SessionContinuation *SessionContinuation `json:"session_continuation,omitempty"`
 	// SessionStopReports negotiates optional, protocol-3 session reuse metadata.
 	// Its absence preserves the original terminal reporting sequence.

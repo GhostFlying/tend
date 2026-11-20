@@ -222,6 +222,10 @@ func rebindRunnerRuntime(ctx context.Context, q store.Querier, selected *hostedc
 }
 
 func runnerSupportsOwnerNativeTools(ctx context.Context, q store.Querier, host string) (bool, error) {
+	return runnerSupportsCapability(ctx, q, host, protocol.CapabilityIssueOwnerNativeTools)
+}
+
+func runnerSupportsCapability(ctx context.Context, q store.Querier, host, capability string) (bool, error) {
 	runtime, err := store.GetHostRuntime(ctx, q, host)
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil
@@ -229,5 +233,5 @@ func runnerSupportsOwnerNativeTools(ctx context.Context, q store.Querier, host s
 	if err != nil {
 		return false, err
 	}
-	return slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwnerNativeTools), nil
+	return slices.Contains(runtime.Runtime.Capabilities, capability), nil
 }

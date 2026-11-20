@@ -340,6 +340,7 @@ func assignmentQuestions(ctx context.Context, q store.Querier, as *protocol.Assi
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
+	as.EventSync = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityEventSync)
 	as.WorkerQuestions = err == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityWorkerQuestions)
 	if err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT supervisor_allowed FROM run_question_contracts WHERE run_id=?),0)`, as.RunID).Scan(&as.SupervisorQuestions); err != nil {
 		return err

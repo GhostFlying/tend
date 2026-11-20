@@ -413,9 +413,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		}()
 		ack := func() error {
 			if acknowledger, ok := th.(harness.EventAcknowledger); ok {
-				durable, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				defer cancel()
-				return acknowledger.AcknowledgeEvent(durable, ev)
+				return acknowledgeAppliedEvent(ctx, acknowledger, ev)
 			}
 			return nil
 		}
@@ -1638,4 +1636,22 @@ func (c Control) Reconcile(ctx context.Context, d app.Delivery) app.DeliveryResu
 		return app.DeliveryResult{Outcome: app.Unknown, Reason: "tend stopped while stopping the turn"}
 	}
 	return app.DeliveryResult{Outcome: app.Delivered, Reason: "the turn has ended"}
+}
+
+// Once the effect has been applied, retry only its immutable receipt. A writer
+// queue deadline must not close the native process or execute the event again.
+func acknowledgeAppliedEvent(ctx context.Context, acknowledger harness.EventAcknowledger, event harness.Event) error {
+	for {
+		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := acknowledger.AcknowledgeEvent(attempt, event)
+		cancel()
+		if ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

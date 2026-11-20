@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -150,7 +149,7 @@ func (r *Runner) reportManagerStopped(lifetime context.Context, as protocol.Assi
 	// budget afterwards, still subject to the caller's lifetime/cancellation.
 	ctx, cancel := context.WithTimeout(lifetime, r.cfg.RequestTimeout)
 	defer cancel()
-	pending, err := r.cfg.Journal.Requests(ctx)
+	pending, err := r.cfg.Journal.ManagerControlRequests(ctx, as.RunID)
 	if err != nil {
 		return err
 	}
@@ -266,6 +265,29 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}()
 	defer func() { cancelFailureObserver(); <-failureDone }()
 
+	// One sender owns the ordered stream. A stalled peer cannot hold the native
+	// event callback. The journal is still the source after a lost wake or restart.
+	eventReady := make(chan struct{}, 1)
+	if as.EventSync {
+		uploadCtx, stopUploads := context.WithCancel(ctx)
+		uploadDone := make(chan struct{})
+		go func() {
+			defer close(uploadDone)
+			for uploadCtx.Err() == nil {
+				select {
+				case <-uploadCtx.Done():
+					return
+				case <-eventReady:
+				case <-time.After(r.cfg.EventFlush):
+				}
+				err := r.flushManagerEvents(uploadCtx, as)
+				if err != nil && uploadCtx.Err() == nil {
+					r.cfg.Log.WarnContext(uploadCtx, "manager event sync pending", "run_id", as.RunID, "err", err)
+				}
+			}
+		}()
+		defer func() { stopUploads(); <-uploadDone }()
+	}
 	driver.Emit = func(ctx context.Context, event coordination.Event) error {
 		emitMu.Lock()
 		defer emitMu.Unlock()
@@ -274,10 +296,12 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			if native.ContextUsage != nil || native.Kind == harness.EventTurnCompleted {
 				r.wakeNativeUsage()
 			}
-			var err error
-			native.Raw, err = coordination.CompactNativeImages(native.Raw)
-			if err != nil {
-				return fmt.Errorf("compact manager event: %w", err)
+			if !as.EventSync {
+				var err error
+				native.Raw, err = coordination.CompactNativeImages(native.Raw)
+				if err != nil {
+					return fmt.Errorf("compact manager event: %w", err)
+				}
 			}
 			event.Native = &native
 		}
@@ -291,6 +315,13 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}
 		if err = r.cfg.Journal.SaveManagerEvent(ctx, as.RunID, env, raw); err != nil {
 			return fmt.Errorf("persist manager event: %w", err)
+		}
+		if as.EventSync {
+			select {
+			case eventReady <- struct{}{}:
+			default:
+			}
+			return nil
 		}
 		if err = r.flushManagerEvents(ctx, as); err != nil {
 			return fmt.Errorf("deliver persisted manager event %s: %w", env.RequestID, err)
@@ -311,9 +342,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	if err = r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
 		return err
 	}
-	// Replay prior sequenced facts before emitting reconnect or resume facts.
-	if err = r.flushManagerEvents(ctx, as); err != nil {
-		return err
+	// The asynchronous sender includes older facts in the same ordered stream.
+	if !as.EventSync {
+		if err = r.flushManagerEvents(ctx, as); err != nil {
+			return err
+		}
 	}
 	if run.Attempts > 0 {
 		// Tell an attached server proxy to reconcile its old native turn. A new
@@ -347,7 +380,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		default:
 		}
 		var request *protocol.Envelope
-		pending, err := r.cfg.Journal.Requests(ctx)
+		pending, err := r.cfg.Journal.ManagerControlRequests(ctx, as.RunID)
 		if err != nil {
 			return err
 		}
@@ -360,7 +393,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				request = &saved
 				continue
 			}
-			if err = r.sendManagerReceipt(ctx, as, &p.Envelope); err != nil {
+			if err = r.deliverActiveManagerReceipt(ctx, as, &p.Envelope); err != nil {
 				return err
 			}
 			if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
@@ -464,9 +497,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				}
 			}
 			if command.Method == "close" && reply.Error == "" {
-				if err = r.flushManagerEvents(ctx, as); err != nil {
-					return err
-				}
+				// Persist the close before uploading the tail. Recovery reuses its
+				// frozen cursor even if delivery fails after the process exited.
 				reply.LastSequence, err = r.cfg.Journal.LastManagerEvent(ctx, as.RunID)
 				if err != nil {
 					return err
@@ -517,7 +549,12 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {
 			return err
 		}
-		if err = r.sendManagerReceipt(ctx, as, env); err != nil {
+		if command.Method == "close" && reply.Error == "" {
+			if err = r.flushManagerEvents(ctx, as); err != nil {
+				return err
+			}
+		}
+		if err = r.deliverActiveManagerReceipt(ctx, as, env); err != nil {
 			return err
 		}
 		if err = r.cfg.Journal.DeleteRequest(ctx, env.RequestID); err != nil {
@@ -551,7 +588,7 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 		// delivery must not become a new reply after the peer retires it.
 		return true, r.finishJournal(ctx, as.RunID)
 	}
-	pending, err := r.cfg.Journal.Requests(ctx)
+	pending, err := r.cfg.Journal.ManagerControlRequests(ctx, as.RunID)
 	if err != nil {
 		return true, err
 	}
@@ -583,6 +620,23 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 		return true, err
 	}
 	return true, r.finishJournal(ctx, as.RunID)
+}
+
+// A completed native call retains its exact reply while the connection is
+// unavailable. Keep the original session alive for its already admitted turn.
+func (r *Runner) deliverActiveManagerReceipt(ctx context.Context, as protocol.Assignment, env *protocol.Envelope) error {
+	for {
+		err := r.sendManagerReceipt(ctx, as, env)
+		if !as.EventSync || ctx.Err() != nil || err == nil ||
+			(!errors.Is(err, context.DeadlineExceeded) && !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(r.cfg.RetryDelay):
+		}
+	}
 }
 
 // A close proof may reach the server before the final uploaded event has
@@ -643,29 +697,22 @@ func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment)
 	r.wakeRolloutArchive()
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
 	defer cancel()
-	pending, err := r.cfg.Journal.Requests(ctx)
-	if err != nil {
-		return err
-	}
-	events := []journal.Request{}
-	sequence := func(p journal.Request) int64 {
-		var event protocol.ManagerNativeEvent
-		_ = json.Unmarshal(p.Envelope.Payload, &event)
-		return event.Sequence
-	}
-	for _, p := range pending {
-		if p.RunID == as.RunID && p.Envelope.Operation == protocol.OpManagerNativeEvent {
-			events = append(events, p)
+	for {
+		pending, err := r.cfg.Journal.NextManagerEvent(ctx, as.RunID)
+		if err != nil || len(pending) == 0 {
+			return err
 		}
-	}
-	sort.Slice(events, func(i, j int) bool { return sequence(events[i]) < sequence(events[j]) })
-	for _, p := range events {
-		if _, err = r.send(ctx, runCredential(as), &p.Envelope); err != nil {
-			return fmt.Errorf("deliver original manager event %s sequence %d: %w", p.Envelope.RequestID, sequence(p), err)
+		env := &pending[0].Envelope
+		if as.EventSync {
+			err = r.sendEvent(ctx, as, env)
+		} else {
+			_, err = r.send(ctx, runCredential(as), env)
 		}
-		if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
+		if err != nil {
+			return fmt.Errorf("deliver original manager event %s: %w", env.RequestID, err)
+		}
+		if err = r.cfg.Journal.DeleteRequest(ctx, env.RequestID); err != nil {
 			return err
 		}
 	}
-	return nil
 }

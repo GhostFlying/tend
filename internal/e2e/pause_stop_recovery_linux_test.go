@@ -98,7 +98,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return err
 		}
-		if env.Operation == protocol.OpRunnerEvents && failNextEventUpload.CompareAndSwap(true, false) {
+		if env.Operation == protocol.OpRunnerSyncEvents && failNextEventUpload.CompareAndSwap(true, false) {
 			close(firstUpload)
 			if !restart {
 				select {

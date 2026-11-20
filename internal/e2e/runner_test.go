@@ -1121,13 +1121,11 @@ func TestTakeoverWhilePausedIsHandedBack(t *testing.T) {
 func TestFinalEventsSurviveUploadFailure(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	n := newNode(t, srv, passing)
-	n.net.dropNext(protocol.OpRunnerEvents, 3)
+	n.net.dropNext(protocol.OpRunnerSyncEvents, 3)
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
-	if got := srv.count(`SELECT COUNT(*) FROM run_logs`); got != 2 {
-		t.Errorf("run logs = %d, want both implement events despite failed uploads", got)
-	}
+	eventually(t, "both implementation events arrive despite failed uploads", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 2 })
 }
 
 func TestRestartKeepsShortLease(t *testing.T) {
@@ -1192,6 +1190,7 @@ func TestRunnerReturnsStartupRejection(t *testing.T) {
 func TestLargeEventVolumesArrive(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	big := json.RawMessage(`{"output":"` + strings.Repeat("x", 200<<10) + `"}`)
+	original := json.RawMessage(`{"output":"` + strings.Repeat("x", 5<<20) + `"}`)
 	n := newNode(t, srv, func(spec harness.WorkerSpec) testkit.WorkerScript {
 		if spec.Role == protocol.RoleAccept {
 			return passing(spec)
@@ -1200,23 +1199,40 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 		for range 30 {
 			events = append(events, harness.WorkerEvent{Kind: "item.completed", Body: big})
 		}
-		// One body too large to keep whole.
-		events = append(events, harness.WorkerEvent{Kind: "item.completed", Body: json.RawMessage(`"` + strings.Repeat("y", 300<<10) + `"`)})
+		events = append(events, harness.WorkerEvent{NativeID: "last-original", Kind: "item.completed", Body: original})
 		return testkit.WorkerScript{Events: events}
 	})
-	n.net.dropNext(protocol.OpRunnerEvents, 1000) // hold every upload until the final flush
+	n.net.dropNext(protocol.OpRunnerSyncEvents, 100000)
+	n.net.dropNext(protocol.OpRunnerEventPart, 100000)
 	n.start()
 	task := srv.createTask()
-	eventually(t, "the worker finishes", func() bool { return len(n.workers.Started()) == 1 })
-	time.Sleep(200 * time.Millisecond)
-	n.net.allow(protocol.OpRunnerEvents)
-	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
-	if got := srv.count(`SELECT COUNT(*) FROM run_logs`); got != 31 {
-		t.Errorf("run logs = %d, want all 31 events", got)
+	eventually(t, "the task completes while the event uploader is disconnected", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
+	eventually(t, "completed run retains its event tail", func() bool {
+		runs, err := n.runningJournal().SettledEventRuns(t.Context())
+		return err == nil && len(runs) == 1
+	})
+	if got := srv.count(`SELECT COUNT(*) FROM run_logs`); got != 0 {
+		t.Fatalf("unreachable events persisted: %d", got)
 	}
-	if got := srv.count(`SELECT COUNT(*) FROM run_logs WHERE body_json LIKE '%"truncated":true%'`); got != 1 {
-		t.Errorf("truncated events = %d, want the oversized one", got)
+	n.stop()
+	n.net.allow(protocol.OpRunnerSyncEvents)
+	n.net.allow(protocol.OpRunnerEventPart)
+	n.net.loseNext(protocol.OpRunnerEventPart, 1)
+	n.start()
+	eventually(t, "restarted runner uploads all original events", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 31 })
+	if err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		row, ok, err := store.RunLogAt(t.Context(), tx.Q(), n.workers.Started()[0].RunID, 31)
+		if err == nil && (!ok || row.NativeID != "last-original" || row.BodyJSON != string(original)) {
+			t.Fatal("large command output was changed")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
+	eventually(t, "stored originals retire from journal", func() bool {
+		runs, err := n.runningJournal().SettledEventRuns(t.Context())
+		return err == nil && len(runs) == 0
+	})
 }
 
 func TestRejectedReportReleasesRun(t *testing.T) {
