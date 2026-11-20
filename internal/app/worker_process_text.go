@@ -4,17 +4,25 @@ import (
 	"context"
 	"encoding/json"
 
-	workerharness "github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+type agentProcessTextReader interface {
+	Snapshot(thread, turn string) []protocol.WorkerProcessText
+}
+
+type agentProcessTextAttachment struct {
+	reader agentProcessTextReader
+}
+
 // TrackAgentProcessText exposes the current local native attachment to the
 // authorized process reader. Stale attachments can only clear their own entry.
-func (a *App) TrackAgentProcessText(conversation string, text *workerharness.WorkerProcessTextBuffer) func() {
+func (a *App) TrackAgentProcessText(conversation string, reader agentProcessTextReader) func() {
 	conversation = store.ConversationID(conversation)
-	a.agentProcessText.Store(conversation, text)
-	return func() { a.agentProcessText.CompareAndDelete(conversation, text) }
+	attachment := &agentProcessTextAttachment{reader: reader}
+	a.agentProcessText.Store(conversation, attachment)
+	return func() { a.agentProcessText.CompareAndDelete(conversation, attachment) }
 }
 
 func (a *App) AgentProcessText(conversation, thread, turn string) []protocol.WorkerProcessText {
@@ -22,7 +30,7 @@ func (a *App) AgentProcessText(conversation, thread, turn string) []protocol.Wor
 	if !ok {
 		return nil
 	}
-	return source.(*workerharness.WorkerProcessTextBuffer).Snapshot(thread, turn)
+	return source.(*agentProcessTextAttachment).reader.Snapshot(thread, turn)
 }
 
 func (a *App) RecordAgentProcessText(ctx context.Context, conversation string, parts []protocol.WorkerProcessText) error {

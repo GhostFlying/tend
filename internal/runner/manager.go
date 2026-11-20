@@ -513,8 +513,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				}
 				result, callErr := driver.Handle(ctx, command.Method, command.Payload)
 				if command.Method == "close" && callErr == nil {
-					// Delivery can be cancelled after this physical close. No
-					// cleanup event may follow its frozen event cursor.
+					// The driver has stopped its event producers. The cursor
+					// must also exclude any cleanup event from this attempt.
 					nativeClosed = true
 					reply.ProcessText = processText.Drain("", "")
 				}
@@ -536,14 +536,6 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 							return err
 						}
 					}
-				}
-			}
-			if command.Method == "close" && reply.Error == "" {
-				// Persist the close before uploading the tail. Recovery reuses its
-				// frozen cursor even if delivery fails after the process exited.
-				reply.LastSequence, err = r.cfg.Journal.LastManagerEvent(ctx, as.RunID)
-				if err != nil {
-					return err
 				}
 			}
 			var original coordination.Request
@@ -572,7 +564,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					}
 				}
 			}
-			if !journal.ManagerReadOnly(command.Method) {
+			if !nativeClosed && !journal.ManagerReadOnly(command.Method) {
 				if err = r.cfg.Journal.CompleteManagerOperation(ctx, *reply); err != nil {
 					return err
 				}
@@ -581,14 +573,16 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		if r.supportsManagerAcknowledgements() {
 			reply.Method = command.Method
 		}
-		env, err := r.newEnvelope(protocol.OpManagerNativeReply, runTarget(as), reply)
+		persistCtx := ctx
+		cancelPersist := func() {}
+		if nativeClosed {
+			// Persist the actual close even if this attempt was cancelled
+			// while the native process was shutting down.
+			persistCtx, cancelPersist = context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
+		}
+		env, err := r.retainManagerReply(persistCtx, as, request.RequestID, reply, nativeClosed)
+		cancelPersist()
 		if err != nil {
-			return err
-		}
-		if err = r.cfg.Journal.PutRequest(ctx, journal.Request{RunID: as.RunID, Envelope: *env}); err != nil {
-			return err
-		}
-		if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {
 			return err
 		}
 		if command.Method == "close" && reply.Error == "" {
@@ -608,6 +602,27 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}
 	}
 	return ctx.Err()
+}
+
+func (r *Runner) retainManagerReply(ctx context.Context, as protocol.Assignment, claimID string, reply *protocol.ManagerNativeReply, freezeClose bool) (*protocol.Envelope, error) {
+	if freezeClose {
+		last, err := r.cfg.Journal.LastManagerEvent(ctx, as.RunID)
+		if err != nil {
+			return nil, err
+		}
+		reply.LastSequence = last
+		if err := r.cfg.Journal.CompleteManagerOperation(ctx, *reply); err != nil {
+			return nil, err
+		}
+	}
+	env, err := r.newEnvelope(protocol.OpManagerNativeReply, runTarget(as), reply)
+	if err != nil {
+		return nil, err
+	}
+	if err = r.cfg.Journal.PutRequest(ctx, journal.Request{RunID: as.RunID, Envelope: *env}); err != nil {
+		return nil, err
+	}
+	return env, r.cfg.Journal.DeleteRequest(ctx, claimID)
 }
 
 // Replay completed close receipts before opening a native process or emitting

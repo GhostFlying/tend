@@ -107,6 +107,33 @@ type ManagerNativeEvent struct {
 	Body     json.RawMessage `json:"body"`
 }
 
+// ManagerProcessEvent is the read-only subset of the stored native event body
+// used by the process timeline. The execution transport owns the complete body.
+type ManagerProcessEvent struct {
+	ThreadID     string              `json:"thread_id"`
+	ProcessText  []WorkerProcessText `json:"process_text,omitempty"`
+	Disconnected bool                `json:"disconnected,omitempty"`
+	Native       *struct {
+		Kind       string
+		TurnID     string
+		ItemID     string
+		ItemType   string
+		Text       string
+		TurnStatus string
+		Tool       *struct {
+			Name   string
+			Status ToolStatus
+		}
+	} `json:"native,omitempty"`
+}
+
+const (
+	ManagerEventAgentMessageDelta = "agent_message_delta"
+	ManagerEventItemCompleted     = "item_completed"
+	ManagerEventTurnCompleted     = "turn_completed"
+	ManagerItemAgentMessage       = "agentMessage"
+)
+
 const (
 	MaxWorkerProcessTextItems = 4
 	MaxWorkerProcessTextBytes = 8 << 10
