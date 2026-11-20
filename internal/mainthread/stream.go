@@ -49,7 +49,7 @@ func (d replyDrafts) begin(ev harness.Event, m *Manager) {
 	if d[k] != nil {
 		return
 	}
-	replyTo, sources := m.replyContext(ev.TurnID)
+	replyTo, sources := m.replyContext(eventDeliveryTurn(ev))
 	d[k] = &replyDraft{event: ev, state: protocol.AssistantStreaming, order: len(d), replyTo: replyTo, sources: sources}
 }
 
@@ -140,7 +140,7 @@ func (m *Manager) flushClosingReplies(ctx context.Context, th replyThread, draft
 }
 
 func (m *Manager) recordReplyState(ctx context.Context, th harness.Thread, ev harness.Event, state protocol.AssistantState) error {
-	replyTo, sources := m.replyContext(ev.TurnID)
+	replyTo, sources := m.replyContext(eventDeliveryTurn(ev))
 	return m.recordReplySources(ctx, th, ev, state, replyTo, sources)
 }
 
@@ -159,7 +159,7 @@ func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev har
 		replyTo, sources = prior, refs
 	}
 	if replyTo == "" {
-		rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
+		rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), eventDeliveryTurn(ev))
 		if err != nil {
 			return err
 		}
@@ -180,7 +180,7 @@ func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev har
 		native += fmt.Sprintf("/%s:%x", state, sha256.Sum256([]byte(ev.Text)))
 	}
 	_, replay := th.(*databaseReplyThread)
-	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{PreservePrefix: replay})
+	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{PreservePrefix: replay, DeliveryTurn: ev.CoordinatorRootTurn})
 }
 
 // A ticker, closing drain, or another event may flush retained drafts. Always
@@ -194,7 +194,7 @@ func replyWriteContext(ctx context.Context, ev harness.Event) context.Context {
 func (m *Manager) isRepairEvent(ctx context.Context, th replyThread, ev harness.Event) (bool, error) {
 	// A delayed item can belong to the previous native turn while a repair
 	// is starting. Persisted native identity takes precedence over admission.
-	rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
+	rec, ok, err := m.app.TurnDelivery(ctx, th.ID(), eventDeliveryTurn(ev))
 	if err != nil {
 		return false, err
 	}
@@ -203,7 +203,7 @@ func (m *Manager) isRepairEvent(ctx context.Context, th replyThread, ev harness.
 		request = rec.RequestID
 	} else {
 		m.mu.Lock()
-		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == eventDeliveryTurn(ev)) {
 			request = a.requestID
 		}
 		m.mu.Unlock()

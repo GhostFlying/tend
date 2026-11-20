@@ -344,6 +344,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.syncJournalEvents(ctx) })
+		r.wg.Go(func() { r.syncSessionStops(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 		if err := r.resumeDelegated(ctx); err != nil {
 			return err
@@ -373,6 +374,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if !factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.syncJournalEvents(ctx) })
+		r.wg.Go(func() { r.syncSessionStops(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}
 	if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {

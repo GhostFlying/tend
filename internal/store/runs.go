@@ -258,19 +258,34 @@ const (
 
 // LeaseRow is a run lease.
 type LeaseRow struct {
-	Protocol  int64
-	LeaseID   string
-	RunID     string
-	HostID    string
-	ExpiresAt int64
-	Status    string
+	MaintenanceDeadline int64 // Fixed execution cutoff under the current explicit maintenance control.
+	Protocol            int64
+	LeaseID             string
+	RunID               string
+	HostID              string
+	ExpiresAt           int64
+	Status              string
 }
 
 // Current checks the execution contract of the original Run. A delegated
 // writer remains exclusive until release or an explicit fence.
 func (l LeaseRow) Current(now int64) bool {
-	return l.Status == LeaseActive && (protocol.RunnerOwnsExecution(l.Protocol) || l.ExpiresAt > now)
+	return l.Status == LeaseActive && !l.MaintenanceExpired(now) && (protocol.RunnerOwnsExecution(l.Protocol) || l.ExpiresAt > now)
 }
+
+// MaintenanceExpired checks the Run-specific authority of the owning journal.
+func (l LeaseRow) MaintenanceExpired(now int64) bool {
+	return protocol.RunnerOwnsExecution(l.Protocol) && l.MaintenanceDeadline > 0 && now >= l.MaintenanceDeadline
+}
+
+// Run IDs are globally unique. Each control lists only its own journal's Runs.
+const maintenanceDeadlines = `WITH controls AS (
+ SELECT host_id,control_json FROM host_controls WHERE json_extract(control_json,'$.mode')='maintenance'
+ UNION ALL SELECT host_id,control_json FROM draining_runners WHERE json_extract(control_json,'$.mode')='maintenance'
+), deadlines AS (
+ SELECT host_id,ids.value AS run_id, MIN(json_extract(control_json,'$.authorization.deadline_ms')) AS deadline
+ FROM controls,json_each(control_json,'$.authorization.run_ids') ids GROUP BY host_id,ids.value
+) `
 
 // InsertLease stores a new active lease.
 func (t *Tx) InsertLease(ctx context.Context, l LeaseRow, now int64) error {
@@ -285,8 +300,8 @@ func (t *Tx) InsertLease(ctx context.Context, l LeaseRow, now int64) error {
 // GetLeaseByRun returns the lease of a run, or ErrNotFound.
 func GetLeaseByRun(ctx context.Context, q Querier, runID string) (LeaseRow, error) {
 	l := LeaseRow{RunID: runID}
-	err := q.QueryRowContext(ctx, `SELECT l.lease_id, l.host_id, l.expires_at, l.status,r.protocol FROM leases l JOIN runs r USING(run_id) WHERE l.run_id = ?`, runID).
-		Scan(&l.LeaseID, &l.HostID, &l.ExpiresAt, &l.Status, &l.Protocol)
+	err := q.QueryRowContext(ctx, maintenanceDeadlines+`SELECT l.lease_id,l.host_id,l.expires_at,l.status,r.protocol,COALESCE(d.deadline,0) FROM leases l JOIN runs r USING(run_id) LEFT JOIN deadlines d ON d.host_id=l.host_id AND d.run_id=l.run_id WHERE l.run_id=?`, runID).
+		Scan(&l.LeaseID, &l.HostID, &l.ExpiresAt, &l.Status, &l.Protocol, &l.MaintenanceDeadline)
 	if err != nil {
 		return LeaseRow{}, notFound(err, "lease of run "+runID)
 	}
@@ -316,8 +331,9 @@ func (t *Tx) SetLease(ctx context.Context, leaseID, from, to string, expiresAt, 
 
 // ListExpiredLeases returns active leases that expired before now.
 func ListExpiredLeases(ctx context.Context, q Querier, now int64) ([]LeaseRow, error) {
-	rows, err := q.QueryContext(ctx, `SELECT lease_id, run_id, host_id, expires_at, status FROM leases
-		WHERE status = 'active' AND expires_at < ? AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.run_id=leases.run_id AND protocol>=7) ORDER BY expires_at`, now)
+	rows, err := q.QueryContext(ctx, maintenanceDeadlines+`SELECT l.lease_id,l.run_id,l.host_id,l.expires_at,l.status,r.protocol,COALESCE(d.deadline,0)
+ FROM leases l JOIN runs r USING(run_id) LEFT JOIN deadlines d ON d.host_id=l.host_id AND d.run_id=l.run_id
+ WHERE l.status='active' AND ((r.protocol<7 AND l.expires_at<?) OR (r.protocol>=7 AND d.deadline<=?)) ORDER BY l.expires_at`, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: list expired leases: %w", err)
 	}
@@ -325,7 +341,7 @@ func ListExpiredLeases(ctx context.Context, q Querier, now int64) ([]LeaseRow, e
 	var out []LeaseRow
 	for rows.Next() {
 		var l LeaseRow
-		if err := rows.Scan(&l.LeaseID, &l.RunID, &l.HostID, &l.ExpiresAt, &l.Status); err != nil {
+		if err := rows.Scan(&l.LeaseID, &l.RunID, &l.HostID, &l.ExpiresAt, &l.Status, &l.Protocol, &l.MaintenanceDeadline); err != nil {
 			return nil, fmt.Errorf("store: scan lease: %w", err)
 		}
 		out = append(out, l)

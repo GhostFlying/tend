@@ -14,8 +14,11 @@ import (
 
 // bufferBackgroundReply keeps ordinary output out of the transcript until the
 // background turn has made its final visible/silent choice.
-func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload, preservePrefix bool) (bool, Outcome, error) {
-	b, handled, err := backgroundOutputBatch(ctx, x, tx, p.ReplyTo, p.TurnID)
+func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload, preservePrefix bool, deliveryTurn string) (bool, Outcome, error) {
+	if deliveryTurn == "" {
+		deliveryTurn = p.TurnID
+	}
+	b, handled, err := backgroundOutputBatch(ctx, x, tx, p.ReplyTo, deliveryTurn)
 	if err != nil || !handled {
 		return handled, Outcome{}, err
 	}
@@ -87,8 +90,11 @@ func backgroundOutputBatch(ctx context.Context, x *Exec, tx *store.Tx, message, 
 
 // Tool records share the deferred arrival sequence with prose. They are always
 // retained in the audit transcript, including after a silent check-in.
-func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload) (bool, Outcome, error) {
-	b, handled, err := backgroundOutputBatch(ctx, x, tx, p.ReplyTo, p.TurnID)
+func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload, deliveryTurn string) (bool, Outcome, error) {
+	if deliveryTurn == "" {
+		deliveryTurn = p.TurnID
+	}
+	b, handled, err := backgroundOutputBatch(ctx, x, tx, p.ReplyTo, deliveryTurn)
 	if err != nil || !handled {
 		return handled, Outcome{}, err
 	}

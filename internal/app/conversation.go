@@ -349,7 +349,8 @@ func (InterruptReply) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 // agent said something in a turn. Its request ID is derived from the
 // harness item, so recording the same item again has no effect.
 type RecordAgentMessage struct {
-	Reconciled bool
+	DeliveryTurn string // Original admitted turn of a runner-local continuation.
+	Reconciled   bool
 	// PreservePrefix is an internal database-replay constraint. Native terminal
 	// events keep their normal ability to replace provisional streaming text.
 	PreservePrefix bool
@@ -392,7 +393,7 @@ func (c RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown assistant status")
 	}
-	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p, c.PreservePrefix); handled {
+	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p, c.PreservePrefix, c.DeliveryTurn); handled {
 		return out, err
 	}
 	return recordVisibleAgentMessage(ctx, x, tx, agentMessageRecordPolicy{reconciled: c.Reconciled, extendInterruptedPrefix: c.PreservePrefix})
@@ -1039,7 +1040,7 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 // an item adds it to the conversation; later ones update it in place.
 // Its request ID is derived from the item and the phase, so a repeated
 // event records it once.
-type RecordToolUse struct{}
+type RecordToolUse struct{ DeliveryTurn string }
 
 type recordToolUsePayload struct {
 	TurnID  string              `json:"turn_id"`
@@ -1060,7 +1061,7 @@ func (RecordToolUse) Authorize(_ context.Context, x *Exec, _ store.Querier) erro
 }
 
 // Apply implements Command.
-func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (c RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	var p recordToolUsePayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
@@ -1072,7 +1073,7 @@ func (RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
 	}
 	p.Input = protocol.RedactOwnerToolInput(p.Tool, p.Input)
-	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p); handled || err != nil {
+	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn); handled || err != nil {
 		return out, err
 	}
 	return recordVisibleToolUse(ctx, x, tx, p)

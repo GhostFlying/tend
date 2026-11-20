@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -237,6 +238,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	}
 	instructions, input := harness.Brief(spec)
 	results := harness.Results{Spec: spec}
+	var delivery struct {
+		Deliverables []string `json:"deliverables"`
+	}
+	if err := json.Unmarshal(spec.Spec, &delivery); err != nil && len(spec.Spec) > 0 {
+		release(err)
+		return nil, err
+	}
+	structuredResult := slices.Contains(delivery.Deliverables, "report") || slices.Contains(delivery.Deliverables, "files")
 	if err := results.Restore(); err != nil {
 		release(err)
 		return nil, err
@@ -244,16 +253,18 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	cfg := harness.ThreadConfig{LegacyRawUsage: spec.LegacyRawUsage,
 		EnvironmentID: ws.opts.EnvironmentID, Cwd: spec.Dir, Model: profile.Model, Sandbox: ws.opts.Sandbox, ApprovalPolicy: ws.opts.ApprovalPolicy,
 		DeveloperInstructions: instructions,
-		Tools:                 workerTools(spec), OnToolCall: results.Handle,
+		Tools:                 workerTools(spec),
 	}
-	if spec.Role == protocol.RoleAccept {
-		cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
-			if c.Tool == harness.VerdictTool {
-				return verdicts.Handle(ctx, c)
-			}
-			return results.Handle(ctx, c)
+	cfg.OnToolCall = func(ctx context.Context, c harness.ToolCall) harness.ToolResult {
+		if c.Tool == harness.ContinueRunTool.Name && spec.LocalTurns != nil {
+			return harness.QueueContinuation(ctx, spec.LocalTurns, c)
 		}
+		if spec.Role == protocol.RoleAccept && c.Tool == harness.VerdictTool {
+			return verdicts.Handle(ctx, c)
+		}
+		return results.Handle(ctx, c)
 	}
+
 	th, err := ws.thread(startupCtx, s, spec, cfg)
 	if err != nil {
 		release(err)
@@ -429,23 +440,47 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 						break events
 					}
 				case harness.EventTurnCompleted:
-					select {
-					case w.events <- nativeRolloutEvent(th.ID(), ev):
-					case <-ctx.Done():
-						break events
-					}
 					if spec.Role == protocol.RoleAccept && spec.AcceptanceEvidenceFiles {
 						if err := verdicts.RestoreContext(ctx); err != nil {
 							w.err = err
 							return
 						}
 					}
-					if spec.Delegated && ev.TurnStatus == "completed" && ctx.Err() == nil &&
-						((spec.Role == protocol.RoleImplement && results.Result() == nil) || (spec.Role == protocol.RoleAccept && verdicts.Verdict() == nil)) {
-						next, err := th.StartTurn(ctx, harness.TurnInput{Text: harness.Continuation(spec), Model: profile.Model, Effort: profile.Effort})
-						if err != nil {
-							w.err = fmt.Errorf("continue delegated Run: %w", err)
+					var nextInput, callID string
+					explicit := false
+					if spec.Delegated && ev.TurnStatus == "completed" && ctx.Err() == nil {
+						if spec.LocalTurns != nil {
+							nextInput, callID, err = spec.LocalTurns.Begin(ctx, th.ID(), turnID)
+							if err != nil {
+								w.err = err
+								return
+							}
+							explicit = nextInput != ""
+						}
+						needsResult := spec.Role == protocol.RoleImplement && structuredResult && results.Result() == nil
+						needsVerdict := spec.Role == protocol.RoleAccept && verdicts.Verdict() == nil
+						if !explicit && (needsResult || needsVerdict) {
+							nextInput, callID = harness.Continuation(spec), "continue"
+						}
+					}
+					more := nextInput != ""
+					ev.CoordinatorContinued = more
+					select {
+					case w.events <- nativeRolloutEvent(th.ID(), ev):
+					case <-ctx.Done():
+						break events
+					}
+					if more {
+						next, err := th.StartTurn(ctx, harness.TurnInput{Text: nextInput, Model: profile.Model, Effort: profile.Effort, UserMessageID: protocol.NativeObjectID(protocol.PrefixMessage, th.ID(), turnID+"/"+callID)})
+						if err != nil || next == "" {
+							w.err = fmt.Errorf("%w: continuation of native turn %s has no confirmed start receipt: %v", harness.ErrRetainedResumePending, turnID, err)
 							return
+						}
+						if explicit {
+							if err := spec.LocalTurns.Started(ctx, th.ID(), turnID, next); err != nil {
+								w.err = errors.Join(harness.ErrRetainedResumePending, err)
+								return
+							}
 						}
 						turnID = next
 						w.turnMu.Lock()
@@ -545,11 +580,12 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
 	ev.Raw = redactedRolloutPayload(threadID, ev)
 	body, _ := json.Marshal(struct {
-		ThreadID string          `json:"thread_id"`
-		TurnID   string          `json:"turn_id"`
-		ItemID   string          `json:"item_id"`
-		Data     json.RawMessage `json:"data,omitempty"`
-	}{threadID, ev.TurnID, ev.ItemID, ev.Raw})
+		ThreadID  string          `json:"thread_id"`
+		TurnID    string          `json:"turn_id"`
+		ItemID    string          `json:"item_id"`
+		Data      json.RawMessage `json:"data,omitempty"`
+		Continued bool            `json:"continues_run,omitempty"`
+	}{threadID, ev.TurnID, ev.ItemID, ev.Raw, ev.CoordinatorContinued})
 	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "native." + string(ev.Kind), Body: body}
 }
 
@@ -583,6 +619,9 @@ func workerTools(spec harness.WorkerSpec) []harness.ToolSpec {
 	tools := []harness.ToolSpec{harness.ResultToolSpec}
 	if spec.Role == protocol.RoleAccept {
 		tools = []harness.ToolSpec{harness.VerdictToolFor(spec)}
+	}
+	if spec.LocalTurns != nil {
+		tools = append(tools, harness.ContinueRunTool)
 	}
 	if harness.HasObservation(spec) {
 		tools = append(tools, harness.ReadObservationToolSpec)

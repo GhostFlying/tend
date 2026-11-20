@@ -275,9 +275,50 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 		stop := context.AfterFunc(a.ctx, cancel)
 		defer stop()
 	}
-	_, err = r.sendOnce(attempt, runCredential(as), env)
+	err = r.deliverSessionStop(attempt, as, env)
 	if err != nil {
 		r.cfg.Log.WarnContext(ctx, "optional session stop report remains uncertain", "run_id", as.RunID, "request_id", env.RequestID, "operation", env.Operation, "err", err)
 	}
 	return err
+}
+
+func (r *Runner) deliverSessionStop(ctx context.Context, as protocol.Assignment, env *protocol.Envelope) error {
+	op, err := r.sendOnce(ctx, runCredential(as), env)
+	if err != nil {
+		return err
+	}
+	if op.Status != protocol.OpSucceeded {
+		return errors.New("session stop receipt remains pending")
+	}
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		return r.cfg.Journal.AckSessionStop(ctx, as.RunID, env.RequestID)
+	}
+	return nil
+}
+
+// Physical exit has a dedicated sender. It must remain deliverable after
+// business settlement, including while a large event is still unavailable.
+func (r *Runner) syncSessionStops(ctx context.Context) {
+	for ctx.Err() == nil {
+		runs, err := r.cfg.Journal.PendingSessionStopRuns(ctx)
+		if err != nil && ctx.Err() == nil {
+			r.cfg.Log.WarnContext(ctx, "read pending physical stop reports", "err", err)
+		}
+		for _, as := range runs {
+			env, err := r.cfg.Journal.SessionStopReport(ctx, as.RunID)
+			if err == nil && env != nil {
+				attempt, cancel := context.WithTimeout(ctx, time.Second)
+				err = r.deliverSessionStop(attempt, as, env)
+				cancel()
+			}
+			if err != nil && ctx.Err() == nil {
+				r.cfg.Log.WarnContext(ctx, "physical stop delivery pending", "run_id", as.RunID, "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(r.cfg.RetryDelay):
+		}
+	}
 }

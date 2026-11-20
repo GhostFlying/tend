@@ -460,7 +460,7 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // Driver runs operations against the runner-local native process. The caller
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
-	LocalTurns           LocalTurns
+	LocalTurns           harness.LocalTurns
 	pendingLocal         map[string]string
 	RequireReceiptReader bool
 	NativeOwnerTools     bool
@@ -560,7 +560,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 		}
 		local := d.LocalTurns != nil && !receiptHistory && !cfg.Ephemeral && cfg.Purpose != "internal_summary"
 		if local {
-			cfg.Tools = append(cfg.Tools, continueRunTool)
+			cfg.Tools = append(cfg.Tools, harness.ContinueRunTool)
 		}
 		if d.Upload != nil && nativeOwner && !receiptHistory {
 			cfg.Tools = append(cfg.Tools, harness.UploadFileToolSpec)
@@ -807,14 +807,14 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	d.tools[key] = ch
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); delete(d.tools, key); d.mu.Unlock(); d.wg.Done() }()
-	if call.Tool == continueRunTool.Name && d.LocalTurns != nil && !d.RequireReceiptReader {
+	if call.Tool == harness.ContinueRunTool.Name && d.LocalTurns != nil && !d.RequireReceiptReader {
 		d.mu.Lock()
 		private := d.private[call.ThreadID]
 		d.mu.Unlock()
 		if private {
 			return harness.ToolResult{Text: "private threads cannot continue the owner Run"}
 		}
-		return d.queueLocal(ctx, call)
+		return harness.QueueContinuation(ctx, d.LocalTurns, call)
 	}
 	if call.Tool == harness.UploadFileTool && d.Upload != nil {
 		var p struct {

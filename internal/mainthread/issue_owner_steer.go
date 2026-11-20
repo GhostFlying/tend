@@ -15,6 +15,7 @@ func (m *Manager) steerIssueOwner(ctx context.Context, th harness.Thread, a *tur
 	m.mu.Lock()
 	blocked := a.finished || a.steerBlocked || m.thread != th
 	turnID := a.turnID
+	nativeID := a.nativeTurnID()
 	m.mu.Unlock()
 	if blocked || turnID == "" {
 		return nil
@@ -26,7 +27,7 @@ func (m *Manager) steerIssueOwner(ctx context.Context, th harness.Thread, a *tur
 		return err
 	}
 	callCtx, cancel := context.WithTimeout(ctx, m.cfg.SteerTimeout)
-	err = native.SteerTurn(callCtx, turnID, harness.TurnInput{Text: steer.Text, UserMessageID: steer.MessageID})
+	err = native.SteerTurn(callCtx, nativeID, harness.TurnInput{Text: steer.Text, UserMessageID: steer.MessageID})
 	cancel()
 
 	status, reason := "accepted", "waiting_safe_boundary"
