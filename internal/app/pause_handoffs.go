@@ -379,7 +379,7 @@ func consumeStoppedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx,
 	if rawText, attached := fields["process_text"]; attached {
 		var parts []protocol.WorkerProcessText
 		if m.ConversationID == "" || m.ConversationID == "main" ||
-			json.Unmarshal(rawText, &parts) != nil || !validWorkerProcessText(parts) {
+			json.Unmarshal(rawText, &parts) != nil || !protocol.ValidWorkerProcessText(parts) {
 			return nil
 		}
 		delete(fields, "process_text")

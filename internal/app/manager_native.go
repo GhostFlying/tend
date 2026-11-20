@@ -546,7 +546,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if shutdownText {
 			var parts []protocol.WorkerProcessText
-			if !processText || json.Unmarshal(event.ProcessText, &parts) != nil || !validWorkerProcessText(parts) {
+			if !processText || json.Unmarshal(event.ProcessText, &parts) != nil || !protocol.ValidWorkerProcessText(parts) {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid worker shutdown process text")
 			}
 		}

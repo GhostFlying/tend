@@ -95,7 +95,7 @@ func (a *App) stageRetainedInput(ctx context.Context, env *protocol.Envelope, do
 		if json.Unmarshal(env.Payload, &p) != nil {
 			return ctx, nil
 		}
-		return a.store.StageEventOriginals(ctx, "manager-events:"+env.Target.ID, p.Body)
+		return a.store.StageManagerEventOriginals(ctx, env.Target.ID, p.Body)
 	}
 	return ctx, nil
 }
