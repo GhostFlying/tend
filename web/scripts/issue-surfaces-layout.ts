@@ -226,14 +226,6 @@ const server = createServer(async (req, res) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(issueBoardFixture(res.req.url, data)));
   };
-  if (copyOnly && p === "/fixture/complete-tool" && req.method === "POST") {
-    copyTools[1]!.tool.status = "completed";
-    for (const stream of streams)
-      stream.write(
-        `id: ${++seq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: seq, object_type: "message", object_id: "copy-tool-1", kind: "conversation.associations_changed", created_at: new Date().toISOString() })}\n\n`,
-      );
-    return json({ completed: true });
-  }
   if (p === "/api/v1/session")
     return json({
       token: "fixture-token",
@@ -279,19 +271,33 @@ const server = createServer(async (req, res) => {
       queue: [],
       decisions: [],
     });
-  if (p === "/api/v1/conversation")
+  if (p === "/api/v1/conversation" && u.searchParams.get("projection") === "chat")
     return json({
       items: [
         {
-          message_id: "assistant-example",
+          message_id: "owner-plan",
           seq: 1,
           kind: "message",
+          author: "owner",
+          body: "请帮我梳理发布与回滚流程。",
+          created_at: new Date(now).toISOString(),
+          state: "replied",
+          associations: messageAssociations,
+        },
+        {
+          message_id: "reply-plan",
+          seq: 2,
+          kind: "message",
           author: "main_agent",
-          body: "我会统筹目标与下一步。当前需要你确认发布范围。",
-          created_at: new Date().toISOString(),
+          body: replyBody,
+          assistant_revision: replyRevision,
+          associations: { ...messageAssociations, message_id: "reply-plan" },
+          created_at: new Date(now).toISOString(),
+          reply_to: "owner-plan",
           state: "replied",
         },
       ],
+      event_seq: seq,
       more: false,
     });
   if (p === "/api/v1/conversation/settings")
@@ -347,61 +353,6 @@ const server = createServer(async (req, res) => {
   }
   if (p === "/api/v1/conversation/handoff")
     return json({ enabled: true, mode: "index", revision: 1 });
-  if (p === "/api/v1/conversation/transcript")
-    return json({
-      blocks: [
-        ...(copyOnly
-          ? [
-              {
-                position: 0,
-                trigger: {
-                  message_id: "copy-system",
-                  seq: 0,
-                  kind: "message",
-                  author: "system",
-                  body: `Release ${copyUpgrade.release_id} completed`,
-                  created_at: new Date(now).toISOString(),
-                  notice_type: "upgrade_completed",
-                  upgrade_id: copyUpgrade.upgrade_id,
-                },
-                items: [],
-                more: false,
-              },
-            ]
-          : []),
-        {
-          position: 1,
-          trigger: {
-            message_id: "owner-plan",
-            seq: 1,
-            kind: "message",
-            author: "owner",
-            body: "请帮我梳理发布与回滚流程。",
-            created_at: new Date().toISOString(),
-            state: "replied",
-            associations: messageAssociations,
-          },
-          items: [
-            ...(copyOnly ? copyTools : []),
-            {
-              message_id: "reply-plan",
-              seq: copyOnly ? 6 : 2,
-              kind: "message",
-              author: "main_agent",
-              body: replyBody,
-              assistant_revision: replyRevision,
-              associations: { ...messageAssociations, message_id: "reply-plan" },
-              created_at: new Date().toISOString(),
-              reply_to: "owner-plan",
-              state: "replied",
-            },
-          ],
-          more: false,
-        },
-      ],
-      event_seq: seq,
-      more: false,
-    });
   if (p === `/api/v1/upgrades/${copyUpgrade.upgrade_id}`) return json({ upgrade: copyUpgrade });
   if (p === "/api/v1/conversation/queue")
     return json({ items: [], enabled: true, event_seq: seq, total: 0 });
@@ -1230,25 +1181,6 @@ const copyUpgrade = {
   updated_at: now,
   hosts: [],
 };
-const copyTools = ["issues_read", "tasks_read", "background_sources", "repos_list"].map(
-  (name, index) => ({
-    message_id: `copy-tool-${index}`,
-    seq: index + 2,
-    kind: "message",
-    author: "main_agent",
-    reply_to: "owner-plan",
-    created_at: new Date(now).toISOString(),
-    tool: {
-      turn_id: "copy-turn",
-      name,
-      status: index < 2 ? "completed" : index === 2 ? "running" : "failed",
-      updated_at: new Date(now).toISOString(),
-      input: JSON.stringify({ task_id: activeTask.task_id }),
-      output: index < 2 ? "原始工具输出保持不变" : "",
-    },
-  }),
-);
-
 async function captureS5() {
   assert(output);
   assert(address && typeof address !== "string");
@@ -1268,57 +1200,11 @@ async function captureS5() {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await page.screenshot({ path: join(output, `s5-${name}-${viewport.width}.png`) });
     };
-    copyTools[1]!.tool.status = "running";
     await page.goto(`http://127.0.0.1:${address.port}/diagnostics/main`);
-    await page.locator("[data-trace-trigger]").click();
-    const firstTool = page.locator('[data-scroll-id="copy-tool-0"]');
-    const firstButton = firstTool.getByRole("button", { includeHidden: true });
-    await firstButton.click();
-    await firstButton.evaluate((element) => element.setAttribute("data-retained-tool", "true"));
-    await page.request.post(`http://127.0.0.1:${address.port}/fixture/complete-tool`);
-    await page
-      .locator('[data-scroll-id="copy-tool-1"] [data-status="running"]')
-      .waitFor({ state: "hidden" });
-    assert.equal(await firstButton.getAttribute("data-retained-tool"), "true");
-    assert.equal(await firstButton.getAttribute("aria-expanded"), "true");
-    assert(await firstButton.evaluate((element) => document.activeElement === element));
-    await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
-    await firstButton.click();
-    await page.getByRole("textbox", { name: "消息", exact: true }).focus();
-    const groupButton = page.locator("[data-trace-trigger]");
-    assert.equal(await page.getByRole("button", { name: /使用了 .* 个工具/ }).count(), 0);
-    await groupButton.waitFor();
-    if ((await groupButton.getAttribute("aria-expanded")) === "true") await groupButton.click();
-    await firstButton.waitFor({ state: "hidden" });
-    assert.equal(await firstButton.getAttribute("data-retained-tool"), "true");
-    assert.equal(
-      await page
-        .locator(`[id="${await groupButton.getAttribute("aria-controls")}"] [data-tool-item]`)
-        .count(),
-      copyTools.length,
-    );
-    assert.equal(await page.getByRole("button", { name: /读取背景来源/ }).count(), 0);
-    assert.equal(await page.getByRole("button", { name: /查看仓库/ }).count(), 0);
-    assert.equal(await page.getByText(activeTask.task_id, { exact: true }).count(), 0);
-    await shot("chat-grouped");
-    await page
-      .locator('[data-scroll-id="0:copy-system"]')
-      .evaluate((element) => element.scrollIntoView({ block: "start" }));
-    await shot("upgrade-system-card");
-    await groupButton.click();
-    await page.getByRole("button", { name: /查看 Issue/ }).click();
-    await page.getByText("原始工具输出保持不变", { exact: true }).waitFor();
-    await page
-      .locator('[data-scroll-id="copy-tool-0"]')
-      .evaluate((element) => element.scrollIntoView({ block: "start" }));
-    await shot("chat-expanded");
-    await groupButton.click();
-    await firstButton.waitFor({ state: "hidden" });
-    await page.locator('[data-scroll-id="copy-tool-1"]').waitFor({ state: "hidden" });
-    assert.equal(await groupButton.getAttribute("aria-expanded"), "false");
-    assert(await groupButton.evaluate((element) => document.activeElement === element));
-    await groupButton.click();
-    await firstTool.getByText("原始工具输出保持不变", { exact: true }).waitFor();
+    await page.getByText(replyBody, { exact: true }).waitFor();
+    assert.equal(await page.locator("[data-trace-trigger], [data-tool-item]").count(), 0);
+    assert(!readPaths.includes("/api/v1/conversation/transcript"));
+    await shot("chat");
     await navigate(page, "/tasks/" + activeTask.task_id);
     await page.getByText("任务阶段 · 实现中", { exact: true }).waitFor();
     await page.getByText("sample · 优先级 P1 · 第 2 版要求", { exact: true }).waitFor();
