@@ -1839,7 +1839,7 @@ try {
       await progress.getByText("当前候选的提交 CI · 检查进行中").waitFor();
       assert.equal(await progress.getByText("已开始处理", { exact: false }).count(), 0);
       await page
-        .locator('[data-scroll-id="old-pr-checks"]')
+        .locator('[data-scroll-id="delivery-candidate:old-pr-checks"]')
         .getByText("当时 CI · 等待检查")
         .waitFor();
       await progress.screenshot({ path: join(output, `delivery-candidate-${width}.png`) });
@@ -1913,46 +1913,104 @@ try {
       };
     };
     const initialRows = Array.from({ length: 19 }, (_, index) =>
-      observation(101 + index, head, { previous: old }),
+      observation(101 + index, head, { previous: old, checkCount: index === 0 ? 80 : 6 }),
     );
-    const other = observation(99, head, { number: 375 });
-    const rows = [other, observation(100, old), ...initialRows];
+    const olderRows = [
+      observation(86, old),
+      ...Array.from({ length: 12 }, (_, index) => observation(87 + index, head, { previous: old })),
+    ];
+    const rows = [observation(99, head, { number: 375 }), ...initialRows];
     const newRows = [
       observation(120, head, { previous: old, checkCount: 8, moved: true }),
       observation(121, head, { previous: old, checkCount: 8, moved: true, failing: true }),
       observation(122, next),
     ];
     let publishUpdates = false;
+    let releaseEarlier = () => {};
+    const heldEarlier = new Promise<void>((resolve) => {
+      releaseEarlier = resolve;
+    });
     try {
-      await page.route(`**/api/v1/issues/${issue.issue_id}/activity*`, (route) =>
-        route.fulfill({
-          json: {
-            ...activity,
-            more: false,
-            event_seq: 122,
-            items: [...activity.items!, ...rows, ...(publishUpdates ? newRows : [])],
-          },
-        }),
-      );
+      await page.route(`**/api/v1/issues/${issue.issue_id}/activity*`, async (route) => {
+        const params = new URL(route.request().url()).searchParams;
+        if (params.has("before")) {
+          assert.equal(params.get("before"), "99");
+          await heldEarlier;
+          return route.fulfill({
+            json: { items: olderRows, more: false, event_seq: 119, readable: true },
+          });
+        }
+        if (params.has("since")) {
+          return route.fulfill({
+            json: {
+              items: publishUpdates ? newRows : [],
+              more: false,
+              event_seq: publishUpdates ? 122 : 119,
+              readable: true,
+            },
+          });
+        }
+        return route.fulfill({
+          json: { items: rows, more: true, next_before: 99, event_seq: 119, readable: true },
+        });
+      });
       await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
       assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
       await page.getByRole("region", { name: "Issue 详情", exact: true }).waitFor();
       assert.equal(await page.title(), "tend");
       const cards = page.locator("[data-delivery-candidate]");
-      const card = page.locator('[data-scroll-id="pr-observation-101"]');
+      const card = cards
+        .filter({ has: page.locator(`code[title="${head}"]`) })
+        .filter({ hasText: "sample/repo #372" });
       const summary = card.getByText("最新观察", { exact: false });
       await summary.waitFor();
       await card.getByText("当时 CI · 等待检查 · 6 项检查", { exact: true }).waitFor();
-      assert.equal(await cards.count(), 3);
+      assert.equal(await cards.count(), 2);
       assert.equal(await cards.getByText("已推送新候选", { exact: false }).count(), 1);
       assert.equal(await card.getByText("无合并冲突", { exact: false }).count(), 1);
       await card.getByText("查看 19 条观察记录", { exact: true }).click();
-      await card.locator('[data-scroll-id="pr-observation-102"] > summary').click();
-      await card.getByText("job 5 · 检查进行中", { exact: true }).waitFor();
+      await card.locator(":scope > details > details > summary").first().click();
+      const check = card.getByText("job 34 · 检查进行中", { exact: true });
+      await check.waitFor();
+
+      const scroll = page.locator("[data-issue-scroll]");
+      await scroll.evaluate((node) => {
+        node.scrollTop = 0;
+      });
+      await page
+        .locator('[data-history-boundary][aria-busy="true"]')
+        .waitFor({ state: "attached" });
+      const scrollRoot = await scroll.elementHandle();
+      assert(scrollRoot);
+      const offset = () =>
+        check.evaluate(
+          (node, root) => node.getBoundingClientRect().top - root.getBoundingClientRect().top,
+          scrollRoot,
+        );
+      await check.evaluate((node, root) => {
+        root.scrollTop += node.getBoundingClientRect().top - root.getBoundingClientRect().top - 120;
+      }, scrollRoot);
+      const settlePaint = () =>
+        page.evaluate(
+          () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+        );
+      await settlePaint();
+      const before = await offset();
+      assert(Math.abs(before - 120) <= 1, `check at ${before}px before pagination at ${width}px`);
+      releaseEarlier();
+      await card.getByText("查看 31 条观察记录", { exact: true }).waitFor();
+      await settlePaint();
+      const movement = (await offset()) - before;
+      assert(Math.abs(movement) <= 1, `check shifted ${movement}px after pagination at ${width}px`);
+      await check.waitFor();
+      assert.equal(await cards.count(), 3);
+      console.log(
+        `PASS Issue delivery observation reading position ${width} (${movement}px shift)`,
+      );
 
       publishUpdates = true;
       publish("work_item.delivery_changed");
-      await card.getByText("查看 21 条观察记录", { exact: true }).waitFor();
+      await card.getByText("查看 33 条观察记录", { exact: true }).waitFor();
       await card.getByText("当时 CI · 等待检查 · 8 项检查", { exact: true }).waitFor();
       await summary.locator(`code[title="${advanced}"]`).waitFor();
       await card.getByText("检测到合并冲突", { exact: false }).waitFor();
@@ -1960,17 +2018,21 @@ try {
       assert.equal(await cards.count(), 4);
       assert.equal(await cards.getByText("已推送新候选", { exact: false }).count(), 2);
       assert.equal(await card.locator("details[open]").count(), 2);
-      assert.equal(await card.locator(":scope > details > details").count(), 21);
-      await card.getByText("job 5 · 检查进行中", { exact: true }).waitFor();
+      assert.equal(await card.locator(":scope > details > details").count(), 33);
+      await check.waitFor();
       await card.locator('[data-scroll-id="pr-observation-120"] > summary').click();
-      await card.getByText("job 7 · 检查进行中", { exact: true }).waitFor();
+      await card
+        .locator('[data-scroll-id="pr-observation-120"]')
+        .getByText("job 7 · 检查进行中", { exact: true })
+        .waitFor();
       assert.equal(await page.locator("vite-error-overlay").count(), 0);
       assert.equal(await card.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
-      await card.getByText("查看 21 条观察记录", { exact: true }).click();
+      await card.getByText("查看 33 条观察记录", { exact: true }).click();
       await card.screenshot({ path: join(output, `delivery-candidate-group-${width}.png`) });
       assert.deepEqual(errors, []);
       console.log(`PASS Issue delivery candidate groups and observation history ${width}`);
     } finally {
+      releaseEarlier();
       await context.close();
     }
   }
