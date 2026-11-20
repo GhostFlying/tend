@@ -238,6 +238,48 @@ export function groupActivityEvents(rows: readonly IssueActivityEntry[]): IssueA
   return groups;
 }
 
+/** Fold observations into the first card for each uninterrupted head of a PR. */
+export function projectActivityGroups(
+  rows: readonly IssueActivityEntry[],
+  identities: Map<string, string>,
+) {
+  const current = new Map<string, { head: string; entries: IssueActivityEntry[] }>();
+  const candidates = new Map<string, { newCandidate: boolean }>();
+  const groups = groupActivityEvents(rows).filter((entries) => {
+    const row = entries[0]!;
+    if (
+      row.kind !== "work_item.delivery_changed" &&
+      row.kind !== "work_item.delivery_candidate_retired"
+    )
+      return true;
+    const item = row.delivery;
+    const head = item?.observation.head_sha;
+    if (!item || !head || !item.observation.checked_at) return true;
+    const { observation, delivery } = item;
+    // Retired records can use a different local delivery ID for the same PR.
+    const identity = JSON.stringify([
+      observation.issue_id || row.issue_id,
+      delivery.provider,
+      delivery.provider === "github" ? delivery.repository.toLowerCase() : delivery.repository,
+      delivery.number,
+    ]);
+    const previous = current.get(identity);
+    if (previous?.head === head) {
+      previous.entries.push(row);
+      return false;
+    }
+    current.set(identity, { head, entries });
+    // The first loaded observation can follow a head outside the retained page.
+    const priorHead = previous?.head ?? observation.previous_head_sha;
+    candidates.set(row.id, { newCandidate: !!priorHead && priorHead !== head });
+    return true;
+  });
+  return identifyActivityGroups(groups, identities).map((group) => ({
+    ...group,
+    candidate: candidates.get(group.entries[0]!.id),
+  }));
+}
+
 /** Each retained identity belongs to one group, with its original member taking priority. */
 export function identifyActivityGroups(
   groups: readonly IssueActivityEntry[][],

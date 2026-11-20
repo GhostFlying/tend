@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ApiError } from "../api/client.ts";
 import type { IssueActivityPage, IssueActivityEntry } from "../api/generated/api.ts";
-import { IssueActivityRead } from "./activity.ts";
+import { IssueActivityRead, projectActivityGroups } from "./activity.ts";
 const entry = (id: string, position: number, title = id): IssueActivityEntry => ({
   id,
   position,
@@ -526,4 +526,68 @@ test("returning to an Issue resumes from the retained cursor and removes a withd
   expect(read.state.get().value?.items).toEqual([head]);
   expect(read.state.get().value).toMatchObject({ event_seq: 111, more: false });
   read.close();
+});
+
+test("keeps a delivery card stable as observations arrive and earlier pages are loaded", () => {
+  const changed = (
+    position: number,
+    head: string,
+    previous: string,
+    number = 372,
+  ): IssueActivityEntry => ({
+    ...entry(String(position), position),
+    kind: "work_item.delivery_changed",
+    issue_id: "issue",
+    delivery: {
+      delivery: {
+        delivery_id: `github:repo#${number}`,
+        provider: "github",
+        repository: "Org/Repo",
+        number,
+      },
+      observation: {
+        issue_id: "issue",
+        delivery_id: `github:repo#${number}`,
+        generation: 1,
+        checked_at: position,
+        state: "open",
+        head_sha: head,
+        previous_head_sha: previous,
+      },
+    },
+  });
+  const earlier = changed(1, "b", "a");
+  const firstLoaded = changed(2, "b", "a");
+  const other = changed(3, "b", "", 373);
+  const milestone = entry("milestone", 4);
+  const same = changed(5, "b", "a");
+  const retired: IssueActivityEntry = {
+    ...changed(6, "b", "a"),
+    kind: "work_item.delivery_candidate_retired",
+    delivery: {
+      ...same.delivery!,
+      delivery: { ...same.delivery!.delivery, delivery_id: "retired", repository: "org/repo" },
+    },
+  };
+  const next = changed(7, "c", "b");
+  const returned = changed(8, "b", "c");
+  const rows = [firstLoaded, other, milestone, same, retired, next, returned];
+  const unchanged = structuredClone(rows);
+  const identities = new Map<string, string>();
+  const firstRead = projectActivityGroups(rows, identities);
+  const fullRead = projectActivityGroups([earlier, ...rows], identities);
+  expect(
+    fullRead.map(({ entries, candidate }) => [
+      entries.map((row) => row.id),
+      candidate?.newCandidate,
+    ]),
+  ).toEqual([
+    [["1", "2", "5", "6"], true],
+    [["3"], false],
+    [["milestone"], undefined],
+    [["7"], true],
+    [["8"], true],
+  ]);
+  expect(fullRead[0]?.key).toBe(firstRead[0]?.key);
+  expect(rows).toEqual(unchanged);
 });

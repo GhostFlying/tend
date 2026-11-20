@@ -1850,6 +1850,131 @@ try {
     }
   }
 
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    const head = "8".repeat(40);
+    const old = "7".repeat(40);
+    const next = "9".repeat(40);
+    const target = "a".repeat(40);
+    const advanced = "b".repeat(40);
+    const observation = (
+      index: number,
+      commit: string,
+      { number = 372, previous = "", checkCount = 6, moved = false, failing = false } = {},
+    ): NonNullable<IssueActivityPage["items"]>[number] => {
+      const delivery = {
+        delivery_id: `github:sample/repo#${number}`,
+        provider: "github" as const,
+        repository: "sample/repo",
+        number,
+      };
+      return {
+        id: `pr-observation-${index}`,
+        position: index,
+        kind: "work_item.delivery_changed",
+        author: "tend",
+        title: "记录了交付候选观察",
+        created_at: now + index,
+        issue_id: issue.issue_id,
+        delivery: {
+          delivery,
+          observation: {
+            head_sha: commit,
+            previous_head_sha: previous,
+            base_sha: target,
+            target_sha: moved ? advanced : target,
+            mergeability: failing ? "conflicting" : "mergeable",
+            state: "open",
+            checked_at: now + index,
+            observer: "server",
+            issue_id: issue.issue_id,
+            delivery_id: delivery.delivery_id,
+            generation: 1,
+            ci: {
+              head_sha: commit,
+              state: "pending",
+              checks: Array.from({ length: checkCount }, (_, i) => ({
+                name: i === 0 ? "check" : `job ${i}`,
+                state: i === 0 && failing ? "completed" : "in_progress",
+                ...(i === 0 && failing ? { conclusion: "failure" } : {}),
+              })),
+            },
+          },
+        },
+      };
+    };
+    const initialRows = Array.from({ length: 19 }, (_, index) =>
+      observation(101 + index, head, { previous: old }),
+    );
+    const other = observation(99, head, { number: 375 });
+    const rows = [other, observation(100, old), ...initialRows];
+    const newRows = [
+      observation(120, head, { previous: old, checkCount: 8, moved: true }),
+      observation(121, head, { previous: old, checkCount: 8, moved: true, failing: true }),
+      observation(122, next),
+    ];
+    let publishUpdates = false;
+    try {
+      await page.route(`**/api/v1/issues/${issue.issue_id}/activity*`, (route) =>
+        route.fulfill({
+          json: {
+            ...activity,
+            more: false,
+            event_seq: 122,
+            items: [...activity.items!, ...rows, ...(publishUpdates ? newRows : [])],
+          },
+        }),
+      );
+      await page.goto(`http://127.0.0.1:${address.port}/issues/${issue.issue_id}`);
+      assert.equal(new URL(page.url()).pathname, `/issues/${issue.issue_id}`);
+      await page.getByRole("region", { name: "Issue 详情", exact: true }).waitFor();
+      assert.equal(await page.title(), "tend");
+      const cards = page.locator("[data-delivery-candidate]");
+      const card = page.locator('[data-scroll-id="pr-observation-101"]');
+      const summary = card.getByText("最新观察", { exact: false });
+      await summary.waitFor();
+      await card.getByText("当时 CI · 等待检查 · 6 项检查", { exact: true }).waitFor();
+      assert.equal(await cards.count(), 3);
+      assert.equal(await cards.getByText("已推送新候选", { exact: false }).count(), 1);
+      assert.equal(await card.getByText("无合并冲突", { exact: false }).count(), 1);
+      await card.getByText("查看 19 条观察记录", { exact: true }).click();
+      await card.locator('[data-scroll-id="pr-observation-102"] > summary').click();
+      await card.getByText("job 5 · 检查进行中", { exact: true }).waitFor();
+
+      publishUpdates = true;
+      publish("work_item.delivery_changed");
+      await card.getByText("查看 21 条观察记录", { exact: true }).waitFor();
+      await card.getByText("当时 CI · 等待检查 · 8 项检查", { exact: true }).waitFor();
+      await summary.locator(`code[title="${advanced}"]`).waitFor();
+      await card.getByText("检测到合并冲突", { exact: false }).waitFor();
+      await card.locator('li[data-tone="error"]').getByText("check · 检查失败").waitFor();
+      assert.equal(await cards.count(), 4);
+      assert.equal(await cards.getByText("已推送新候选", { exact: false }).count(), 2);
+      assert.equal(await card.locator("details[open]").count(), 2);
+      assert.equal(await card.locator(":scope > details > details").count(), 21);
+      await card.getByText("job 5 · 检查进行中", { exact: true }).waitFor();
+      await card.locator('[data-scroll-id="pr-observation-120"] > summary').click();
+      await card.getByText("job 7 · 检查进行中", { exact: true }).waitFor();
+      assert.equal(await page.locator("vite-error-overlay").count(), 0);
+      assert.equal(await card.evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+      await card.getByText("查看 21 条观察记录", { exact: true }).click();
+      await card.screenshot({ path: join(output, `delivery-candidate-group-${width}.png`) });
+      assert.deepEqual(errors, []);
+      console.log(`PASS Issue delivery candidate groups and observation history ${width}`);
+    } finally {
+      await context.close();
+    }
+  }
+
   // Read summaries as summaries, then fetch the full report and its original bytes on demand.
   for (const width of [1440, 390]) {
     for (const indexTiming of ["index-first", "historical-first", "while-reading"] as const) {

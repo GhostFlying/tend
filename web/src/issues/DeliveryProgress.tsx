@@ -1,4 +1,5 @@
 import type {
+  DeliveryCheck,
   IssueDeliveryProgress,
   IssueDeliveryReviewProgress,
   IssueDeliveryView,
@@ -17,6 +18,55 @@ const ciLabels: Record<string, string> = {
   error: "检查出错",
   unknown: "检查结果待确认",
 };
+const checkLabels: Record<string, string> = {
+  ...ciLabels,
+  action_required: "需要处理",
+  cancelled: "已取消",
+  neutral: "中性",
+  skipped: "按条件跳过",
+  timed_out: "超时",
+};
+const failedCheckStates = new Set([
+  "failure",
+  "error",
+  "action_required",
+  "cancelled",
+  "stale",
+  "startup_failure",
+  "timed_out",
+]);
+
+const mergeabilityLabels: Record<string, string> = {
+  mergeable: "无合并冲突",
+  unknown: "合并状态待确认",
+};
+
+function DeliveryChecks({ checks }: { checks: DeliveryCheck[] }) {
+  return (
+    <ul className={styles.deliveryChecks}>
+      {checks.map((check, index) => {
+        const status = check.conclusion || check.state;
+        const label = checkLabels[status] ?? status;
+        return (
+          <li
+            key={`${check.name}:${index}`}
+            data-tone={failedCheckStates.has(status) ? "error" : undefined}
+          >
+            {check.url ? (
+              <a href={check.url} target="_blank" rel="noreferrer">
+                {check.name}
+              </a>
+            ) : (
+              check.name
+            )}
+            {" · "}
+            {label}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export function conflictActionLabel(action: string) {
   return action === "working" ? "已开始处理" : "已看到冲突";
@@ -77,10 +127,12 @@ function ReviewProgress({ review }: { review: IssueDeliveryReviewProgress }) {
 
 export function DeliveryProgress({
   item,
-  historical = false,
+  presentation = "current",
+  newCandidate = false,
 }: {
   item: IssueDeliveryView;
-  historical?: boolean;
+  presentation?: "current" | "candidate" | "observation";
+  newCandidate?: boolean;
 }) {
   const { delivery, observation: o, conflict_progress: response, review } = item;
   const c = o.last_conflict;
@@ -104,10 +156,24 @@ export function DeliveryProgress({
   const conflictUnknown =
     o.state === "open" && sameConflict && (!o.mergeability || o.mergeability === "unknown");
   const earlierConflict = c && c.head_sha !== head ? c : undefined;
-  const replaced = o.previous_head_sha && o.previous_head_sha !== head;
+  const historical = presentation !== "current";
+  const replaced =
+    presentation === "current" ? o.previous_head_sha && o.previous_head_sha !== head : newCandidate;
+  const deliveryState = o.state === "merged" ? "已合入" : o.state === "closed" ? "已关闭" : "";
+  const mergeability =
+    o.state === "open" && !conflict && !conflictUnknown
+      ? mergeabilityLabels[o.mergeability || "unknown"]
+      : "";
   const ci = o.ci?.head_sha === head ? o.ci : undefined;
-  const time = currentConflict?.checked_at ?? o.checked_at;
-  const observer = currentConflict?.observer ?? o.observer;
+  const checks = ci?.checks ?? [];
+  const visibleChecks =
+    presentation === "observation"
+      ? checks
+      : presentation === "candidate"
+        ? checks.filter((check) => failedCheckStates.has(check.conclusion || check.state))
+        : [];
+  const time = historical ? o.checked_at : (currentConflict?.checked_at ?? o.checked_at);
+  const observer = historical ? o.observer : (currentConflict?.observer ?? o.observer);
   const url = o.url ?? delivery.url;
   const heading = candidateLabel(delivery);
   const candidate = { ...o, head_sha: head };
@@ -124,9 +190,12 @@ export function DeliveryProgress({
         {conflict ? <strong> · 检测到合并冲突</strong> : null}
         {conflictUnknown ? <strong> · 曾检测到冲突，当前状态待确认</strong> : null}
         {replaced ? <strong> · 已推送新候选</strong> : null}
+        {historical && (deliveryState || mergeability)
+          ? ` · ${deliveryState || mergeability}`
+          : null}
       </p>
       <p>
-        {historical ? "当时观察 · " : "当前交付 · "}
+        {presentation === "candidate" ? "最新观察 · " : historical ? "当时观察 · " : "当前交付 · "}
         <CandidateIdentity candidate={candidate} />
       </p>
       <p className={styles.muted}>
@@ -158,8 +227,10 @@ export function DeliveryProgress({
         <p>
           {historical ? "当时 CI" : "当前候选的提交 CI"} ·{" "}
           {ci.truncated ? "检查结果待确认" : (ciLabels[ci.state] ?? ci.state)}
+          {historical ? ` · ${checks.length} 项检查` : null}
         </p>
       ) : null}
+      {visibleChecks.length ? <DeliveryChecks checks={visibleChecks} /> : null}
     </div>
   );
 }
