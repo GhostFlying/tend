@@ -34,7 +34,7 @@ const issue = (patch: Partial<IssueSummary> = {}): IssueSummary => ({
 
 test("finished executions leave ongoing responsibility and the owner next step visible", () => {
   const item = issue();
-  expect(responsibilityLabel(item)).toBe("待确认下一步");
+  expect(responsibilityLabel(item)).toBe("");
   item.board!.progress = {
     summary: "Deployment accepted",
     next_step: "Settle the original delivery",
@@ -42,7 +42,7 @@ test("finished executions leave ongoing responsibility and the owner next step v
     updated_at: 1,
     updated_by: item.assignee,
   };
-  expect(responsibilityLabel(item)).toBe("继续推进");
+  expect(responsibilityLabel(item)).toBe("");
   item.board!.attention_count = 1;
   expect(responsibilityLabel(item)).toBe("等待 Agent 处理");
   item.board!.owner_attention_count = 1;
@@ -79,7 +79,7 @@ test("terminal and reopened projections preserve historical next steps without m
     historical: true,
     historical_reason: "issue_reopened",
   };
-  expect(responsibilityLabel(item)).toBe("待确认下一步");
+  expect(responsibilityLabel(item)).toBe("");
   item.board!.execution.unknown = 1;
   expect(responsibilityLabel(item)).toBe("执行结果待核对");
 });

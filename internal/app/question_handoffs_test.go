@@ -8,6 +8,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestQuestionHandoffHumanOwnerResumes(t *testing.T) {
@@ -23,14 +24,32 @@ func TestQuestionHandoffHumanOwnerResumes(t *testing.T) {
 	if !ok || !as.QuestionHandoffs {
 		t.Fatal(as)
 	}
+	checkBoard := func(column protocol.IssueBoardColumn, hint protocol.IssueBoardWaitHint) {
+		t.Helper()
+		if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			page, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true, BoardColumn: "all", ReadRoot: issue.IssueID})
+			if err != nil {
+				return err
+			}
+			if len(page.Items) != 1 || page.Items[0].Board.Column != column || page.Items[0].Board.WaitHint != hint {
+				t.Fatalf("expected board column %s and hint %s, got %+v", column, hint, page.Items)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 	q := askQuestion(t, h, as, scopeQuestion)
+	checkBoard(protocol.IssueColumnWIP, "")
 	if op := h.runAs(as, protocol.OpRunsYieldQuestion, protocol.YieldQuestionPayload{DecisionID: q.DecisionID}, YieldQuestion{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	checkBoard(protocol.IssueColumnWaiting, protocol.IssueBoardWaitDecision)
 	if op := answerQuestion(t, h, q, scopeQuestion.Options[0], ""); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	checkBoard(protocol.IssueColumnWaiting, "")
 	next, ok := h.claimInputRun(runtime)
 	if !ok || next.TaskID != task || next.QuestionContinuation == nil {
 		t.Fatalf("human answer did not resume frozen agreement: %+v, %+v", next, h.executionTask(task))

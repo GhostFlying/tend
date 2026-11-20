@@ -15,6 +15,9 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 	if f.BoardStatus != "" && !slices.Contains(protocol.IssueWorkStatusValues(), f.BoardStatus) {
 		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid board status")
 	}
+	if f.BoardColumn != "" && !validExecutionBoardColumn(f.BoardColumn) {
+		return out, protocol.Errorf(protocol.CodeInvalidRequest, "invalid board column")
+	}
 	statusSQL := issueBoardStatusSQL
 	if f.GroupReview {
 		if f.BoardStatus == protocol.IssueInReview {
@@ -73,6 +76,14 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		base += ` AND c.issue_id IN (` + ownerActionIssueIDsSQL + `)`
 		args = append(args, f.WaitingOnOwner, f.WaitingOnOwner, f.WaitingOnOwner)
 	}
+	if f.BoardColumn != "" {
+		facts, err := readExecutionFacts(ctx, q)
+		if err != nil {
+			return out, err
+		}
+		out.Counts = nil
+		return executionBoardPage(ctx, q, f, out, base, args, facts)
+	}
 	rows, err = q.QueryContext(ctx, `SELECT `+statusSQL+`,COUNT(*)`+base+` GROUP BY `+statusSQL, args...)
 	if err != nil {
 		return out, err
@@ -126,9 +137,13 @@ func canonicalIssueBoard(ctx context.Context, q store.Querier, f CanonicalIssueF
 		if err != nil {
 			return out, err
 		}
-		out.Items = append(out.Items, protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card})
+		out.Items = append(out.Items, boardIssueSummary(issue, card))
 	}
 	return out, nil
+}
+
+func boardIssueSummary(issue protocol.Issue, card protocol.IssueBoardCard) protocol.IssueSummary {
+	return protocol.IssueSummary{EffectiveWorkStatus: issue.BoardStatus(), IssueControl: issue.IssueControl, Revision: issue.Revision, Title: issue.Plan.Title, Project: issue.Plan.Project, Board: &card}
 }
 
 // Use the original Issue association shown by Inbox. UNION collapses both

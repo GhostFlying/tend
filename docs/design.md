@@ -2652,6 +2652,11 @@ Issue 看板和 CLI 的执行计数合并普通 Task 与当前责任代次的协
 计数与工作分组、处理责任及进展叙述独立。外部等待是可选的 owner 读取字段，
 runner 协议和调度不变。见 [实施计划](plans/issue-owner-execution-projection.md)。
 
+
+### D246 补充：Issue 看板按执行事实分列
+
+看板按 Backlog、WIP、Waiting、Done、Cancelled 展示当前责任。领取仍由原有 todo 准入开启。实际启动的 Run 优先归 WIP，即使 Run 正等待自身命令。正式等待在执行停止后才改变列和提示。等待条件失效时清理提示，后续运行实际启动时回到 WIP。服务端在同一读事务中计算列、计数和分页。详见[实施计划](plans/issue-board-execution-columns.md)。
+
 ### D222 补充：按用户约定发布
 
 主 Agent 与 Issue owner 将普通阶段进展记在 Issue。用户追问沿原输入回复，真正需要用户选择时使用原决策卡。在用户明确要求的交付点，或时间、范围、可行性实质改变时，负责人依据原约定向用户说明。内部决策答复保留实际受众及来源。

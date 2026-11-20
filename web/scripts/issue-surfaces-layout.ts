@@ -1727,9 +1727,11 @@ async function captureS4() {
             "board has no horizontal page overflow",
           );
           if (viewport.width === 1440) {
-            const last = page.getByRole("region", { name: "已取消列", exact: true });
+            const last = page.getByRole("region", { name: "Cancelled列", exact: true });
             await last.scrollIntoViewIfNeeded();
-            const toggle = page.getByRole("button", { name: /已取消/ }).filter({ visible: true });
+            const toggle = page
+              .getByRole("button", { name: /Cancelled/ })
+              .filter({ visible: true });
             assert.equal(await toggle.getAttribute("aria-expanded"), "true");
             assert.equal(
               await page.evaluate(() => localStorage.getItem("tend.board.cancelled-expanded")),
@@ -1811,12 +1813,12 @@ async function checkBoardColumnWidths() {
   assert(address && typeof address !== "string");
   const originalLength = issueRows.length;
   const samples = [
-    ["backlog", "待安排", "整理旧候选的测试与验收历史"],
-    ["todo", "待推进", "核对生产发布范围和可回滚版本"],
-    ["in_progress", "进行中", "在 Issue 进展中及时显示 PR 冲突及负责人的实际处理状态"],
-    ["in_review", "待检查", "审阅当前候选的独立浏览器验证证据"],
-    ["done", "已完成", "为发布流程补齐启动验证与回滚文档"],
-    ["cancelled", "已取消", "修复旧候选验证记录在 Issue 进展中丢失的问题"],
+    ["backlog", "Backlog", "整理旧候选的测试与验收历史"],
+    ["todo", "Waiting", "核对生产发布范围和可回滚版本"],
+    ["in_progress", "WIP", "在 Issue 进展中及时显示 PR 冲突及负责人的实际处理状态"],
+    ["in_review", "WIP", "审阅当前候选的独立浏览器验证证据"],
+    ["done", "Done", "为发布流程补齐启动验证与回滚文档"],
+    ["cancelled", "Cancelled", "修复旧候选验证记录在 Issue 进展中丢失的问题"],
   ] as const;
   const active = issueRows[0]!.board!;
   for (const [status, , title] of samples) {
@@ -1827,6 +1829,7 @@ async function checkBoardColumnWidths() {
       board: {
         ...active,
         status,
+        ...(status === "todo" ? { wait_hint: "ci" } : {}),
         stages_done: 2,
         stages_total: 4,
         attention_count: 1,
@@ -1897,9 +1900,9 @@ async function checkBoardColumnWidths() {
               ?.getBoundingClientRect();
             return rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth;
           }, status);
-        const activeTab = page.getByRole("tab", { name: /^进行中/, selected: true });
+        const activeTab = page.getByRole("tab", { name: /^WIP/, selected: true });
         await activeTab.waitFor();
-        const ongoingColumn = board.getByRole("region", { name: "进行中列", exact: true });
+        const ongoingColumn = board.getByRole("region", { name: "WIP列", exact: true });
         const cdp = await context.newCDPSession(page);
         const swipe = async (x: number, y: number, dx: number, dy: number) => {
           await cdp.send("Input.dispatchTouchEvent", {
@@ -1916,7 +1919,7 @@ async function checkBoardColumnWidths() {
         };
         await swipe(195, 560, 0, -280);
         await page.waitForFunction(
-          () => document.querySelector('[aria-label="进行中列"]')!.scrollTop > 0,
+          () => document.querySelector('[aria-label="WIP列"]')!.scrollTop > 0,
         );
         await waitForScrollToSettle(ongoingColumn);
         const readingTop = await ongoingColumn.evaluate((column) => column.scrollTop);
@@ -1939,7 +1942,7 @@ async function checkBoardColumnWidths() {
         await swipe(195, 560, 0, -280);
         await page.waitForFunction(() => {
           const title = document.activeElement;
-          const column = title?.closest('[aria-label="进行中列"]');
+          const column = title?.closest('[aria-label="WIP列"]');
           return (
             title &&
             column &&
@@ -1967,7 +1970,12 @@ async function checkBoardColumnWidths() {
         await page.screenshot({ path: join(output, "board-focused-reading-position-390.png") });
         await activeTab.focus();
         await swipe(350, 350, -320, 0);
-        const doneTab = page.getByRole("tab", { name: /^已完成/, selected: true });
+        const waitingTab = page.getByRole("tab", { name: /^Waiting/, selected: true });
+        await waitingTab.waitFor();
+        await waitForCardInViewport("todo");
+        await card("todo").getByText("等 CI", { exact: true }).waitFor();
+        await waitingTab.press("ArrowRight");
+        const doneTab = page.getByRole("tab", { name: /^Done/, selected: true });
         await doneTab.waitFor();
         assert(
           await ongoingColumn.evaluate((column) => (column as HTMLElement).inert),
@@ -1987,6 +1995,7 @@ async function checkBoardColumnWidths() {
         await page.screenshot({ path: join(output, "board-touch-390.png") });
         const doneOffset = await board.evaluate((element) => element.scrollLeft);
         await doneTab.press("ArrowLeft");
+        await waitingTab.press("ArrowLeft");
         await activeTab.waitFor();
         await waitForCardInViewport("in_review");
         await board.evaluate((element, left) => (element.scrollLeft = left), doneOffset);
@@ -1997,6 +2006,7 @@ async function checkBoardColumnWidths() {
         );
         await waitForCardInViewport("in_review");
         await activeTab.press("ArrowRight");
+        await waitingTab.press("ArrowRight");
         await doneTab.waitFor();
         await waitForCardInViewport("done");
         await resizeBoard(844, 390);
@@ -2040,22 +2050,22 @@ async function checkBoardColumnWidths() {
         }
         await doneTab.focus();
         await swipe(40, 350, 320, 0);
-        await activeTab.waitFor();
+        await waitingTab.waitFor();
         await waitForScrollToSettle();
-        await waitForCardInViewport("in_review");
+        await waitForCardInViewport("todo");
         assert(
-          await activeTab.isVisible(),
+          await waitingTab.isVisible(),
           "swiping still changes the selected column after rotation",
         );
-        await page.getByRole("tab", { name: /^已取消/ }).click();
-        await page.getByRole("tab", { name: /^已取消/, selected: true }).waitFor();
+        await page.getByRole("tab", { name: /^Cancelled/ }).click();
+        await page.getByRole("tab", { name: /^Cancelled/, selected: true }).waitFor();
         await waitForCardInViewport("cancelled");
         await minimumWidth("cancelled");
         await card("cancelled")
           .getByText("Issue 已取消 · 1 项执行收尾中", { exact: true })
           .waitFor();
 
-        const backlogTab = page.getByRole("tab", { name: /^待安排/ });
+        const backlogTab = page.getByRole("tab", { name: /^Backlog/ });
         const backlogTitle = card("backlog").getByRole("button", {
           name: samples[0][2],
           exact: true,
@@ -2093,6 +2103,36 @@ async function checkBoardColumnWidths() {
         }
         assert.equal(await boardFits(), width === 1920);
         if (width === 1920) {
+          const waited = issueRows.find((row) => row.issue_id === "board-todo")!;
+          const initialWait = waited.board!;
+          const waitingColumn = board.getByRole("region", { name: "Waiting列", exact: true });
+          const wipColumn = board.getByRole("region", { name: "WIP列", exact: true });
+          const ciHint = waitingColumn
+            .locator('[data-issue-id="board-todo"]')
+            .getByText("等 CI", { exact: true });
+          await ciHint.waitFor();
+          await page.screenshot({ path: join(output, "board-waiting-ci-1920.png") });
+          waited.board = { ...initialWait, column: "wip" };
+          delete waited.board.wait_hint;
+          try {
+            const event = {
+              event_seq: ++seq,
+              object_type: "run",
+              object_id: "resumed-board-owner",
+              kind: "run.manager_started",
+              created_at: new Date().toISOString(),
+            };
+            for (const stream of streams) {
+              stream.write(
+                `id: ${event.event_seq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`,
+              );
+            }
+            await wipColumn.locator('[data-issue-id="board-todo"]').waitFor();
+            await ciHint.waitFor({ state: "hidden" });
+            await page.screenshot({ path: join(output, "board-resumed-wip-1920.png") });
+          } finally {
+            waited.board = initialWait;
+          }
           const terminalCards = [
             ["done", "Issue 已完成"],
             ["cancelled", "Issue 已取消"],
@@ -2137,7 +2177,7 @@ async function checkBoardColumnWidths() {
           await page.waitForFunction(
             () => document.querySelector('[aria-label="看板列"]')!.scrollLeft > 0,
           );
-          const toggle = board.getByRole("button", { name: /^已取消/ });
+          const toggle = board.getByRole("button", { name: /^Cancelled/ });
           await toggle.click();
           assert.equal(await toggle.getAttribute("aria-expanded"), "false");
           assert.equal(await card("cancelled").isVisible(), false);

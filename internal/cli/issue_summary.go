@@ -20,6 +20,13 @@ func printIssuePage(e *Env, p protocol.IssuePage) error {
 		execution := v.Execution
 		if v.Board != nil {
 			execution = &v.Board.Execution
+			if v.Board.Column != "" {
+				fmt.Fprintf(w, "  Board column: %s", v.Board.Column)
+				if v.Board.WaitHint != "" {
+					fmt.Fprintf(w, " (%s)", v.Board.WaitHint)
+				}
+				fmt.Fprintln(w)
+			}
 		}
 		if execution != nil {
 			printIssueExecution(w, *execution)

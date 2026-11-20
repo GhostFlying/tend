@@ -1247,7 +1247,7 @@ test.each([
     const live = new LiveData({
       async get<T>(path: string): Promise<T> {
         const items =
-          new URL(path, "https://tend.invalid").searchParams.get("board_status") === "todo"
+          new URL(path, "https://tend.invalid").searchParams.get("board_column") === "waiting"
             ? [
                 {
                   issue_id: "pending",
@@ -1264,7 +1264,7 @@ test.each([
     });
     try {
       live.issues.board.open({});
-      const column = live.issues.board.columns.get("todo")!.read.state;
+      const column = live.issues.board.columns.get("waiting")!.read.state;
       const reason = () => column.get().value?.items?.[0]?.board?.queue_reason?.message;
       await settle();
       expect(reason()).toBe("Waiting for owner");

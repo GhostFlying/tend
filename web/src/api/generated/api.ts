@@ -236,6 +236,16 @@ export type ActionStatus = "pending" | "ready" | "dispatched" | "done" | "cancel
 export type RelationDirection = "outgoing" | "incoming";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBoardColumn".
+ */
+export type IssueBoardColumn = "backlog" | "wip" | "waiting" | "done" | "cancelled";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueBoardWaitHint".
+ */
+export type IssueBoardWaitHint = "ci" | "decision";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "MessagingPublication".
  */
 export type MessagingPublication = {
@@ -5820,6 +5830,9 @@ export interface IssueNotificationSettings {
  */
 export interface IssuePage {
   assignees?: IssueAssignee[];
+  column_counts?: {
+    [k: string]: number | undefined;
+  };
   counts?: {
     [k: string]: number | undefined;
   };
@@ -5859,6 +5872,7 @@ export interface IssueSummary {
 export interface IssueBoardCard {
   attention_count: number;
   children?: IssueChildProgress;
+  column?: IssueBoardColumn;
   execution: ExecutionCounts;
   notification_due_at?: number;
   owner_attention_count?: number;
@@ -5871,6 +5885,7 @@ export interface IssueBoardCard {
   stages_done: number;
   stages_total: number;
   status: IssueWorkStatus;
+  wait_hint?: IssueBoardWaitHint;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

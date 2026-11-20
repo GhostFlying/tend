@@ -8559,6 +8559,9 @@
         "children": {
           "$ref": "#/definitions/IssueChildProgress"
         },
+        "column": {
+          "$ref": "#/definitions/IssueBoardColumn"
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionCounts"
         },
@@ -8594,6 +8597,9 @@
         },
         "status": {
           "$ref": "#/definitions/IssueWorkStatus"
+        },
+        "wait_hint": {
+          "$ref": "#/definitions/IssueBoardWaitHint"
         }
       },
       "required": [
@@ -8605,6 +8611,25 @@
       ],
       "title": "IssueBoardCard",
       "type": "object"
+    },
+    "IssueBoardColumn": {
+      "enum": [
+        "backlog",
+        "wip",
+        "waiting",
+        "done",
+        "cancelled"
+      ],
+      "title": "IssueBoardColumn",
+      "type": "string"
+    },
+    "IssueBoardWaitHint": {
+      "enum": [
+        "ci",
+        "decision"
+      ],
+      "title": "IssueBoardWaitHint",
+      "type": "string"
     },
     "IssueChildProgress": {
       "additionalProperties": false,
@@ -11324,6 +11349,12 @@
             "$ref": "#/definitions/IssueAssignee"
           },
           "type": "array"
+        },
+        "column_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
         },
         "counts": {
           "additionalProperties": {
