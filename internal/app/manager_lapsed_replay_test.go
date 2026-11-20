@@ -12,6 +12,11 @@ import (
 
 func lapsedReplyFixture(t *testing.T) (*harness, protocol.Assignment, string) {
 	t.Helper()
+	return lapsedReplyFixtureForTurn(t, "original-turn")
+}
+
+func lapsedReplyFixtureForTurn(t *testing.T, native string) (*harness, protocol.Assignment, string) {
+	t.Helper()
 	h, _, _, as, source := reviewManagerAssignment(t)
 	selection, named, err := h.app.HostedRuntimeSelection(t.Context(), as.Manager.ConversationID)
 	if err != nil || !named {
@@ -42,8 +47,15 @@ func lapsedReplyFixture(t *testing.T) (*harness, protocol.Assignment, string) {
 	}
 	for sequence := int64(1); sequence <= 19; sequence++ {
 		body := json.RawMessage(`{"thread_id":"native","native":{"Kind":"request_usage"}}`)
+		if sequence == 16 && native != "original-turn" {
+			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"native","root_turn_id":"original-turn","native":{"Kind":"turn_started","TurnID":%q}}`, native))
+		}
 		if sequence >= 17 {
-			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"native","native":{"Kind":"agent_message_delta","TurnID":"original-turn","ItemID":"original-item","Text":"part%d"}}`, sequence))
+			root := ""
+			if native != "original-turn" {
+				root = "original-turn"
+			}
+			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"native","root_turn_id":%q,"native":{"Kind":"agent_message_delta","TurnID":%q,"ItemID":"original-item","Text":"part%d"}}`, root, native, sequence))
 		}
 		if op := h.runAs(as, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: body}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
@@ -116,6 +128,34 @@ func TestFault_LapsedManagerReplaysOnlyItsFrozenDatabasePrefix(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestContinuedManagerReplyPrefixSettlesOriginalClose(t *testing.T) {
+	h, as, closeID := lapsedReplyFixtureForTurn(t, "continued-turn")
+	scope, err := h.app.LapsedManagerReplyReplay(t.Context(), as.Manager.ConversationID)
+	if err != nil || scope == nil || len(scope.Events) != 3 {
+		t.Fatal(scope, err)
+	}
+	var consumed []int64
+	for _, event := range scope.Events {
+		if event.DeliveryTurn != "original-turn" {
+			t.Fatal("lost original delivery", event)
+		}
+		consumed = append(consumed, event.Sequence)
+	}
+	command := RecordAgentMessage{PreservePrefix: true, DeliveryTurn: "original-turn"}
+	text := "part17part18part19"
+	env := h.env(command.Operation(), protocol.Target{Type: "message"}, map[string]any{"body": text, "turn_id": "continued-turn", "item_id": "original-item", "status": protocol.AssistantInterrupted}, nil)
+	if op := h.exec(protocol.Principal{Kind: protocol.PrincipalMainAgent, Subject: "main", Thread: "native"}, env, command); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.app.AcknowledgeManagerReplyPrefix(t.Context(), as.RunID, 19, "native", "continued-turn", "original-item", text, consumed); err != nil {
+		t.Fatal(err)
+	}
+	frozen := h.env(protocol.OpManagerNativeReply, runTarget(as.RunID), protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`), LastSequence: 19}, nil)
+	if op, err := h.app.Execute(t.Context(), runPrincipal(as.RunID, as.Role), frozen, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
 	}
 }
 
@@ -398,7 +438,7 @@ func TestDatabaseReplayExtendsPublishedInterruptedBackgroundPrefix(t *testing.T)
 	payload["body"], payload["status"] = "original late tail", protocol.AssistantInterrupted
 	record()
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		return durableManagerReplyPrefix(t.Context(), tx.Q(), turn.ThreadID, turn.TurnID, "original-item", payload["body"].(string))
+		return durableManagerReplyPrefix(t.Context(), tx.Q(), turn.ThreadID, turn.TurnID, turn.TurnID, "original-item", payload["body"].(string))
 	}); err != nil {
 		t.Fatal("published original prefix did not extend with its durable buffer", err)
 	}

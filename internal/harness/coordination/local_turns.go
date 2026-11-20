@@ -45,6 +45,9 @@ func (d *Driver) forwardNative(ctx context.Context, t harness.Thread, e harness.
 	d.pendingLocal[t.ID()] = root
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); delete(d.pendingLocal, t.ID()); d.mu.Unlock() }()
+	if err := harness.PrepareUsageDispatch(ctx, t, d.BeforeUsageDispatch); err != nil {
+		return err
+	}
 	id, err := t.StartTurn(ctx, input)
 	if err != nil {
 		return errors.Join(harness.ErrRetainedResumePending, err)

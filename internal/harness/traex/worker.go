@@ -318,13 +318,9 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			return nil, err
 		}
 	}
-	if spec.BeforeUsageDispatch != nil {
-		if native, ok := th.(harness.NativeUsageThread); ok {
-			if err := spec.BeforeUsageDispatch(startupCtx, native.UsageSource()); err != nil {
-				release(err)
-				return nil, err
-			}
-		}
+	if err := harness.PrepareUsageDispatch(startupCtx, th, spec.BeforeUsageDispatch); err != nil {
+		release(err)
+		return nil, err
 	}
 	turnID, err := th.StartTurn(startupCtx, harness.TurnInput{Text: input, Model: profile.Model, Effort: profile.Effort})
 	if err != nil {
@@ -471,6 +467,10 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 						break events
 					}
 					if more {
+						if err := harness.PrepareUsageDispatch(ctx, th, spec.BeforeUsageDispatch); err != nil {
+							w.err = err
+							return
+						}
 						next, err := th.StartTurn(ctx, harness.TurnInput{Text: nextInput, Model: profile.Model, Effort: profile.Effort, UserMessageID: protocol.NativeObjectID(protocol.PrefixMessage, th.ID(), turnID+"/"+callID)})
 						if err != nil || next == "" {
 							w.err = fmt.Errorf("%w: continuation of native turn %s has no confirmed start receipt: %v", harness.ErrRetainedResumePending, turnID, err)

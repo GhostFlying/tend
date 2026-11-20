@@ -747,12 +747,8 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 	case "inject":
 		return nil, t.InjectDeveloper(ctx, r.Texts...)
 	case "turn":
-		if d.BeforeUsageDispatch != nil {
-			if native, ok := t.(harness.NativeUsageThread); ok {
-				if err := d.BeforeUsageDispatch(ctx, native.UsageSource()); err != nil {
-					return nil, err
-				}
-			}
+		if err := harness.PrepareUsageDispatch(ctx, t, d.BeforeUsageDispatch); err != nil {
+			return nil, err
 		}
 		return t.StartTurn(ctx, r.Input)
 	case "interrupt":
@@ -767,12 +763,8 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			return s.ContextUsage(ctx)
 		}
 	case "compact":
-		if d.BeforeUsageDispatch != nil {
-			if native, ok := t.(harness.NativeUsageThread); ok {
-				if err := d.BeforeUsageDispatch(ctx, native.UsageSource()); err != nil {
-					return nil, err
-				}
-			}
+		if err := harness.PrepareUsageDispatch(ctx, t, d.BeforeUsageDispatch); err != nil {
+			return nil, err
 		}
 		if s, ok := t.(harness.ContextManager); ok {
 			return nil, s.Compact(ctx)

@@ -56,6 +56,15 @@ func (r *Runner) flushStartReports(ctx context.Context, as protocol.Assignment) 
 	if err != nil {
 		return err
 	}
+	if len(reports) == 0 {
+		return nil
+	}
+	desired, err := r.cfg.Journal.ReceivedDesired(ctx, as.RunID)
+	if err != nil || desired == protocol.DesiredStopped {
+		// The original final result can settle independently. Any obsolete
+		// startup commands become historical observations at settlement.
+		return err
+	}
 	for _, env := range reports {
 		op, err := r.sendOnce(ctx, runCredential(as), &env)
 		if err != nil {

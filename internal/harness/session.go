@@ -56,6 +56,14 @@ type ThreadLocation interface {
 // Remote proxies deliberately do not expose an executor path to the server.
 type NativeUsageThread interface{ UsageSource() nativeusage.Source }
 
+// PrepareUsageDispatch activates the executor-local usage source before sending new native input.
+func PrepareUsageDispatch(ctx context.Context, thread Thread, before func(context.Context, nativeusage.Source) error) error {
+	if native, ok := thread.(NativeUsageThread); ok && before != nil {
+		return before(ctx, native.UsageSource())
+	}
+	return nil
+}
+
 // NativeUsageWriterObserver independently verifies a retained writer's exit.
 // A new process or resumed thread alone does not prove the old writer stopped.
 type NativeUsageWriterObserver interface {
