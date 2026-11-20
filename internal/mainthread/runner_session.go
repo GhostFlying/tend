@@ -284,7 +284,13 @@ func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event,
 	if !ok {
 		return errors.New("manager event has no original receipt identity")
 	}
-	return t.app.AcknowledgeManagerEvent(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
+	if origin.run == t.run && !e.Historical && !e.Disconnected &&
+		(e.Native == nil || e.Native.Kind != harness.EventCoordinatorHistoryEnd) {
+		return t.app.RecoverManagerEventACK(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
+	}
+	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return t.app.AcknowledgeManagerEvent(attempt, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
 }
 
 func (t *runnerTransport) ReplayToolResult(ctx context.Context, e coordination.Event) (harness.ToolResult, error) {

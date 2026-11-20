@@ -2518,6 +2518,8 @@ Agent instructions 属于各自责任。实施与故障回归见
 详见 `docs/plans/manager-receipt-replay.md`。本决策不增加通信必填字段、改变有效 worker 输入或更换原生执行身份，无协议代次变化，也不新增通用请求账本。
 
 
+D251 补充：负责人事件的业务处理与 applied 确认分开。保留原 Run、事件序号及 flush 选择范围，写入未进入事务回调且遇到短暂争用时，在原责任、控制、租约仍有效的范围内作有界补写。写入进入事务后返回错误时，检查原事件与确切的 delta 覆盖；只有其 durable 标记全齐才继续。已执行的事件 handler 和工具不会因 ACK 补写再次调用。历史结清和真实停止沿原路径。此阶段保持 wire、journal 及持久事件格式。见[实施计划](plans/manager-run-timeout-recovery.md)。
+
 ## D252：自主执行、独立历史读取与短停机安装
 
 责任 Agent 默认自行决定是否审阅。创建 Issue/Task 不再自动添加独立验收义务；

@@ -176,6 +176,10 @@ func TestFault_ManagerContinuesAdmittedWorkWithoutTend(t *testing.T) {
 	runRunnerManager(t, false, false, false, "offline-turn")
 }
 
+func TestFault_ManagerAcknowledgesOriginalEventAfterWriterDeadline(t *testing.T) {
+	runRunnerManager(t, false, false, false, "ack_writer")
+}
+
 func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
 	runRunnerManager(t, false, false, false, "urgent")
 }
@@ -213,6 +217,11 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var wg sync.WaitGroup
+	const ackMarker = "writer-deadline-item"
+	var recoveredACK <-chan store.WriteSource
+	if archiveMode == "ack_writer" {
+		recoveredACK = holdManagerWriterAtACK(ctx, s, ackMarker)
+	}
 	category := protocol.DefaultIssueManagerCategory
 	zero := int64(0)
 	execute := func(op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
@@ -383,6 +392,24 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				return false
 			}
 			return true
+		}
+		if recoveredACK != nil {
+			th.Emit(harness.Event{Kind: harness.EventItemStarted, ItemType: harness.ItemAgentMessage, TurnID: turn, ItemID: ackMarker})
+			timer := time.NewTimer(20 * time.Second)
+			defer timer.Stop()
+			select {
+			case observed := <-recoveredACK:
+				if observed.RunID == "" || observed.RunID != observed.AttachmentRunID ||
+					s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=? AND method='close'`, observed.RunID) != 0 {
+					failures <- "ACK recovery did not preserve the live original attachment"
+					return "failed"
+				}
+			case <-timer.C:
+				failures <- "original ACK never recovered from writer deadline"
+				return "failed"
+			case <-ctx.Done():
+				return "failed"
+			}
 		}
 		var item protocol.IssueView
 		if !invoke("issues_read", map[string]any{}, &item) {
@@ -1063,6 +1090,9 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		} else if strings.Count(visible, completeText) != 1 || strings.Contains(logs, processFragment) {
 			t.Fatal("complete item was not published exactly once", visible, logs)
 		}
+	}
+	if recoveredACK != nil && (attempts.Load() != 1 || s.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE kind='item_started' AND item_id=?`, ackMarker) != 1) {
+		t.Fatal("writer deadline replayed the original turn or handler")
 	}
 	if archiveMode != "" && (s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager'`) != 1) {
 		t.Fatal("archive recovery replaced or repeated the original manager responsibility")

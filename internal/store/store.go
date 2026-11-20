@@ -377,6 +377,20 @@ func IsUniqueViolation(err error) bool {
 	return code == sqlite3.SQLITE_CONSTRAINT_UNIQUE || code == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }
 
+// IsTransientSQLite reports a bounded database attempt that timed out or
+// encountered lock contention. Callers must independently assess write safety.
+func IsTransientSQLite(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	se, ok := errors.AsType[*sqlite.Error](err)
+	if !ok {
+		return false
+	}
+	code := se.Code() & 0xff
+	return code == sqlite3.SQLITE_BUSY || code == sqlite3.SQLITE_LOCKED
+}
+
 // MarkChanged records a transaction-local view invalidation. It is discarded on rollback.
 func (t *Tx) MarkChanged(view string) {
 	if t.changed == nil {
