@@ -1087,11 +1087,6 @@ func outcome(env protocol.Envelope) []any {
 }
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
-	if protocol.RunnerOwnsExecution(as.Protocol) {
-		if err := r.retry(ctx, func() error { return r.flushStartReports(ctx, as) }); err != nil {
-			return &completionPending{err}
-		}
-	}
 	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
 	if err != nil {
 		return &completionPending{err}
@@ -1115,6 +1110,19 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 			// credentials may already be revoked; preserve outstanding facts
 			// as history instead of interpreting Forbidden as business success.
 			return r.cleanupReportedRunWithStop(ctx, as, stop)
+		}
+	}
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		flush := func() error { return r.flushStartReports(ctx, as) }
+		if strictResume != nil {
+			// Let Hello deliver an authoritative Stop while the original
+			// startup receipt remains pending.
+			if err := flush(); err != nil {
+				r.requestReconcile()
+				return &completionPending{err}
+			}
+		} else if err := r.retry(ctx, flush); err != nil {
+			return &completionPending{err}
 		}
 	}
 	req, ok, err := r.cfg.Journal.RequestForRun(ctx, as.RunID)
