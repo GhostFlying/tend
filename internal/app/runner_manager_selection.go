@@ -127,11 +127,19 @@ func (a *App) AgentConversationClaimed(ctx context.Context, conversation string)
 	return ready, err
 }
 
+const runnerReceiptHistoryTaskQuery = pendingManagerReceiptRuns + `
+ SELECT r.task_id FROM pending_receipt_runs p
+ CROSS JOIN runs r ON r.run_id=p.run_id
+ CROSS JOIN issue_manager_tasks m ON m.task_id=r.task_id
+ WHERE m.issue_id=? AND r.observed_state IN ('finished','failed')
+ AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+ ORDER BY r.created_at LIMIT 1`
+
 func runnerReceiptSelection(ctx context.Context, q store.Querier, issue string) (hostedconfig.Selection, bool, error) {
 	var task string
 	err := q.QueryRowContext(ctx, `SELECT r.task_id FROM issue_manager_tasks m JOIN runs r USING(task_id) JOIN leases l USING(run_id) JOIN plan_actions a ON a.action_id=r.action_id WHERE m.issue_id=? AND l.status='active' AND r.observed_state IN ('starting','running','waiting','interrupted','unknown') AND json_extract(a.trigger_json,'$.receipt_only')=1 ORDER BY r.created_at LIMIT 1`, issue).Scan(&task)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = q.QueryRowContext(ctx, `SELECT r.task_id FROM issue_manager_tasks m JOIN runs r USING(task_id) WHERE m.issue_id=? AND r.observed_state IN ('finished','failed') AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity AND EXISTS(SELECT 1 FROM hosted_executions h JOIN native_turn_receipts_pending p ON p.request_id=h.execution_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id) ORDER BY r.created_at LIMIT 1`, issue).Scan(&task)
+		err = q.QueryRowContext(ctx, runnerReceiptHistoryTaskQuery, issue).Scan(&task)
 		if errors.Is(err, sql.ErrNoRows) {
 			return hostedconfig.Selection{}, false, nil
 		}

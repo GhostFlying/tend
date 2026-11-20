@@ -11,11 +11,37 @@ import (
 	"github.com/GhostFlying/tend/internal/store"
 )
 
+// Keep the pending receipts on the outer side of each join. Joining through
+// hosted_executions can scan or materialize both execution history tables.
+const pendingManagerReceiptRuns = `WITH pending_receipt_runs(run_id) AS (
+ SELECT json_extract(h.private_snapshot,'$.runner_run_id')
+ FROM native_turn_receipts_pending p
+ CROSS JOIN local_hosted_executions h ON h.execution_id=p.request_id
+ UNION ALL
+ SELECT json_extract(h.private_snapshot,'$.runner_run_id')
+ FROM native_turn_receipts_pending p
+ CROSS JOIN runner_coordination_executions h ON h.execution_id=p.request_id
+)`
+
+const managerHistoryRunQuery = pendingManagerReceiptRuns + `
+ SELECT run_id FROM (
+  SELECT r.run_id,r.created_at FROM pending_receipt_runs p
+  CROSS JOIN runs r ON r.run_id=p.run_id
+  WHERE r.task_id=?1 AND r.role='issue_manager' AND r.observed_state IN ('finished','failed')
+  AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+  UNION ALL
+  SELECT r.run_id,r.created_at FROM runs r
+  WHERE r.task_id=?1 AND r.role='issue_manager' AND r.observed_state IN ('finished','failed')
+  AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+  AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
+ )
+ ORDER BY created_at DESC LIMIT 1`
+
 // Original receipts are read through the host control channel after physical
 // close. They neither acquire a lease nor create another business execution.
 func managerHistoryRun(ctx context.Context, q store.Querier, task string) (string, error) {
 	var run string
-	err := q.QueryRowContext(ctx, `SELECT r.run_id FROM runs r WHERE r.task_id=? AND r.role='issue_manager' AND r.observed_state IN ('finished','failed') AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity AND (EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0) OR EXISTS(SELECT 1 FROM hosted_executions h JOIN native_turn_receipts_pending p ON p.request_id=h.execution_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=r.run_id)) ORDER BY r.created_at DESC LIMIT 1`, task).Scan(&run)
+	err := q.QueryRowContext(ctx, managerHistoryRunQuery, task).Scan(&run)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
