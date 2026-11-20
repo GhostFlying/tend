@@ -29,7 +29,7 @@ func TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer j.Close()
-	as := protocol.Assignment{Protocol: protocol.CurrentRunnerProtocol, RunID: "run_original", LeaseID: "lease_original", Role: protocol.RoleIssueManager, Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{ConversationID: "original-responsibility"}}
+	as := protocol.Assignment{Protocol: 6, RunID: "run_original", LeaseID: "lease_original", Role: protocol.RoleIssueManager, Execution: &protocol.RunExecutionPin{}, Manager: &protocol.IssueManagerAssignment{ConversationID: "original-responsibility"}}
 	if err := j.AcceptAssignment(ctx, as, ""); err != nil {
 		t.Fatal(err)
 	}

@@ -285,7 +285,7 @@ func TestRecoveredPauseCollectionReestablishesOriginalLease(t *testing.T) {
 				case protocol.OpRunnerHeartbeat:
 					var hb protocol.HeartbeatPayload
 					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
-						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						hb.Runs[0].RunID != as.RunID || hb.Runs[0].LeaseID != as.LeaseID {
 						t.Error("collection heartbeat did not track the original lease", hb.Runs, err)
 						return
 					}
@@ -424,7 +424,7 @@ func TestRecoveredPauseReportObservesHandbackAndStop(t *testing.T) {
 				case protocol.OpRunnerHeartbeat:
 					var hb protocol.HeartbeatPayload
 					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
-						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						hb.Runs[0].RunID != as.RunID || hb.Runs[0].LeaseID != as.LeaseID {
 						t.Error("held result missed its original control channel", hb.Runs, err)
 						return
 					}

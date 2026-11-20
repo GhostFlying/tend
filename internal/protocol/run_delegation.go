@@ -7,6 +7,7 @@ package protocol
 func RunnerOwnsExecution(version int64) bool { return version >= 7 }
 
 const (
-	EventWorkerOutcome = "worker.outcome"
-	EventWorkerStopped = "worker.physical_exit"
+	EventWorkerSubmitted = "worker.result_submitted"
+	EventWorkerOutcome   = "worker.outcome"
+	EventWorkerStopped   = "worker.physical_exit"
 )

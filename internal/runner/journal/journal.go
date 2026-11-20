@@ -549,7 +549,7 @@ func (j *Journal) WorkerDone(ctx context.Context, runID string, result json.RawM
 			return err
 		}
 		var delegated bool
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(assignment_json,'$.protocol'),0)>=7 AND phase<>'worker_done' FROM runs WHERE run_id=?`, runID).Scan(&delegated); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(assignment_json,'$.protocol'),0)>=7 AND COALESCE(json_extract(assignment_json,'$.event_sync'),0)=1 AND phase<>'worker_done' FROM runs WHERE run_id=?`, runID).Scan(&delegated); err != nil {
 			return err
 		}
 		if delegated {

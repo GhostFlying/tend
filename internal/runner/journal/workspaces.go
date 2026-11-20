@@ -28,7 +28,7 @@ func (j *Journal) ConfirmStopped(ctx context.Context, id string) error {
 	defer j.WakeUsage()
 	return j.tx(ctx, func(tx *sql.Tx) error {
 		var publish bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=? AND stopped_confirmed=0 AND json_extract(assignment_json,'$.protocol')>=7 AND json_extract(assignment_json,'$.role')<>'issue_manager')`, id).Scan(&publish); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=? AND stopped_confirmed=0 AND json_extract(assignment_json,'$.protocol')>=7 AND json_extract(assignment_json,'$.event_sync')=1 AND json_extract(assignment_json,'$.role')<>'issue_manager')`, id).Scan(&publish); err != nil {
 			return err
 		}
 		if publish {
