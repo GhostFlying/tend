@@ -100,6 +100,7 @@ func TestRunObservationRejectsInactiveIdentity(t *testing.T) {
 			case "wrong_role":
 				p.Role = protocol.RoleAccept
 			case "expired":
+				renewalBoundFixture(t, h, as)
 				h.clock.Advance(24 * time.Hour)
 			default:
 				err := h.store.Write(t.Context(), func(tx *store.Tx) error {

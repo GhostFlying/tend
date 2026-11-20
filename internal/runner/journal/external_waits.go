@@ -96,3 +96,12 @@ func (j *Journal) SaveSessionStopReport(ctx context.Context, run string, env *pr
 		return err
 	})
 }
+
+func (j *Journal) PendingSessionStopRuns(ctx context.Context) ([]protocol.Assignment, error) {
+	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN
+      (SELECT run_id FROM session_stop_reports WHERE delivered=0 AND json_extract(envelope_json,'$.payload.physical_exit')=1) ORDER BY run_id`)
+}
+
+func (j *Journal) AckSessionStop(ctx context.Context, run, request string) error {
+	return j.exec(ctx, `UPDATE session_stop_reports SET delivered=1 WHERE run_id=? AND delivered=0 AND json_extract(envelope_json,'$.request_id')=?`, run, request)
+}

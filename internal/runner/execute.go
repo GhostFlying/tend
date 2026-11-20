@@ -593,7 +593,11 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
-	w, err := startWorker(runCtx, harness.WorkerSpec{SessionContinuation: as.SessionContinuation, WaitExternal: waitExternal, ExternalWaitContinuation: as.ExternalWaitContinuation, PredecessorStateDir: predecessorState, Delegated: protocol.RunnerOwnsExecution(as.Protocol), AttachOriginal: attachOriginal, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
+	var localTurns harness.LocalTurns
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		localTurns = journal.LocalTurns{Journal: r.cfg.Journal, RunID: as.RunID}
+	}
+	w, err := startWorker(runCtx, harness.WorkerSpec{LocalTurns: localTurns, SessionContinuation: as.SessionContinuation, WaitExternal: waitExternal, ExternalWaitContinuation: as.ExternalWaitContinuation, PredecessorStateDir: predecessorState, Delegated: protocol.RunnerOwnsExecution(as.Protocol), AttachOriginal: attachOriginal, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},

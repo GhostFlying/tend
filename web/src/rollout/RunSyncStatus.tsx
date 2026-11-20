@@ -31,7 +31,9 @@ export function RunSyncStatus({ facts }: { facts: RunSyncObservation | undefined
       {facts.last_progress_at
         ? ` · 最后进展于${since(facts.last_progress_at, now)}（${facts.last_progress}）`
         : ""}
-      {advertised > received ? ` · 已连续收到第 ${received} 条，runner 已记录到第 ${advertised} 条` : ""}
+      {advertised > received
+        ? ` · 已连续收到第 ${received} 条，runner 已记录到第 ${advertised} 条`
+        : ""}
     </small>
   );
 }

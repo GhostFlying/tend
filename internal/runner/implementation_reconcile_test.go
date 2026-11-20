@@ -525,14 +525,9 @@ func TestImplementationResultRecoveryPreservesUncertaintyAndMissingFallback(t *t
 				}
 				return
 			}
-			err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun})
+			err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun, recoveryAttempt: before.Attempts})
 			after, afterRequests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
-			if scenario == "missing" {
-				failure, ok := errors.AsType[*stepError](err)
-				if !ok || failure.reason != "worker_interrupted_after_runner_restart" || !after.StoppedConfirmed || len(after.WorkerResult) != 0 || len(workers.stops) != 1 {
-					t.Fatal("missing result changed original interruption behavior", after, err)
-				}
-			} else if !isCompletionPending(err) || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(requests, afterRequests) || len(workers.stops) != 0 {
+			if !isCompletionPending(err) || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(requests, afterRequests) || len(workers.stops) != 0 {
 				t.Fatal("uncertain original submission was promoted or discarded", before, after, err)
 			}
 			if workers.starts != 0 || spaces.mutations != 0 {

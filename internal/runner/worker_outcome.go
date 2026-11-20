@@ -116,9 +116,10 @@ func nativeWorkerOutcome(run, thread string, attempt int, event harness.WorkerEv
 		return nil, nil
 	}
 	var body struct {
-		Thread string `json:"thread_id"`
-		Turn   string `json:"turn_id"`
-		Data   struct {
+		Continued bool   `json:"continues_run"`
+		Thread    string `json:"thread_id"`
+		Turn      string `json:"turn_id"`
+		Data      struct {
 			Turn struct {
 				ID     string `json:"id"`
 				Status string `json:"status"`
@@ -131,6 +132,9 @@ func nativeWorkerOutcome(run, thread string, attempt int, event harness.WorkerEv
 	if body.Thread != thread || body.Turn == "" || body.Data.Turn.ID != body.Turn {
 		return nil, errors.New("runner: original native terminal identity differs")
 	}
+	if body.Continued {
+		return nil, nil
+	}
 	status := body.Data.Turn.Status
 	if status != "completed" && status != "failed" && status != "interrupted" {
 		status = "unknown"
@@ -140,7 +144,7 @@ func nativeWorkerOutcome(run, thread string, attempt int, event harness.WorkerEv
 
 func (r *Runner) restoreWorkerOutcome(ctx context.Context, as protocol.Assignment, run journal.Run, p Prepared) (*workerOutcome, error) {
 	outcome, err := readWorkerOutcome(p.StateDir, as.RunID, run.Thread, run.Attempts)
-	if err != nil || outcome != nil {
+	if err != nil || outcome != nil && (!protocol.RunnerOwnsExecution(as.Protocol) || outcome.Source != "native_terminal") {
 		return outcome, err
 	}
 	// Old runs did not have an outcome file. A retained original terminal
@@ -148,15 +152,32 @@ func (r *Runner) restoreWorkerOutcome(ctx context.Context, as protocol.Assignmen
 	// event after its normal acknowledgement. Multiple old attempts without
 	// an attempt-bound receipt cannot borrow another attempt's terminal.
 	if run.Attempts != 1 {
-		return nil, nil
+		return outcome, nil
 	}
 	event, ok, err := r.cfg.Journal.LatestNativeTerminal(ctx, as.RunID, run.Thread)
-	if err != nil || !ok {
+	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		if outcome != nil && event.Kind == "native.turn_started" {
+			var started struct {
+				Turn string `json:"turn_id"`
+			}
+			if err := json.Unmarshal(event.Body, &started); err != nil {
+				return nil, err
+			}
+			if started.Turn != outcome.TurnID {
+				return nil, nil
+			}
+		}
+		return outcome, nil
 	}
 	outcome, err = nativeWorkerOutcome(as.RunID, run.Thread, run.Attempts, harness.WorkerEvent{Kind: event.Kind, Body: event.Body})
 	if err != nil {
 		return nil, err
+	}
+	if outcome == nil {
+		return nil, nil
 	}
 	return saveWorkerOutcome(ctx, p.StateDir, *outcome)
 }

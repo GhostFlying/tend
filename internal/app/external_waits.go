@@ -605,13 +605,14 @@ func (a *App) ExternalWaitReplayCredential(ctx context.Context, run string, env 
 		return "", "", "", store.ErrNotFound
 	}
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
-		if !committedRunReceipt(ctx, tx.Q(), run, env) {
-			return store.ErrNotFound
-		}
-
 		r, e := store.GetRun(ctx, tx.Q(), run)
 		if e != nil {
 			return e
+		}
+		var stop protocol.SessionStopPayload
+		delegatedExit := env.Operation == protocol.OpRunsRecordSessionStop && protocol.RunnerOwnsExecution(r.Protocol) && json.Unmarshal(env.Payload, &stop) == nil && stop.PhysicalExit && stop.EventSequence >= 0
+		if !delegatedExit && !committedRunReceipt(ctx, tx.Q(), run, env) {
+			return store.ErrNotFound
 		}
 
 		if env.Operation == protocol.OpRunsYieldExternalWait {
@@ -654,7 +655,7 @@ func (RecordSessionStop) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{}, err
 	}
 	if p.PhysicalExit && protocol.RunnerOwnsExecution(r.Protocol) && r.Role == x.Principal.Role {
-		if _, err := tx.Exec(ctx, `UPDATE runs SET announced_event_sequence=MAX(announced_event_sequence,?),runner_stopped_at=CASE WHEN writer_state_sequence<=? AND runner_stopped_at=0 THEN ? ELSE runner_stopped_at END WHERE run_id=?`, p.EventSequence, p.EventSequence, x.Now.UnixMilli(), r.RunID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET announced_event_sequence=MAX(announced_event_sequence,?),runner_stopped_at=CASE WHEN writer_state_sequence<=? AND runner_stopped_at=0 THEN ? ELSE runner_stopped_at END, writer_state_sequence=MAX(writer_state_sequence,?) WHERE run_id=?`, p.EventSequence, p.EventSequence, x.Now.UnixMilli(), p.EventSequence, r.RunID); err != nil {
 			return Outcome{}, err
 		}
 		if p.ThreadID == "" {

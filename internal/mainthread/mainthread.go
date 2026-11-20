@@ -112,12 +112,27 @@ type turn struct {
 	requestID                        string
 	messageID                        string
 	turnID                           string
+	continuationID                   string // Current native turn within the original logical delivery.
 	done                             chan string
 	sourceMessageID, sourceRequestID string
 	sourceSeq                        int64
 	sources                          []string
 	finished, steerBlocked           bool
 	inputText                        string
+}
+
+func (a *turn) nativeTurnID() string {
+	if a.continuationID != "" {
+		return a.continuationID
+	}
+	return a.turnID
+}
+
+func eventDeliveryTurn(ev harness.Event) string {
+	if ev.CoordinatorRootTurn != "" {
+		return ev.CoordinatorRootTurn
+	}
+	return ev.TurnID
 }
 
 // New returns a Manager.
@@ -465,7 +480,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemUserMessage {
 			m.mu.Lock()
 			var consumedRequest, consumedMessage string
-			if a := m.active; a != nil && a.inputText != "" && a.inputText == ev.Text && (a.turnID == "" || a.turnID == ev.TurnID) && ev.ItemID != "" {
+			if a := m.active; a != nil && a.inputText != "" && a.inputText == ev.Text && (a.turnID == "" || a.turnID == eventDeliveryTurn(ev)) && ev.ItemID != "" {
 				consumedRequest = a.requestID
 				consumedMessage = a.messageID
 			}
@@ -477,11 +492,11 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			}
 
 			if m.cfg.ConversationID != "" && m.cfg.ConversationID != "main" {
-				if err := m.app.ConsumeIssueOwnerSteer(ctx, m.cfg.ConversationID, th.ID(), ev.TurnID, ev.Text, ev.ItemID); err != nil {
+				if err := m.app.ConsumeIssueOwnerSteer(ctx, m.cfg.ConversationID, th.ID(), eventDeliveryTurn(ev), ev.Text, ev.ItemID); err != nil {
 					return err
 				}
 			}
-			if err := m.consumeSteer(ctx, th.ID(), ev.TurnID, ev.Text, ev.ItemID); err != nil {
+			if err := m.consumeSteer(ctx, th.ID(), eventDeliveryTurn(ev), ev.Text, ev.ItemID); err != nil {
 				return err
 			}
 		}
@@ -892,7 +907,7 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		}
 	case ev.Kind == harness.EventTurnError:
 		m.mu.Lock()
-		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == eventDeliveryTurn(ev)) {
 			a.failure = ev.Failure
 		}
 		request := ""
@@ -905,13 +920,18 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 		}
 	case ev.Kind == harness.EventTurnStarted:
 		if ev.CoordinatorRootTurn != "" {
+			m.mu.Lock()
+			if a := m.active; a != nil && a.turnID == ev.CoordinatorRootTurn {
+				a.continuationID = ev.TurnID
+			}
+			m.mu.Unlock()
 			return nil
 		}
 		// One turn at a time: the first turn to start after a turn/start
 		// is that delivery's, even before the start response arrives.
 		m.mu.Lock()
 		var startRequest string
-		if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == eventDeliveryTurn(ev)) {
 			a.turnID = ev.TurnID
 			startRequest = a.requestID
 		}
@@ -965,9 +985,9 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 	if ev.Kind == harness.EventItemCompleted {
 		phase = "completed:" + string(ev.Tool.Status)
 	}
-	replyTo, _ := m.replyContext(ev.TurnID)
+	replyTo, _ := m.replyContext(eventDeliveryTurn(ev))
 	if backgroundTool(ev.Tool.Name) {
-		original, ok, err := m.app.TurnDelivery(ctx, th.ID(), ev.TurnID)
+		original, ok, err := m.app.TurnDelivery(ctx, th.ID(), eventDeliveryTurn(ev))
 		if err != nil {
 			return err
 		}
@@ -975,7 +995,7 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 			replyTo = original.MessageID
 		} else {
 			m.mu.Lock()
-			if a := m.active; a != nil && (a.turnID == "" || a.turnID == ev.TurnID) {
+			if a := m.active; a != nil && (a.turnID == "" || a.turnID == eventDeliveryTurn(ev)) {
 				replyTo = a.messageID
 			}
 			m.mu.Unlock()
@@ -993,7 +1013,7 @@ func (m *Manager) recordToolUse(ctx context.Context, th harness.Thread, ev harne
 	}
 	payload := map[string]any{"turn_id": ev.TurnID, "item_id": ev.ItemID, "reply_to": replyTo,
 		"tool": ev.Tool.Name, "input": protocol.RedactOwnerToolInput(ev.Tool.Name, ev.Tool.Input), "output": ev.Tool.Output, "status": ev.Tool.Status}
-	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase+"/source:"+replyTo, "conversation.record_tool_use", payload, app.RecordToolUse{})
+	return m.record(ctx, th, th.ID()+"/"+ev.TurnID+"/item:"+ev.ItemID+"/"+phase+"/source:"+replyTo, "conversation.record_tool_use", payload, app.RecordToolUse{DeliveryTurn: ev.CoordinatorRootTurn})
 }
 
 // record executes a conversation write of the main agent under a request
@@ -1598,7 +1618,7 @@ func (c Control) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult
 	a, th := m.active, m.thread
 	turnID := ""
 	if a != nil {
-		turnID = a.turnID
+		turnID = a.nativeTurnID()
 	}
 	m.mu.Unlock()
 	switch {
@@ -1628,7 +1648,7 @@ func (c Control) Deliver(ctx context.Context, d app.Delivery) app.DeliveryResult
 func (m *Manager) running(turnID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.active != nil && m.active.turnID == turnID
+	return m.active != nil && m.active.nativeTurnID() == turnID
 }
 
 // Reconcile implements dispatch.Handler for a stop a previous process left

@@ -22,6 +22,7 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	LocalTurns LocalTurns
 	// Delegated lets this executor continue the frozen agreement across native turns.
 	Delegated bool
 	// AttachOriginal limits local crash recovery to observing the original native process.

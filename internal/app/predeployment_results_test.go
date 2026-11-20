@@ -248,6 +248,7 @@ func TestPredeploymentResultRejectsMismatchedOrUncertainExecution(t *testing.T) 
 			case "upgrade-claim":
 				stage.Report.Evidence = []string{"upgrade:invented"}
 			case "expired":
+				renewalBoundFixture(t, h, as)
 				h.clock.Advance(2 * h.app.LeaseTTL())
 			case "old-run":
 				if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "Stop the original execution"}, Release{}); op.Status != protocol.OpSucceeded {

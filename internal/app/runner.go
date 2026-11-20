@@ -842,6 +842,10 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			stop(h.RunID, "the run is no longer wanted")
 			continue
 		}
+		if lease.MaintenanceExpired(now) {
+			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictRetain, Desired: desired, Reason: "original maintenance execution authorization expired"})
+			continue
+		}
 		protected, err := activeMaintenanceRunProtection(ctx, q, run)
 		if err != nil {
 			return Outcome{}, err
@@ -1318,6 +1322,11 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 					return protocol.Errorf(protocol.CodeForbidden, "lease belongs to another runner journal")
 				}
 			}
+			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status != store.LeaseReleased && lease.MaintenanceExpired(now.UnixMilli()) {
+				state.Desired = desiredFor(rc.run, rc.action, rc.task)
+				res.Runs = append(res.Runs, state)
+				continue
+			}
 			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status == store.LeaseActive {
 				if protocol.RunnerOwnsExecution(rc.run.Protocol) && ref.EventSequence > 0 {
 					if _, err := tx.Exec(ctx, `UPDATE runs SET announced_event_sequence=? WHERE run_id=? AND announced_event_sequence<?`, ref.EventSequence, ref.RunID, ref.EventSequence); err != nil {
@@ -1578,7 +1587,11 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 			if err := tx.UpdateRunObserved(ctx, run.RunID, protocol.RunUnknown, now); err != nil {
 				return err
 			}
-			body, err := json.Marshal(map[string]any{"from": run.ObservedState, "reason": "lease_expired", "host_id": l.HostID})
+			reason := "lease_expired"
+			if l.MaintenanceExpired(now) {
+				reason = "maintenance_authorization_expired"
+			}
+			body, err := json.Marshal(map[string]any{"from": run.ObservedState, "reason": reason, "host_id": l.HostID})
 			if err != nil {
 				return fmt.Errorf("app: encode lease event: %w", err)
 			}

@@ -250,7 +250,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		return r.registerRollout(sourceCtx, as.RunID, source)
 	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
 	if protocol.RunnerOwnsExecution(as.Protocol) && !as.Manager.RequireReceiptReader && !as.Manager.ReceiptOnly {
-		driver.LocalTurns = journal.ManagerLocalTurns{Journal: r.cfg.Journal, RunID: as.RunID}
+		driver.LocalTurns = journal.LocalTurns{Journal: r.cfg.Journal, RunID: as.RunID}
 	}
 	uploadKey := sha256.Sum256([]byte(as.RunID))
 	driver.Upload = func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {

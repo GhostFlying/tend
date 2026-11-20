@@ -233,6 +233,9 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		client = &http.Client{Transport: partition}
 	}
 	log := quiet()
+	if archiveMode == "offline-turn" {
+		log = runnerTestLog(t)
+	}
 	archivePending := make(chan struct{}, 1)
 	const originalBody = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"th_1\"}}\n"
 	var foreignPath string
@@ -618,7 +621,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				}
 			}
 			return mainthread.RunnerSession(ctx, s.app, selected.RunnerRunID), nil
-		}, RestartDelay: time.Millisecond * 20, Log: quiet()}), nil
+		}, RestartDelay: time.Millisecond * 20, Log: log}), nil
 	}}
 	wg.Go(func() { pool.Run(ctx) })
 	created := execute("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Coordinate an intent", Project: "default", Intent: "Retain continuing responsibility"}}, nil, app.CanonicalOwnerIssueCommand{Action: "create"})

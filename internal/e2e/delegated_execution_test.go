@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/domain"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -101,10 +102,8 @@ func TestDelegatedNativePeer(t *testing.T) {
 				if err := enc.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "native-thread", "turnId": id, "item": map[string]string{"id": "red", "type": "agentMessage", "text": "test failed: fixed is missing"}}}); err != nil {
 					return err
 				}
-				if err := finished(id); err != nil {
-					return err
-				}
-				continue
+				tool = harness.ContinueRunTool.Name
+				args = map[string]any{"next_step": "Fix the failing check, rerun it, then open the pull request."}
 			case turn == 2:
 				if err := os.WriteFile("fixed", []byte("fixed"), 0600); err != nil {
 					return err
@@ -199,7 +198,15 @@ func partitionedNativeExecution(t *testing.T, stop, restart bool) {
 	n.backend = realWorkerWorkspace{traex.NewWorkers(traex.WorkerOptions{Session: traex.Options{Bin: wrapper, Env: []string{"TEND_FIXTURE_EXECUTABLE=" + bin, "TEND_FIXTURE_PR_SERVICE=" + git.URL}, Stderr: os.Stderr}})}
 	n.log = runnerTestLog(t)
 	n.start()
-	task := srv.createTask()
+	eventually(t, "runner advertises composable deliverables", func() bool { return srv.count(`SELECT COUNT(*) FROM hosts WHERE workspace_protocol >= 1`) == 1 })
+	op := srv.exec(owner, "tasks.create", protocol.Target{Type: "task"}, map[string]any{"title": "repair the failing test and report the pull request", "spec": domain.Spec{Goal: "repair the failing test and open a pull request", Acceptance: []string{"tests pass and the pull request is reported"}, Deliverables: []string{"commit", "report"}, Workspace: domain.Workspace{Mounts: []domain.Mount{{Repo: "tend"}}}}}, app.CreateTask{})
+	var created struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(op.Result, &created); err != nil || created.TaskID == "" {
+		t.Fatal(op, err)
+	}
+	task := created.TaskID
 	select {
 	case <-entered:
 	case <-time.After(20 * time.Second):
@@ -266,7 +273,12 @@ func partitionedNativeExecution(t *testing.T, stop, restart bool) {
 			t.Fatal("stop was presented as confirmed while offline", o)
 		}
 		n.net.dropNext(protocol.OpRunnerSyncEvents, 10000)
+		n.net.dropNext(protocol.OpRunsRecordSessionStop, 10000)
 		n.net.set(false)
+		eventually(t, "original business ownership settles before physical stop delivery", func() bool {
+			return srv.count(`SELECT COUNT(*) FROM leases l JOIN runs r USING(run_id) WHERE r.task_id=? AND l.status='released'`, task) == 1
+		})
+		n.net.allow(protocol.OpRunsRecordSessionStop)
 		eventually(t, "runner confirms physical exit while its outcome is still queued", func() bool { return status().StoppedAt > 0 })
 		n.net.allow(protocol.OpRunnerSyncEvents)
 		eventually(t, "cancelled Run retains its already created PR", func() bool {

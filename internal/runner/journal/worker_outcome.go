@@ -17,7 +17,7 @@ func (j *Journal) LatestNativeTerminal(ctx context.Context, run, thread string) 
 	var event protocol.RunEvent
 	var body string
 	err := j.db.QueryRowContext(ctx, `SELECT seq,kind,body_json FROM events
- WHERE run_id=? AND kind='native.turn_completed' AND (thread_id=? OR thread_id='' AND json_extract(body_json,'$.thread_id')=?)
+ WHERE run_id=? AND kind IN ('native.turn_started','native.turn_completed') AND (thread_id=? OR thread_id='' AND json_extract(body_json,'$.thread_id')=?)
  ORDER BY seq DESC LIMIT 1`, run, thread, thread).Scan(&event.Seq, &event.Kind, &body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return event, false, nil
@@ -30,5 +30,5 @@ func (j *Journal) LatestNativeTerminal(ctx context.Context, run, thread string) 
 		return event, false, err
 	}
 	event.Body = []byte(body)
-	return event, true, nil
+	return event, event.Kind == "native.turn_completed", nil
 }

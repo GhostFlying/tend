@@ -253,6 +253,7 @@ func TestUpgradeWindowMaintenance(t *testing.T) {
 func TestManagerParkingAfterConfirmedWindowStop(t *testing.T) {
 	h, _, assignment, _ := parkUpgradeFixture(t)
 	ctx := t.Context()
+	renewalBoundFixture(t, h, assignment)
 	h.clock.Advance(2 * time.Minute)
 	if _, err := h.app.ExpireLeases(ctx); err != nil {
 		t.Fatal(err)

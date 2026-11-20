@@ -172,6 +172,7 @@ func TestWorkspacePausedDecisionAndUnknownRunsRetainOwnership(t *testing.T) {
 				}
 			case "unknown":
 				h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+				renewalBoundFixture(t, h, as)
 				h.clock.Advance(DefaultLeaseTTL + time.Second)
 				if _, err := h.app.ExpireLeases(context.Background()); err != nil {
 					t.Fatal(err)

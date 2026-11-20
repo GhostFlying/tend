@@ -9,14 +9,14 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 )
 
-// ManagerLocalTurns scopes native input admission and recovery to the original
-// issue-owner Run. A missing native start receipt never authorizes replay.
-type ManagerLocalTurns struct {
+// LocalTurns scopes native input admission and recovery to the original
+// Run. A missing native start receipt never authorizes replay.
+type LocalTurns struct {
 	Journal *Journal
 	RunID   string
 }
 
-func (m ManagerLocalTurns) Root(ctx context.Context, thread, turn string) (string, error) {
+func (m LocalTurns) Root(ctx context.Context, thread, turn string) (string, error) {
 	var root string
 	err := m.Journal.db.QueryRowContext(ctx, `SELECT root_turn FROM manager_local_turns WHERE run_id=? AND thread_id=? AND native_turn=?`, m.RunID, thread, turn).Scan(&root)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -24,7 +24,7 @@ func (m ManagerLocalTurns) Root(ctx context.Context, thread, turn string) (strin
 	}
 	return root, err
 }
-func (m ManagerLocalTurns) Queue(ctx context.Context, call harness.ToolCall, next string) error {
+func (m LocalTurns) Queue(ctx context.Context, call harness.ToolCall, next string) error {
 	return m.Journal.tx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO manager_local_turns(run_id,thread_id,previous_turn,root_turn,call_id,next_input,state)
     SELECT ?,?,?,COALESCE((SELECT root_turn FROM manager_local_turns WHERE run_id=? AND thread_id=? AND native_turn=?),?),?,?,'queued'
@@ -42,14 +42,14 @@ func (m ManagerLocalTurns) Queue(ctx context.Context, call harness.ToolCall, nex
 		return nil
 	})
 }
-func (m ManagerLocalTurns) Begin(ctx context.Context, thread, turn string) (next, call string, err error) {
+func (m LocalTurns) Begin(ctx context.Context, thread, turn string) (next, call string, err error) {
 	err = m.Journal.db.QueryRowContext(ctx, `UPDATE manager_local_turns SET state='starting' WHERE run_id=? AND thread_id=? AND previous_turn=? AND state='queued' RETURNING next_input,call_id`, m.RunID, thread, turn).Scan(&next, &call)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", nil
 	}
 	return
 }
-func (m ManagerLocalTurns) Started(ctx context.Context, thread, previous, native string) error {
+func (m LocalTurns) Started(ctx context.Context, thread, previous, native string) error {
 	res, err := m.Journal.db.ExecContext(ctx, `UPDATE manager_local_turns SET state='started',native_turn=? WHERE run_id=? AND thread_id=? AND previous_turn=? AND state='starting'`, native, m.RunID, thread, previous)
 	if err != nil {
 		return err
