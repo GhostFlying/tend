@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
@@ -10,6 +11,130 @@ import (
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func TestChatEventStreamResumesAcrossCoalescedHiddenProcessChanges(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	ctx := t.Context()
+	const trigger = "main-background-trigger"
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: trigger, Author: "system", Body: "internal trigger"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.say("visible before coalescing")
+	live := openStream(t, e.url, token, "?projection=chat&after=1")
+	if start := live.next(); start.name != "start" {
+		t.Fatal(start)
+	}
+	coalesce := func() int64 {
+		t.Helper()
+		var seq int64
+		if err := e.store.Write(ctx, func(tx *store.Tx) error {
+			for range 2 {
+				var err error
+				seq, err = tx.InsertEvent(ctx, store.EventRow{
+					Kind: "conversation.process_changed", ObjectType: "message", ObjectID: trigger,
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		e.app.Changes().Notify()
+		return seq
+	}
+	assertCheckpoint := func(s *stream, seq int64) {
+		t.Helper()
+		frame := s.next()
+		var at protocol.StreamStart
+		if frame.name != "cursor" || frame.id != strconv.FormatInt(seq, 10) ||
+			json.Unmarshal([]byte(frame.data), &at) != nil || at.EventSeq != seq {
+			t.Fatalf("hidden process changes must only advance the cursor: %+v", frame)
+		}
+	}
+	assertMessage := func(s *stream, seq int64, body string) {
+		t.Helper()
+		frame := s.next()
+		var ev protocol.LedgerEvent
+		if frame.name != "ledger" || json.Unmarshal([]byte(frame.data), &ev) != nil ||
+			ev.EventSeq != seq || ev.Item == nil || ev.Item.Body != body {
+			t.Fatalf("expected visible message %q at %d: %+v", body, seq, frame)
+		}
+	}
+	last := coalesce()
+	assertCheckpoint(live, last)
+	e.say("visible while connected")
+	assertMessage(live, last+1, "visible while connected")
+	live.cancel()
+
+	missed := coalesce()
+	reconnect := openStream(t, e.url, token, fmt.Sprintf("?projection=chat&after=%d", last+1))
+	if reconnect.status != http.StatusOK || reconnect.next().name != "start" {
+		t.Fatalf("hidden events rejected a reconnect: %d", reconnect.status)
+	}
+	assertCheckpoint(reconnect, missed)
+	e.say("visible after reconnect")
+	assertMessage(reconnect, missed+1, "visible after reconnect")
+	e.say("next visible message")
+	assertMessage(reconnect, missed+2, "next visible message")
+	if raw := openStream(t, e.url, token, "?after=1"); raw.status != http.StatusConflict {
+		t.Fatalf("the original stream must still detect missing process notifications: %d", raw.status)
+	}
+}
+
+func TestChatEventStreamResetsForCoalescedIssueProcessChanges(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	ctx := t.Context()
+	const trigger = "issue-background-trigger"
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.InsertMessage(ctx, store.MessageRow{
+			MessageID: trigger, Author: "system", ConversationID: "issue:related",
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.say("visible before Issue changes")
+	stream := openStream(t, e.url, token, "?projection=chat&after=1")
+	if start := stream.next(); start.name != "start" {
+		t.Fatal(start)
+	}
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		for range 2 {
+			if _, err := tx.InsertEvent(ctx, store.EventRow{
+				Kind: "conversation.process_changed", ObjectType: "message", ObjectID: trigger,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.app.Changes().Notify()
+	if reset := stream.next(); reset.name != "reset" {
+		t.Fatal("Issue activity missed its required reset", reset)
+	}
+	if stale := openStream(t, e.url, token, "?projection=chat&after=1"); stale.status != http.StatusConflict {
+		t.Fatal("expired Issue refresh cursor was accepted", stale.status)
+	}
+	retained := openStream(t, e.url, token, "?projection=chat&after=2")
+	if start := retained.next(); start.name != "start" {
+		t.Fatal(start)
+	}
+	frame := retained.next()
+	var ev protocol.LedgerEvent
+	if frame.name != "ledger" || json.Unmarshal([]byte(frame.data), &ev) != nil ||
+		ev.ConversationID != "issue:related" || ev.Kind != "conversation.process_changed" || ev.Item != nil {
+		t.Fatal("Issue process notice must remain a scoped invalidation", frame)
+	}
+}
 
 func TestEventStreamCoalescedRefreshRequiresSourceResync(t *testing.T) {
 	e := newEnv(t)

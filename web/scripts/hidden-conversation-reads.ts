@@ -39,6 +39,16 @@ const visibleHistory = [
     reply_to: original.message_id,
   })),
 ];
+const chatReplay = {
+  seq: 62,
+  message_id: "after-coalesced-tools",
+  author: "main_agent",
+  kind: "message",
+  body: "Visible reply after coalesced tools",
+  created_at: createdAt,
+  reply_to: original.message_id,
+};
+let replayChat = false;
 let active = true;
 const writes: {
   operation: string;
@@ -81,7 +91,21 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const after = Number(url.searchParams.get("after") ?? ledgerSeq);
     res.write(`event: start\ndata: {"event_seq":${after}}\n\n`);
-    if (after < ledgerSeq) res.write(missedEvent());
+    if (after < ledgerSeq) {
+      if (replayChat) {
+        const event = {
+          event_seq: ledgerSeq,
+          object_type: "message",
+          object_id: chatReplay.message_id,
+          kind: "conversation.message",
+          created_at: createdAt,
+          item: chatReplay,
+        };
+        res.write(`id: ${ledgerSeq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`);
+      } else {
+        res.write(missedEvent());
+      }
+    }
     streams.add(res);
     res.on("close", () => streams.delete(res));
     return;
@@ -278,6 +302,21 @@ try {
   });
   await transcript.getByText(original.body, { exact: true }).waitFor({ state: "attached" });
   assert.equal(count("/api/v1/conversation?projection=chat&before="), 1);
+  const latestHistoryReads = count(historyPath);
+  const resumedAfterTools = page.waitForResponse(
+    origin + `/api/v1/events?projection=chat&after=${ledgerSeq}`,
+  );
+  replayChat = true;
+  ledgerSeq += 3; // Two hidden positions and one visible reply.
+  for (const stream of streams) stream.end();
+  await resumedAfterTools;
+  const resumedReply = transcript.getByText(chatReplay.body, { exact: true });
+  await resumedReply.waitFor({ state: "attached" });
+  assert.equal(await resumedReply.count(), 1);
+  assert.equal(await transcript.getByText(original.body, { exact: true }).count(), 1);
+  assert.equal(count(historyPath), latestHistoryReads, "resume does not reload Chat history");
+  assert.equal(count("/api/v1/conversation?projection=chat&before="), 1);
+  replayChat = false;
   assert.equal(count("/api/v1/conversation/transcript"), 0);
   assert.equal(count("/api/v1/conversation/blocks/"), 0);
   assert.equal(count("/api/v1/agent-conversations/main/rollout"), 0);

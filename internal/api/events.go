@@ -52,6 +52,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		diagnostic.status = s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "unknown event projection"))
 		return
 	}
+	cursorExpired := store.RefreshCursorExpired
+	if chat {
+		cursorExpired = store.ChatRefreshCursorExpired
+	}
 	after, err := intParam(query.Get("after"))
 	if err != nil {
 		diagnostic.reason = "invalid_cursor"
@@ -72,7 +76,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		var err error
 		latest, err = store.LatestEventSeq(ctx, tx.Q())
 		if err == nil && hasAfter {
-			expired, err = store.RefreshCursorExpired(ctx, tx.Q(), after)
+			expired, err = cursorExpired(ctx, tx.Q(), after)
 		}
 		return err
 	}); err != nil {
@@ -124,7 +128,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		var resetAt, through int64
 		var scanned int
 		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-			expired, err := store.RefreshCursorExpired(ctx, tx.Q(), after)
+			expired, err := cursorExpired(ctx, tx.Q(), after)
 			if err != nil {
 				return err
 			}

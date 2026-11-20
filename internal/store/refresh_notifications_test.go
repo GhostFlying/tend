@@ -95,6 +95,46 @@ func TestRefreshNotificationsCoalesceAndPreserveBusinessHistory(t *testing.T) {
 	}
 }
 
+func TestRefreshMigrationRetainsPriorChatExpiryBoundary(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "pre-chat-watermark.db")
+	db, err := sql.Open("sqlite", dsn(path, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Store{write: db, read: db, now: testkit.NewClock().Now}
+	if err := s.migrate(ctx, 139); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Write(ctx, func(tx *Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE refresh_stream_state SET cursor=9, expired_through=7 WHERE singleton=1`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Read(ctx, func(tx *ReadTx) error {
+		for _, tc := range []struct {
+			cursor  int64
+			expired bool
+		}{{6, true}, {7, false}, {9, false}, {10, true}} {
+			expired, err := ChatRefreshCursorExpired(ctx, tx.Q(), tc.cursor)
+			if err != nil {
+				return err
+			}
+			if expired != tc.expired {
+				t.Fatalf("Chat cursor %d expired = %v, want %v", tc.cursor, expired, tc.expired)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRefreshMigrationRetainsExactReasonsAndUnmatchedInboxFacts(t *testing.T) {
 	ctx := t.Context()
 	db, err := sql.Open("sqlite", dsn(filepath.Join(t.TempDir(), "historical.db"), true))
