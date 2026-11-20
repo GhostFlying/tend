@@ -656,6 +656,8 @@ Owner HTTP 路由统一登记，实际 owner/hosted operation 与 CLI 命令绑�
 
 本轮补齐会话、消息交互、Issue 状态与通知、决策、任务/运行/交付、归档、用量与目录，并增加只读 doctor 及已有维护入口。本机 Agent 管理只连接原私有 socket。Artifact 详情使用 owner 认证的只读 API 与现有视图，修复 Web 已有调用。新增 owner 能力不改变 runner wire 2/1，不新增存储迁移。实施与验收见 [计划](plans/cli-capability-parity.md)。
 
+维护审计沿用原 owner 读权限。Issue 和 Task 的 `show --fields` 按原 JSON 键缩减 CLI 输出，完整详情始终可查。等待列表可按原 Run 和状态组合筛选，结果保留等待、物理停止与恢复事实。活动游标、停止对账、候选和原件入口见[维护审计账本查询](operations/audit-ledger-queries.md)。
+
 ## D143：Agents 只读目录与版本续接
 
 当前 Agent 平铺展示，运行位置与运行方式分列；运行方式由执行适配器与显式 CLI 声明确定，不从 runtime ID 推断。页面及详情标题 16px、名称 14px，历史定义折叠保留，手机使用独立详情；保留 runtime 绑定和 Agent 稳定身份。目录只读，定义经原本机显式 reload 接受。新分配使用当前定义，已有责任继续冻结快照；续接候选由账本引用和 runner 实际核验共同限定，不能用于新分配。能力双向协商后追加 hello/heartbeat 字段，协议仍为 2/1；未协商时原行为不变。原指令、路径和凭据不进入公共目录，历史保留不预占进程或槽位。见 [实施计划](plans/agent-directory-continuation.md)。

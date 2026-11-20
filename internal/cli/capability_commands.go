@@ -37,7 +37,7 @@ const hostMaintenanceOperation = "hosts.maintenance"
 var capabilityCommands = []capabilityCommand{
 	{Name: "task resume-wait", Operation: protocol.OpTasksResumeWait, Target: "task", RevisionRoute: "-", JSONDefault: true},
 	{Name: "task ci-continuation", Route: "/api/v1/tasks/{id}/ci-continuation/{run}", JSONDefault: true},
-	{Name: "task waits", Route: "/api/v1/tasks/{id}/external-waits", JSONDefault: true},
+	{Name: "task waits", Route: "/api/v1/tasks/{id}/external-waits", Queries: "run=run_id status", JSONDefault: true},
 	{Name: "maintenance overview", Route: "/api/v1/maintenance", JSONDefault: true},
 	{Name: "capability list", Route: "/api/v1/capabilities", Queries: "state search after limit", JSONDefault: true},
 	{Name: "capability show", Route: "/api/v1/capabilities/{id}", Queries: "definition-revision=revision", JSONDefault: true},
@@ -182,6 +182,9 @@ func findCapabilityCommand(args []string) (capabilityCommand, []string, bool) {
 }
 
 func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, args []string) error {
+	if cmd.Name == "task show" {
+		return runDetailShow(ctx, e, cmd.Name, cmd.Route, args)
+	}
 	if cmd.Name == "issue deployment-preparation" {
 		return runIssueDeploymentPreparation(ctx, e, args)
 	}
@@ -195,6 +198,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 		return runManagerReconciliation(ctx, e, args)
 	}
 	fs := newFlags(e, cmd.Name)
+	if cmd.Name == "task waits" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, auditReadHelp(cmd.Name)) }
+	}
 	if cmd.Operation == hostMaintenanceOperation {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, hostMaintenanceHelp(cmd.Name)) }
 	} else if cmd.Operation == protocol.OpContinueRetainedRun || cmd.Name == "run maintenance-reconciliation" || strings.HasPrefix(cmd.Name, "decision-continuation ") {

@@ -35,6 +35,8 @@ var issueOperations = map[string]string{
 func runIssue(ctx context.Context, e *Env, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "show":
+			return runDetailShow(ctx, e, "issue show", "/api/v1/issues/{id}", args[1:])
 		case "pr-policy":
 			return runIssuePRPolicy(ctx, e, args[1:])
 		case "handoff-prompt":
@@ -179,23 +181,6 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 			return err
 		}
 		return o.printJSON(status)
-	case "show":
-		if len(pos) != 1 {
-			return usagef("issue show takes one issue ID")
-		}
-		path := "/api/v1/issues/" + url.PathEscape(pos[0])
-		if *revision >= 0 {
-			path += "?revision=" + strconv.FormatInt(*revision, 10)
-		}
-		var view protocol.IssueView
-		if err := c.do(ctx, "GET", path, nil, &view); err != nil {
-			return err
-		}
-		if *asJSON {
-			return o.printJSON(view)
-		}
-		return printIssueView(e, view)
-
 	}
 	operation, ok := issueOperations[action]
 	if !ok {

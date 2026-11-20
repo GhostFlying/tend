@@ -23,6 +23,9 @@ func runIssueCaller(ctx context.Context, e *Env, args []string) error {
 		tail = tail[1:]
 	}
 	fs := newFlags(e, "issue "+action)
+	if help := auditReadHelp("issue " + action); help != "" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
+	}
 	if help := issueCommandHelp(action); help != "" {
 		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
 	} else if action == "context" {

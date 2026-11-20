@@ -509,7 +509,7 @@ func (a *App) ExternalWaits(ctx context.Context, task string) ([]protocol.Extern
 	var out []protocol.ExternalWait
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
-		out, err = store.TaskExternalWaits(ctx, tx.Q(), task)
+		out, err = store.TaskExternalWaits(ctx, tx.Q(), task, "", "")
 		return err
 	})
 	return out, err

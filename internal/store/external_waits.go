@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -32,20 +33,35 @@ func (t *Tx) PutExternalWait(ctx context.Context, v protocol.ExternalWait, next 
 	return err
 }
 
-func TaskExternalWaits(ctx context.Context, q Querier, task string) ([]protocol.ExternalWait, error) {
-	ids, err := FollowupIDs(ctx, q, `SELECT run_id FROM run_external_waits WHERE task_id=? ORDER BY rowid`, task)
+func TaskExternalWaits(ctx context.Context, q Querier, task, runID, status string) ([]protocol.ExternalWait, error) {
+	query := `SELECT body_json FROM run_external_waits WHERE task_id=?`
+	args := []any{task}
+	if runID != "" {
+		query += ` AND run_id=?`
+		args = append(args, runID)
+	}
+	if status != "" {
+		query += ` AND status=?`
+		args = append(args, status)
+	}
+	rows, err := q.QueryContext(ctx, query+` ORDER BY rowid`, args...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	out := []protocol.ExternalWait{}
-	for _, id := range ids {
-		v, err := GetExternalWait(ctx, q, id)
-		if err != nil {
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		out = append(out, *v)
+		var wait protocol.ExternalWait
+		if err := json.Unmarshal([]byte(raw), &wait); err != nil {
+			return nil, err
+		}
+		out = append(out, wait)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // AssignmentExternalWait transmits a stop request and the predecessor's durable
