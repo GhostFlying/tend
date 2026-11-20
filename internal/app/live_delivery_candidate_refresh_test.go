@@ -204,7 +204,7 @@ func TestLiveSelfDeliveryRefreshIgnoresOnlyArchivedInstallations(t *testing.T) {
 }
 
 func TestLiveDeliveryUpgradeUsesActualCurrentLease(t *testing.T) {
-	for _, scenario := range []string{"current-owner", "expired", "released", "stopped", "receipt-only", "withdrawn-owner-source"} {
+	for _, scenario := range []string{"current-owner", "disconnected-owner", "expired-renewal", "released", "stopped", "receipt-only", "withdrawn-owner-source"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, issue, as, candidate, _ := ownerBoundDeliveryFixture(t, true)
 			command, err := h.app.QueueManagerNative(t.Context(), as.RunID, "turn", json.RawMessage(`{}`))
@@ -231,7 +231,10 @@ func TestLiveDeliveryUpgradeUsesActualCurrentLease(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch scenario {
-			case "expired":
+			case "expired-renewal":
+				renewalBoundFixture(t, h, as)
+				h.clock.Advance(2 * h.app.LeaseTTL())
+			case "disconnected-owner":
 				h.clock.Advance(2 * h.app.LeaseTTL())
 			case "released", "stopped", "receipt-only":
 				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
@@ -264,7 +267,8 @@ func TestLiveDeliveryUpgradeUsesActualCurrentLease(t *testing.T) {
 				_, err := checkDeliveryUpgradeStart(t.Context(), &Exec{Now: h.clock.Now()}, tx.Q(), StartUpgrade{DeliveryTaskID: as.TaskID, ServerInstance: "server", ServerHash: hash, ArtifactSources: map[string]release.SourceIdentity{hash: {Commit: candidate.TargetSHA}}})
 				return err
 			})
-			if scenario == "current-owner" && err != nil || scenario != "current-owner" && protocol.CodeOf(err) != protocol.CodeForbidden {
+			admitted := scenario == "current-owner" || scenario == "disconnected-owner"
+			if admitted && err != nil || !admitted && protocol.CodeOf(err) != protocol.CodeForbidden {
 				t.Fatal("upgrade admission did not follow the real current execution lease and ownership", scenario, err)
 			}
 		})

@@ -41,7 +41,7 @@ class LocalDial(BaseHTTPRequestHandler):
                     (upstream if source is self.connection else self.connection).sendall(data)
 
 
-def runner_unit(root, old, bundle, config, env, stack, current_supervisor=False):
+def runner_unit(root, old, bundle, config, env, stack, manifest, current_supervisor=False):
     state = root / "supervisor"
     runner_env = root / "service.env"
     write_private(runner_env, "".join(f"{k}={v}\n" for k, v in env.items()))
@@ -52,7 +52,7 @@ def runner_unit(root, old, bundle, config, env, stack, current_supervisor=False)
         "args": ["-config", str(config)], "env_files": [str(runner_env)], "state_dir": str(state),
         "log_path": str(root / "runner.log"), "authority_socket": str(bridge),
         "authorize_url": "http://localhost/updater/authorize", "health_url": "http://localhost/updater/health",
-        "protocol": 5, "storage_version": 1,
+        "protocol": manifest["protocol"]["max"], "storage_version": manifest["storage"]["runner_journal"]["max"],
     }))
     fixed = root / "tend-updater"
     shutil.copy2((bundle if current_supervisor else old) / "tend-updater", fixed)
@@ -128,6 +128,7 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
             raise RuntimeError(f"batch entered attention: {view.get('phase')} {view.get('reason')} {view.get('hosts')}")
         return status and status[0][0] == "completed"
 
+    manifest = json.loads((old / "manifest.json").read_bytes())
     with contextlib.ExitStack() as stack:
         log = stack.enter_context((root / "old-server.log").open("w"))
         original = subprocess.Popen([old / "tend-server", "-config", server_config], env=env, stdout=log, stderr=log)
@@ -136,7 +137,8 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
         stack.callback(stop, registration)
         eventually("historical runner advertises task capabilities",
                    lambda: db.exists() and rows("select name from sqlite_master where name='host_runtime'")
-                   and rows("select instance_id from host_runtime where json_extract(runtime_json,'$.protocol')=5"), [original, registration])
+                   and rows("select instance_id from host_runtime where json_extract(runtime_json,'$.protocol')=?",
+                            (manifest["protocol"]["max"],)), [original, registration])
         stop(original)
         stop(registration)
         tasks = run(seed, db, "rolling").decode().splitlines()
@@ -147,7 +149,7 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
         run(cli, "login", "--server", "http://" + address)
         for task in tasks[1:]:
             run(cli, "pause", task)
-        state, oldpid = runner_unit(rc, old, first, runner_config, env, stack, current_supervisor=sole)
+        state, oldpid = runner_unit(rc, old, first, runner_config, env, stack, manifest, current_supervisor=sole)
         gates = lambda: set(root.glob("*.gate"))
         eventually("first long run", lambda: len(gates()) == 1, [])
         first_gate, = gates()

@@ -10,8 +10,8 @@ if [[ ${1:-} == --hosted-systemd ]]; then
   shift
 fi
 
-source_commit=ddef4ef30d54c5c9bc376f449724d82e6831029f
-archive_hash=68b901291090cb8b8e6b58df8b8fc38f84782e9eb828fc7ebe88fdef72a6be12
+source_commit=25af0d57f6e0072e7037bf577970c4bc7e052180
+archive_hash=07581a965b0ecd27a07dd372ee24960880e183579b1416d23bca41ace7abcd61
 release=main-$source_commit
 asset=tend-$release-linux-amd64.tar.gz
 fixture=internal/e2e/testdata/rolling
