@@ -83,6 +83,7 @@ type MaintenanceAuditSession struct {
 type MaintenanceSession struct {
 	ScheduledAuditID   string                  `json:"scheduled_audit_id,omitempty"`
 	SessionProfile     string                  `json:"session_profile,omitempty"`
+	HistoryRead        string                  `json:"history_read,omitempty"`
 	CreationError      string                  `json:"creation_error,omitempty"`
 	ObservedSessionID  string                  `json:"observed_session_id,omitempty"`
 	ReconciledBy       string                  `json:"reconciled_by,omitempty"`

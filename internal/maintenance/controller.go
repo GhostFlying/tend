@@ -392,6 +392,9 @@ func (c *Controller) Step(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if native.HistoryRead != "" {
+			a.HistoryRead = native.HistoryRead
+		}
 		terminal := a.InputID == ""
 		interrupted := false
 		outcome := ""
@@ -471,7 +474,7 @@ func (c *Controller) Step(ctx context.Context) error {
 		}
 		if a.ScheduledAuditID != "" && outcome == "completed" {
 			c.clearAuditThread(a.SessionID)
-			if c.state.PendingBackend == nil && a.SessionProfile != "" && native.BoundedHistory && !native.Unusable {
+			if c.state.PendingBackend == nil && a.SessionProfile != "" && a.HistoryRead == nativeHistoryBounded && !native.Unusable {
 				c.state.IdleAuditSession = &protocol.MaintenanceAuditSession{
 					SessionID: a.SessionID, RolloutPath: a.RolloutPath,
 					SandboxPolicy: a.SandboxPolicy, Profile: a.SessionProfile,
@@ -485,7 +488,7 @@ func (c *Controller) Step(ctx context.Context) error {
 				c.state.Active = &protocol.MaintenanceSession{
 					ID: c.opts.ID(), Backend: a.Backend, Phase: "idle", StartedAt: c.opts.Now().Unix(),
 					SessionID: a.SessionID, RolloutPath: a.RolloutPath,
-					SandboxPolicy: a.SandboxPolicy, SessionProfile: a.SessionProfile,
+					SandboxPolicy: a.SandboxPolicy, SessionProfile: a.SessionProfile, HistoryRead: a.HistoryRead,
 				}
 			}
 			return c.save(ctx)
@@ -525,9 +528,9 @@ func (c *Controller) Step(ctx context.Context) error {
 	a := c.state.Active
 	// An explicitly adopted legacy creation is allowed its original first
 	// input. Without a recorded profile it will not be kept for later reuse.
-	if scheduled && a != nil && (a.SessionProfile != "" || a.ReconciledBy == "") {
-		_, profile, err := c.auditThreadProfile()
-		if err != nil || a.SessionProfile != profile {
+	if scheduled && a != nil {
+		compatible, err := c.auditThreadCompatible(a)
+		if err != nil || !compatible {
 			// Let the original inline repair finish without consuming the timer.
 			reasons = withoutAudit(reasons)
 			if len(reasons) == 0 {
@@ -620,7 +623,8 @@ func (c *Controller) readActiveThread(ctx context.Context, a *protocol.Maintenan
 	reader, ok := c.opts.Native.(interface {
 		ReadTurn(context.Context, protocol.MaintenanceBackend, string, NativeReadMode, NativeTurn, bool) (NativeState, error)
 	})
-	if !ok || mode == ReadMetadata {
+	paged := a.HistoryRead == nativeHistoryBounded || a.ScheduledAuditID != "" && a.HistoryRead != nativeHistoryLegacy
+	if !ok || mode == ReadMetadata || !paged {
 		return c.opts.Native.Read(ctx, a.Backend, a.SessionID, mode)
 	}
 	review := c.state.Review != nil && c.state.Review.Phase == "running" && c.state.Review.RequestID == a.InputID
@@ -629,6 +633,19 @@ func (c *Controller) readActiveThread(ctx context.Context, a *protocol.Maintenan
 
 func withoutAudit(reasons []string) []string {
 	return slices.DeleteFunc(reasons, func(reason string) bool { return reason == "audit" })
+}
+
+func (c *Controller) auditThreadCompatible(a *protocol.MaintenanceSession) (bool, error) {
+	if a.HistoryRead == nativeHistoryLegacy {
+		return false, nil
+	}
+	// An explicitly adopted legacy creation is allowed its original first
+	// input. Without a recorded profile it will not be kept for later reuse.
+	if a.SessionProfile == "" && a.ReconciledBy != "" {
+		return true, nil
+	}
+	_, profile, err := c.auditThreadProfile()
+	return a.SessionProfile == profile, err
 }
 
 func (c *Controller) auditThreadProfile() (instructions, profile string, err error) {
@@ -696,7 +713,7 @@ func (c *Controller) selectAuditThread(ctx context.Context, profile string) (wai
 	c.state.Active = &protocol.MaintenanceSession{
 		ID: c.opts.ID(), Backend: c.state.Backend, Phase: "idle", StartedAt: c.opts.Now().Unix(),
 		SessionID: session.SessionID, RolloutPath: session.RolloutPath,
-		SandboxPolicy: session.SandboxPolicy, SessionProfile: session.Profile,
+		SandboxPolicy: session.SandboxPolicy, SessionProfile: session.Profile, HistoryRead: nativeHistoryBounded,
 	}
 	c.state.IdleAuditSession = nil
 	return false, nil

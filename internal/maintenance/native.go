@@ -43,6 +43,16 @@ type nativeRPCError struct {
 	Message string `json:"message"`
 }
 
+func (e nativeRPCError) unknownTurnList() bool {
+	if e.Code == -32601 {
+		return true
+	}
+	// Some Codex versions use serde's unknown enum variant as Invalid Request.
+	const prefix = "Invalid request: unknown variant `thread/turns/list`"
+	suffix, ok := strings.CutPrefix(e.Message, prefix)
+	return e.Code == -32600 && ok && (suffix == "" || strings.HasPrefix(suffix, ", expected "))
+}
+
 type nativeRPC struct {
 	sandbox map[string]any
 	conn    *websocket.Conn
@@ -106,7 +116,7 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 		if len(response.Error) > 0 && string(response.Error) != "null" {
 			var rejection nativeRPCError
 			if json.Unmarshal(response.Error, &rejection) == nil {
-				if rejection.Code == -32601 {
+				if method == "thread/turns/list" && rejection.unknownTurnList() {
 					return fmt.Errorf("maintenance: native %s: %w: %w", method, ErrNotSent, errNativeMethodUnavailable)
 				}
 				if nativeThreadUnavailable(method, params, rejection) {
@@ -303,12 +313,13 @@ func (n *NativeClient) readThread(ctx context.Context, b protocol.MaintenanceBac
 	if target != nil {
 		turns, readErr := r.readBoundedTurn(ctx, id, *target, review)
 		if readErr == nil {
-			s.Turns, s.BoundedHistory = turns, true
+			s.Turns, s.HistoryRead = turns, nativeHistoryBounded
 			return s, nil
 		}
 		if !errors.Is(readErr, errNativeMethodUnavailable) {
 			return NativeState{}, readErr
 		}
+		s.HistoryRead = nativeHistoryLegacy
 	}
 	if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}, &result); err != nil {
 		return NativeState{}, err
@@ -331,12 +342,15 @@ func (r *nativeRPC) readBoundedTurn(ctx context.Context, threadID string, target
 		}
 	}
 	params := map[string]any{"threadId": threadID, "sortDirection": "desc", "limit": limit, "itemsView": items}
-	for range 32 {
+	for pageNumber := range 32 {
 		var page struct {
 			Data       *[]nativeHistoryTurn `json:"data"`
 			NextCursor string               `json:"nextCursor"`
 		}
 		if err := r.call(ctx, "thread/turns/list", params, &page); err != nil {
+			if pageNumber > 0 && errors.Is(err, errNativeMethodUnavailable) {
+				return nil, errors.New("maintenance: native turn pagination became unavailable before finding the original identity")
+			}
 			return nil, err
 		}
 		if page.Data == nil {

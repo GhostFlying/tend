@@ -48,7 +48,7 @@ func (n *fakeNative) Read(_ context.Context, _ protocol.MaintenanceBackend, _ st
 }
 func (n *fakeNative) ReadTurn(ctx context.Context, b protocol.MaintenanceBackend, threadID string, mode NativeReadMode, _ NativeTurn, _ bool) (NativeState, error) {
 	state, err := n.Read(ctx, b, threadID, mode)
-	state.BoundedHistory = true
+	state.HistoryRead = nativeHistoryBounded
 	return state, err
 }
 

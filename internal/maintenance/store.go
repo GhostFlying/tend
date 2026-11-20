@@ -54,11 +54,16 @@ var ErrNotSent = errors.New("native operation was not accepted")
 // It can retire an idle thread but cannot resolve an outstanding native operation.
 var ErrThreadUnavailable = errors.New("native thread is unavailable")
 
+const (
+	nativeHistoryBounded = "bounded"
+	nativeHistoryLegacy  = "legacy"
+)
+
 type NativeState struct {
-	Busy           bool
-	Unusable       bool
-	BoundedHistory bool
-	Turns          []NativeTurn
+	Busy        bool
+	Unusable    bool
+	HistoryRead string
+	Turns       []NativeTurn
 }
 type NativeTurn struct{ ID, InputID, Status string }
 

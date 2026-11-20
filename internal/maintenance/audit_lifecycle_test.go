@@ -285,6 +285,7 @@ type auditNativeFixture struct {
 	creates, starts int
 	loseTurnReply   bool
 	legacyRead      bool
+	legacyVariant   bool
 }
 
 func (f *auditNativeFixture) counts() (int, int) {
@@ -377,6 +378,9 @@ func (f *auditNativeFixture) serve(w http.ResponseWriter, r *http.Request) {
 		case "thread/turns/list":
 			if f.legacyRead {
 				rejection = map[string]any{"code": -32601, "message": "method not found"}
+				if f.legacyVariant {
+					rejection = map[string]any{"code": -32600, "message": "Invalid request: unknown variant `thread/turns/list`, expected one of `initialize`, `thread/read`"}
+				}
 				break
 			}
 			offset, _ := strconv.Atoi(req.Params.Cursor)
