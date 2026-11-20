@@ -89,7 +89,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation compactions", Route: "/api/v1/agent-conversations/{id}/compactions", Queries: "before"},
 	{Name: "conversation settings show", Route: "/api/v1/conversation/settings", Queries: "conversation=conversation_id"},
 	{Name: "conversation sources", Route: "/api/v1/background/{id}/sources", Queries: "after"},
-	{Name: "message original", Route: "/api/v1/messages/{id}", Queries: "projection"},
+	{Name: "message original", Route: "/api/v1/messages/{id}", Queries: "projection conversation=conversation_id"},
 	{Name: "message associations", Route: "/api/v1/messages/{id}/associations"},
 	{Name: "message list", Route: "/api/v1/messaging/messages", Queries: "after before latest conversation=conversation_id issue=issue_id channel=channel_id", JSONDefault: true},
 	{Name: "issue notifications show", Route: "/api/v1/issue-notification-settings"},

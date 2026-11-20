@@ -320,6 +320,8 @@ func TestCapabilityQueriesPreserveCompleteFiltersAndCursors(t *testing.T) {
 		{[]string{"conversation", "show", "main", "--before", "50", "--limit", "20"}, "/api/v1/conversation", url.Values{"conversation_id": {"main"}, "before": {"50"}, "limit": {"20"}}},
 		{[]string{"conversation", "window", "main", "12", "--offset", "4096"}, "/api/v1/agent-conversations/main/rollout/12", url.Values{"offset": {"4096"}}},
 		{[]string{"message", "list", "--before", "0"}, "/api/v1/messaging/messages", url.Values{"before": {"0"}}},
+		{[]string{"message", "original", "msg_original"}, "/api/v1/messages/msg_original", url.Values{}},
+		{[]string{"message", "original", "msg_tool", "--conversation", "issue:wi_example"}, "/api/v1/messages/msg_tool", url.Values{"conversation_id": {"issue:wi_example"}}},
 		{[]string{"task", "list", "--all", "--lifecycle", "completed", "--sort", "completed_at", "--before", "1:task", "--limit", "10"}, "/api/v1/tasks", url.Values{"all": {"1"}, "lifecycle": {"completed"}, "sort": {"completed_at"}, "before": {"1:task"}, "limit": {"10"}}},
 		{[]string{"usage", "--window", "month", "--offset", "-1", "--model", "model name", "--subject", "main", "--before", "45"}, "/api/v1/token-usage", url.Values{"window": {"month"}, "offset": {"-1"}, "model": {"model name"}, "subject": {"main"}, "before": {"45"}}},
 		{[]string{"conversation", "block", "original", "--after", "51", "--process-after", "37"}, "/api/v1/conversation/blocks/original", url.Values{"after": {"51"}, "process_after": {"37"}}},

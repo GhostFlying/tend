@@ -94,6 +94,12 @@ export function IssueActivity({
   const scrollportSize = useRef({ width: 0, height: 0 });
   const dataFrame = useRef(0);
   const expectedScroll = useRef<number | null>(null);
+  const located = useRef<string | undefined>(undefined);
+  const skippedAnchor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    located.current = undefined;
+    skippedAnchor.current = undefined;
+  }, [targetMessage]);
   const correctScroll = useCallback((node: HTMLElement, correct: () => void) => {
     const before = node.scrollTop;
     correct();
@@ -192,18 +198,46 @@ export function IssueActivity({
         frame = requestAnimationFrame(moved);
       });
     };
+    const skipAnchor = () => {
+      if (targetMessage) skippedAnchor.current = targetMessage;
+    };
+    const scrollKey = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        (event.target instanceof Element &&
+          event.target.closest("input, textarea, select, button, [contenteditable]"))
+      )
+        return;
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
+        skipAnchor();
+    };
+    const scrollbarPress = (event: PointerEvent) => {
+      if (
+        event.target === node &&
+        event.clientX >= node.getBoundingClientRect().left + node.clientWidth
+      )
+        skipAnchor();
+    };
     const observer = new ResizeObserver(resized);
     observer.observe(node);
     node.addEventListener("scroll", moved);
+    node.addEventListener("wheel", skipAnchor, { passive: true });
+    node.addEventListener("touchmove", skipAnchor, { passive: true });
+    node.addEventListener("keydown", scrollKey);
+    node.addEventListener("pointerdown", scrollbarPress);
     node.addEventListener("click", disclosure, true);
     return () => {
       cancelAnimationFrame(frame);
       cancelAnimationFrame(dataFrame.current);
       observer.disconnect();
       node.removeEventListener("scroll", moved);
+      node.removeEventListener("wheel", skipAnchor);
+      node.removeEventListener("touchmove", skipAnchor);
+      node.removeEventListener("keydown", scrollKey);
+      node.removeEventListener("pointerdown", scrollbarPress);
       node.removeEventListener("click", disclosure, true);
     };
-  }, [scroll, reading, correctScroll]);
+  }, [scroll, reading, correctScroll, targetMessage]);
   const last = useRef(0);
   const previousPending = useRef(0);
   const rows = state.value?.items ?? emptyEntries;
@@ -520,28 +554,43 @@ export function IssueActivity({
     !anchor.control?.withdrawn_at
       ? anchor
       : null;
-  const located = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (!targetMessage) {
-      located.current = undefined;
+  const locateTarget = useCallback(() => {
+    if (
+      !targetMessage ||
+      located.current === targetMessage ||
+      skippedAnchor.current === targetMessage
+    )
       return;
-    }
-    if (located.current === targetMessage) return;
     const root = scroll.current;
     const target = root?.querySelector<HTMLElement>(
       `[data-scroll-id="${CSS.escape(targetMessage)}"]`,
     );
-    if (target && root) {
-      const frame = requestAnimationFrame(() => {
-        if (!target.isConnected || !target.getClientRects().length) return;
-        located.current = targetMessage;
-        reading.pauseFollowing();
-        following.current = false;
-        correctScroll(root, () => target.scrollIntoView({ block: "center" }));
-        readingAnchor.current = captureAnchor(root);
-      });
-      return () => cancelAnimationFrame(frame);
-    }
+    if (!target || !root) return;
+    const frame = requestAnimationFrame(() => {
+      if (
+        located.current === targetMessage ||
+        skippedAnchor.current === targetMessage ||
+        !target.isConnected ||
+        !target.getClientRects().length
+      )
+        return;
+      located.current = targetMessage;
+      reading.pauseFollowing();
+      following.current = false;
+      correctScroll(root, () => target.scrollIntoView({ block: "center" }));
+      readingAnchor.current = captureAnchor(root);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targetMessage, scroll, reading, correctScroll]);
+  useEffect(() => {
+    if (
+      !targetMessage ||
+      located.current === targetMessage ||
+      skippedAnchor.current === targetMessage
+    )
+      return;
+    const cancel = locateTarget();
+    if (cancel) return cancel;
     if (
       scopedAnchor &&
       !rows.some(
@@ -560,11 +609,9 @@ export function IssueActivity({
   }, [
     targetMessage,
     scopedAnchor,
-    scroll,
+    locateTarget,
     rows,
     transcript,
-    reading,
-    correctScroll,
     state,
     error,
     loadingEarlier,
@@ -633,6 +680,7 @@ export function IssueActivity({
                 : undefined
             }
             scrollTarget={targetMessage}
+            onAnchorReady={locateTarget}
             restored={continuations[entry.block.trigger.message_id]}
             rows={transcript.filter((row) => row.key.startsWith(`${entry.block!.position}:`))}
             onContinuation={rememberContinuation}
@@ -728,6 +776,7 @@ function ActivityBlock({
   targetMessage,
   processTarget,
   scrollTarget,
+  onAnchorReady,
   restored,
   rows,
   onContinuation,
@@ -745,6 +794,7 @@ function ActivityBlock({
   targetMessage?: string | undefined;
   processTarget?: string | undefined;
   scrollTarget?: string | undefined;
+  onAnchorReady(): (() => void) | undefined;
   restored?: { block: IssueTranscriptBlock; depth: number } | undefined;
   currentIssueId: string;
   rows: TranscriptEntry[];
@@ -775,6 +825,7 @@ function ActivityBlock({
         : "回应系统通知";
   const triggerNode = useRef<HTMLDivElement>(null);
   const [traceOpen, setTraceOpen] = useEntryState(`activity-process-open:${entry.id}`, false);
+  const [anchorTraceOpen, setAnchorTraceOpen] = useState(false);
   const [savedProcessDepth, saveProcessDepth] = useEntryState(
     `activity-process-depth:${entry.id}`,
     1,
@@ -831,8 +882,8 @@ function ActivityBlock({
     [processReads],
   );
   useEffect(() => {
-    if (traceOpen) requestProcess();
-  }, [process.value, requestProcess, traceOpen]);
+    if (traceOpen || anchorTraceOpen) requestProcess();
+  }, [process.value, requestProcess, traceOpen, anchorTraceOpen]);
   useEffect(() => {
     if (process.value && process.value.depth > savedProcessDepth)
       saveProcessDepth(process.value.depth);
@@ -844,6 +895,10 @@ function ActivityBlock({
     else if (value.more && !value.items.some((item) => item.message_id === processTarget))
       requestProcess(value.depth + 1);
   }, [processTarget, process.error, process.value, requestProcess]);
+  useEffect(() => {
+    if (processTarget && process.value?.items.some((item) => item.message_id === processTarget))
+      return onAnchorReady();
+  }, [processTarget, process.value, onAnchorReady]);
   const processBlock = readable
     ? process.value
       ? {
@@ -1037,6 +1092,7 @@ function ActivityBlock({
                       ? {
                           open: traceOpen,
                           ready: !!process.value,
+                          onAnchorVisibilityChange: setAnchorTraceOpen,
                           activeTool: block.process?.active_tool,
                           latestActivity: null,
                           toggle: () => {

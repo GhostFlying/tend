@@ -63,9 +63,11 @@ export function useIssueIdentity(
   useEffect(() => {
     if (!entry) return;
     const { read } = entry;
-    const value = read.state.get().value;
+    const { value, loading } = read.state.get();
     const firstUser = ++entry.users === 1;
-    const shouldRead = recheckMissing ? !value || value === "missing" : firstUser && !value;
+    const shouldRead = recheckMissing
+      ? !value || value === "missing"
+      : (!value && firstUser) || (value === "missing" && !loading);
     if (shouldRead) void read.open(`/api/v1/issues/${encodeURIComponent(id)}?projection=identity`);
     return () => {
       if (--entry.users !== 0) return;

@@ -6,7 +6,7 @@ import { ChoiceCard } from "../workitems/Choice.tsx";
 import { useServices } from "../app/services.tsx";
 import { noticeTitle } from "../upgrades/status.ts";
 // Shared conversation messages and explicitly disclosed tool traces.
-import { memo, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   AssistantState,
   MessageProcessingState,
@@ -212,6 +212,7 @@ export function AgentTurn({
         activeTool?: string | undefined;
         latestActivity?: ConversationItem | null | undefined;
         toggle(): void;
+        onAnchorVisibilityChange?(visible: boolean): void;
         footer: React.ReactNode;
       }
     | undefined;
@@ -245,6 +246,11 @@ export function AgentTurn({
   const [dismissedAnchor, setDismissedAnchor] = useState<string>();
   const revealAnchor = targetTool >= 0 && dismissedAnchor !== targetMessage;
   const traceExpanded = traceOpen || revealAnchor;
+  const onAnchorVisibilityChange = process?.onAnchorVisibilityChange;
+  useEffect(() => {
+    onAnchorVisibilityChange?.(revealAnchor);
+    return () => onAnchorVisibilityChange?.(false);
+  }, [onAnchorVisibilityChange, revealAnchor]);
   const wasActive = useRef(status.active);
   useLayoutEffect(() => {
     if (!process && wasActive.current && !status.active) {
