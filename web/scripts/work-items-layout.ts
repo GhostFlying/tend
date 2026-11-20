@@ -531,7 +531,7 @@ try {
     items[7]!.state = "cancelled";
     publish();
     await board
-      .getByText("Cancelled", { exact: true })
+      .getByText("已取消", { exact: true })
       .waitFor()
       .catch(async (error) => {
         await writeFile(
@@ -542,11 +542,11 @@ try {
         throw error;
       });
     await editIssueFilters(page, () => page.getByLabel("包含已关闭").uncheck());
-    await board.getByText("Cancelled", { exact: true }).waitFor({ state: "hidden" });
+    await board.getByText("已取消", { exact: true }).waitFor({ state: "hidden" });
     await editIssueFilters(page, () => page.getByLabel("包含已关闭").check());
     await title.waitFor();
     await board.getByRole("button", { name: `展开 ${items[0]!.plan.title}`, exact: true }).click();
-    await board.getByText("Cancelled", { exact: true }).waitFor();
+    await board.getByText("已取消", { exact: true }).waitFor();
     await page.screenshot({ path: join(output, `closed-child-${width}.png`) });
     await title.click();
     const detail = page;
@@ -612,7 +612,7 @@ try {
     await editIssueFilters(page, () => filter.fill("tend"));
     await board.getByRole("button", { name: "下一页", exact: true }).click();
     await board.getByRole("button", { name: "持续跟进目标 10", exact: true }).waitFor();
-    await board.getByText("Cancelled", { exact: true }).waitFor();
+    await board.getByText("已取消", { exact: true }).waitFor();
     const pageQuery = reads
       .map((path) => new URL(path, "http://fixture.invalid"))
       .findLast(
