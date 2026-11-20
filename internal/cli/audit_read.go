@@ -198,7 +198,8 @@ For a current snapshot and later event deltas use --view incremental. Pass
 next_cursor to --cursor until more is false, and keep it to read later deltas.
 The default page size is 50. through fixes the event interval and values are
 current at read time. Cursor scope or history errors require a fresh snapshot.
-This read leaves source acknowledgement and Task dispatch to their own commands.
+prepared records the historical baseline. dispatch_ready describes current
+context and its owned receipts. issue create-task returns the admission result.
 `
 
 	case "issue materials":
