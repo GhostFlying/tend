@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/GhostFlying/tend/internal/harness"
-	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -13,7 +11,7 @@ import (
 // the existing Run window. Tool payloads and user inputs stay in their
 // original read paths. Only received replies contribute text here.
 func projectManagerProcessEvent(row *protocol.RunLogView) error {
-	var event coordination.Event
+	var event protocol.ManagerProcessEvent
 	if err := json.Unmarshal(row.Body, &event); err != nil {
 		return err
 	}
@@ -24,16 +22,16 @@ func projectManagerProcessEvent(row *protocol.RunLogView) error {
 		row.Kind = "native.disconnected"
 	case event.Native != nil:
 		native := event.Native
-		row.Kind, row.NativeID = string(native.Kind), native.ItemID
+		row.Kind, row.NativeID = native.Kind, native.ItemID
 		body["turn_id"], data["type"] = native.TurnID, native.ItemType
 		switch native.Kind {
-		case harness.EventAgentMessageDelta:
+		case protocol.ManagerEventAgentMessageDelta:
 			data["type"], data["text"] = "agentMessageFragment", native.Text
-		case harness.EventItemCompleted:
-			if native.ItemType == harness.ItemAgentMessage {
+		case protocol.ManagerEventItemCompleted:
+			if native.ItemType == protocol.ManagerItemAgentMessage {
 				data["text"] = native.Text
 			}
-		case harness.EventTurnCompleted:
+		case protocol.ManagerEventTurnCompleted:
 			data["status"] = native.TurnStatus
 		}
 		if native.Tool != nil {

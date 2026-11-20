@@ -212,18 +212,18 @@ const EventCoordinatorHistoryEnd EventKind = "coordinator_history_end"
 // Event kinds.
 const (
 	EventTurnStarted       EventKind = "turn_started"
-	EventTurnCompleted     EventKind = "turn_completed"
+	EventTurnCompleted     EventKind = protocol.ManagerEventTurnCompleted
 	EventContextUsage      EventKind = "context_usage"
 	EventRequestUsage      EventKind = "request_usage"
 	EventChildRollout      EventKind = "child_rollout"
 	EventItemStarted       EventKind = "item_started"
-	EventItemCompleted     EventKind = "item_completed"
-	EventAgentMessageDelta EventKind = "agent_message_delta"
+	EventItemCompleted     EventKind = protocol.ManagerEventItemCompleted
+	EventAgentMessageDelta EventKind = protocol.ManagerEventAgentMessageDelta
 )
 
 // Item types tend acts on. Other types pass through as they are.
 const (
-	ItemAgentMessage      = "agentMessage"
+	ItemAgentMessage      = protocol.ManagerItemAgentMessage
 	ItemUserMessage       = "userMessage"
 	ItemContextCompaction = "contextCompaction"
 )
