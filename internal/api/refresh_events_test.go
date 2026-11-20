@@ -89,19 +89,27 @@ func TestChatEventStreamResumesAcrossCoalescedHiddenProcessChanges(t *testing.T)
 
 func TestChatEventStreamResetsForCoalescedIssueProcessChanges(t *testing.T) {
 	e := newEnv(t)
+	e.configure()
 	token := e.login(protocol.ScopeOwner)
 	ctx := t.Context()
 	const trigger = "issue-background-trigger"
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	conversation := issueDetailHTTP(t, e, token, issue.IssueID).Conversation.ConversationID
 	if err := e.store.Write(ctx, func(tx *store.Tx) error {
 		_, err := tx.InsertMessage(ctx, store.MessageRow{
-			MessageID: trigger, Author: "system", ConversationID: "issue:related",
+			MessageID: trigger, Author: "system", ConversationID: conversation,
 		})
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	e.say("visible before Issue changes")
-	stream := openStream(t, e.url, token, "?projection=chat&after=1")
+	var snapshot protocol.IssueConversationPage
+	if status := e.do("GET", "/api/v1/conversation?projection=chat", token, nil, &snapshot); status != http.StatusOK {
+		t.Fatalf("snapshot status %d", status)
+	}
+	query := fmt.Sprintf("?projection=chat&after=%d", snapshot.EventSeq)
+	stream := openStream(t, e.url, token, query)
 	if start := stream.next(); start.name != "start" {
 		t.Fatal(start)
 	}
@@ -121,17 +129,17 @@ func TestChatEventStreamResetsForCoalescedIssueProcessChanges(t *testing.T) {
 	if reset := stream.next(); reset.name != "reset" {
 		t.Fatal("Issue activity missed its required reset", reset)
 	}
-	if stale := openStream(t, e.url, token, "?projection=chat&after=1"); stale.status != http.StatusConflict {
+	if stale := openStream(t, e.url, token, query); stale.status != http.StatusConflict {
 		t.Fatal("expired Issue refresh cursor was accepted", stale.status)
 	}
-	retained := openStream(t, e.url, token, "?projection=chat&after=2")
+	retained := openStream(t, e.url, token, fmt.Sprintf("?projection=chat&after=%d", snapshot.EventSeq+1))
 	if start := retained.next(); start.name != "start" {
 		t.Fatal(start)
 	}
 	frame := retained.next()
 	var ev protocol.LedgerEvent
 	if frame.name != "ledger" || json.Unmarshal([]byte(frame.data), &ev) != nil ||
-		ev.ConversationID != "issue:related" || ev.Kind != "conversation.process_changed" || ev.Item != nil {
+		ev.ConversationID != conversation || ev.Kind != "conversation.process_changed" || ev.Item != nil {
 		t.Fatal("Issue process notice must remain a scoped invalidation", frame)
 	}
 }
