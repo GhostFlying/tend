@@ -119,16 +119,10 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if p.ExecutionRunID != "" && (p.Action != "complete" || p.ExecutionTaskID == "" || p.ExecutionTaskID == d.ExecutionTaskID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "execution_run_id selects an archived delivery for an unbound contribution")
 	}
-	if d.Status == "report" && p.Action == "report" && issue.Plan.ReportFollowOnDecision {
-		unchanged, err := reportFollowOnAlreadySettled(ctx, tx.Q(), issue, d.TaskID, p.ProposedImplementationScope)
-		if err != nil {
-			return Outcome{}, err
-		}
-		if unchanged {
-			return Outcome{Result: d, NoEffect: true}, nil
-		}
-	}
-	if d.Status == "complete" || d.Status == "report" || d.Status == "ended" {
+	// A settled report can still receive its original follow-on decision
+	// if the responsible owner already settled it as a bounded report.
+	reportDecision := p.Action == "report" && p.ProposedImplementationScope != ""
+	if d.Status == "complete" || d.Status == "ended" || d.Status == "report" && !reportDecision {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "delivery responsibility is already settled")
 	}
 	var events []Event
@@ -383,7 +377,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 		evidence = []protocol.IssueEvidence{basis}
-		if issue.Plan.ReportFollowOnDecision || p.ProposedImplementationScope != "" {
+		if reportDecision {
 			reportEvents, unchanged, err := settleReportFollowOn(ctx, x, tx, issue, d, p)
 			if err != nil {
 				return Outcome{}, err
