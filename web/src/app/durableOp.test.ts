@@ -1,7 +1,7 @@
 import { IDBFactory } from "fake-indexeddb";
 import { expect, test } from "vitest";
 import { ApiError, NetworkError } from "../api/client.ts";
-import type { APIResponse, Envelope } from "../api/generated/api.ts";
+import type { APIResponse, AttentionView, Envelope } from "../api/generated/api.ts";
 import type { OpSender } from "./ops.ts";
 import { DurableOp } from "./durableOp.ts";
 
@@ -561,5 +561,37 @@ test("newer open decision version fences the original submission without proving
     kind: "stale",
     currentAttention: sender.current,
   });
+  expect(sender.submitted).toEqual([original]);
+});
+
+test("an observed answer only settles the matching request and original question version", async () => {
+  const original: Envelope = {
+    ...envelope,
+    operation: "attentions.respond",
+    target: { type: "attention", id: "attn-original" },
+    payload: { version: 3, option: "approve" },
+  };
+  const sender = new Sender();
+  const journal = new DurableOp("observe-answer", new IDBFactory());
+  expect((await journal.submit(sender, original)).kind).toBe("unknown");
+  const current = {
+    attention_id: "attn-original",
+    kind: "decision",
+    status: "resolved",
+    revision: 8,
+    decision: { version: 4, status: "answered", answer: { option: "defer" } },
+  } as AttentionView;
+  await journal.settleObservedAnswer(current, { ...original, request_id: "foreign" });
+  expect(await journal.pending()).toEqual(original);
+  await journal.settleObservedAnswer(
+    {
+      ...current,
+      decision: { ...current.decision!, version: 5 },
+    },
+    original,
+  );
+  expect(await journal.pending()).toEqual(original);
+  await journal.settleObservedAnswer(current, original);
+  expect(await journal.pending()).toBeUndefined();
   expect(sender.submitted).toEqual([original]);
 });

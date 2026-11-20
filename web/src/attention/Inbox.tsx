@@ -30,6 +30,7 @@ import {
   decisionReceipt,
   decisionReceiptTitle,
   differsFromSubmission,
+  isDeliveryDecision,
   questionVersion,
   submittedExplanation,
 } from "./decisionReceipt.ts";
@@ -339,9 +340,12 @@ function AttentionForm({
   const questionStatus = (a.decision ?? a.choice)?.status;
   const answerable =
     a.status === "open" &&
-    questionStatus === "open" &&
+    (questionStatus === "open" || (!questionStatus && questionVersion(a) > 0)) &&
     (!a.responsibility || a.responsibility.recipient_kind === "owner");
   const hasReceipt = !!receipt;
+  const deliveryDecision = isDeliveryDecision(a);
+  const choiceRequiresNoText =
+    deliveryDecision && (choice === "approve" || choice === "end_delivery");
   const receiptTitle = receipt ? decisionReceiptTitle(a, receipt.option) : "";
   useEffect(() => {
     if (hasReceipt && focusReceipt.current) {
@@ -368,6 +372,14 @@ function AttentionForm({
     original?.operation === "attentions.respond"
       ? (original.payload as RespondAttentionPayload)
       : undefined;
+  const { settleObservedAnswer } = operation;
+  const matchedPending = pendingAnswer && decisionReceipt(a, pendingAnswer.version);
+  const hasMatchedPending = !!matchedPending;
+  useEffect(() => {
+    if (!original || !hasMatchedPending || operation.busy) return;
+    const reply = original.payload as RespondAttentionPayload;
+    void settleObservedAnswer(a, original).then(() => setSubmitted(reply));
+  }, [a, original, hasMatchedPending, operation.busy, settleObservedAnswer]);
   const originalAnswer = pendingAnswer ?? submitted;
   const differentAnswer =
     receipt && originalAnswer && differsFromSubmission(a, receipt, originalAnswer);
@@ -405,13 +417,21 @@ function AttentionForm({
         ? {
             version: questionVersion(a),
             option: choice,
-            text: a.choice ? [choice, text].filter(Boolean).join("\n\n") : text,
+            text: a.choice
+              ? [choice, text].filter(Boolean).join("\n\n")
+              : choiceRequiresNoText
+                ? ""
+                : text,
           }
         : action === "reconcile"
           ? pendingAnswer
           : undefined;
     if (answer) {
-      if (activeAnswer.current || (action === "respond" && (!answerable || operation.pending)))
+      if (
+        activeAnswer.current ||
+        (action === "respond" &&
+          (!answerable || operation.pending || (choiceRequiresNoText && text.trim())))
+      )
         return;
       activeAnswer.current = true;
       setSubmitting(true);
@@ -569,16 +589,39 @@ function AttentionForm({
                     </span>
                   </label>
                 ))}
+                {deliveryDecision && (
+                  <label className={styles.option}>
+                    <input
+                      type="radio"
+                      name={`answer-${a.attention_id}`}
+                      checked={shownChoice === ""}
+                      disabled={blocked}
+                      onChange={() => setChoice("")}
+                    />
+                    <span>仅回复说明</span>
+                  </label>
+                )}
               </div>
               <label>
-                补充说明（可选）
+                {deliveryDecision && shownChoice === "" ? "说明" : "补充说明（可选）"}
                 <Textarea
                   className={styles.textarea}
                   value={shownText}
-                  disabled={blocked}
+                  disabled={blocked || choiceRequiresNoText}
                   onChange={(e) => setText(e.target.value)}
                 />
               </label>
+              {choiceRequiresNoText && (
+                <p className={styles.muted}>
+                  批准和结束交付仅提交所选决定。附带条件时请选择「仅回复说明」。
+                  如需另记审计说明，可用 CLI 的 --reason 参数。
+                  {text.trim() && (
+                    <Button variant="link" disabled={blocked} onClick={() => setText("")}>
+                      清空说明
+                    </Button>
+                  )}
+                </p>
+              )}
             </>
           ) : (
             <p className={styles.muted}>
@@ -696,12 +739,12 @@ function AttentionForm({
               : result.message}
         </p>
       )}
-      {operation.pending && !submitting && (
+      {operation.pending && !submitting && (!matchedPending || operation.storageError) && (
         <div className={styles.warning}>
           <strong role="status">
-            {receipt && pendingAnswer ? "原提交仍可核实。" : "提交结果待确认"}
+            {a.kind === "decision" ? "提交结果待确认" : "提交结果待确认，请勿重复提交。"}
           </strong>
-          {!receipt && <p>已保留本次输入，请核实原提交结果。</p>}
+          {a.kind === "decision" && <p>已保留本次输入，请核实原提交结果。</p>}
           <Button variant="primary" disabled={operation.busy} onClick={() => void run("reconcile")}>
             核实原提交结果
           </Button>
@@ -711,7 +754,9 @@ function AttentionForm({
         {a.kind === "decision" && answerable && !pendingAnswer && (
           <Button
             variant="primary"
-            disabled={blocked || (!choice && !text.trim())}
+            disabled={
+              blocked || (!choice && !text.trim()) || !!(choiceRequiresNoText && text.trim())
+            }
             onClick={() => void run("respond")}
           >
             提交决定

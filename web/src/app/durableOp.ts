@@ -1,8 +1,9 @@
 import { prepareOperation, recoverOperation } from "./operationRecovery.ts";
+import { decisionReceipt } from "../attention/decisionReceipt.ts";
 import { deploymentStorageName } from "../api/deployment.ts";
 // Owner control requests persist before transport. Recovery retains the original
 // target, revision and payload; a different tab cannot replace a pending request.
-import type { Envelope } from "../api/generated/api.ts";
+import type { AttentionView, Envelope, RespondAttentionPayload } from "../api/generated/api.ts";
 import { runOp, type OpOutcome, type OpSender } from "./ops.ts";
 
 export class DurableOp {
@@ -90,6 +91,19 @@ export class DurableOp {
       return { kind: "unknown", message: "该操作仍有待核对请求，请先核对原请求。" };
     }
     return this.settle(envelope, await runOp(sender, envelope));
+  }
+
+  async settleObservedAnswer(item: AttentionView, expected: Readonly<Envelope>): Promise<void> {
+    if (
+      expected.operation !== "attentions.respond" ||
+      expected.target.type !== "attention" ||
+      expected.target.id !== item.attention_id ||
+      !decisionReceipt(item, (expected.payload as RespondAttentionPayload).version)
+    )
+      return;
+    await this.change((current) =>
+      current?.request_id === expected.request_id ? undefined : current,
+    );
   }
 
   async reconcile(sender: OpSender): Promise<OpOutcome> {

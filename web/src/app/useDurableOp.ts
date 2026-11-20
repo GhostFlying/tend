@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { newRequestId } from "../api/ids.ts";
-import type { Envelope } from "../api/generated/api.ts";
+import type { AttentionView, Envelope } from "../api/generated/api.ts";
 import type { OpSender } from "./ops.ts";
 import { DurableOp } from "./durableOp.ts";
 
@@ -47,5 +47,18 @@ export function useDurableOp(sender: OpSender, scope: string) {
       }
     }
   };
-  return { pending, original, busy, storageError, execute };
+  const settleObservedAnswer = useCallback(
+    async (item: AttentionView, request: Readonly<Envelope>) => {
+      try {
+        await journal.settleObservedAnswer(item, request);
+        const remaining = await journal.pending();
+        setPending(!!remaining);
+        setOriginal(remaining ?? null);
+      } catch {
+        setStorageError("无法更新本地操作记录，请核实原提交结果。");
+      }
+    },
+    [journal],
+  );
+  return { pending, original, busy, storageError, execute, settleObservedAnswer };
 }

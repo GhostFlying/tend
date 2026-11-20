@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { chromium } from "playwright";
@@ -50,6 +50,19 @@ let submissions: Envelope[] = [];
 let gate = Promise.resolve();
 let release = () => {};
 let detailReads = 0;
+let eventSeq = 1;
+const streams = new Set<ServerResponse>();
+function publishAnswer() {
+  eventSeq++;
+  const event = {
+    event_seq: eventSeq,
+    object_type: "attention",
+    object_id: id,
+    kind: "attention.updated",
+  };
+  for (const stream of streams)
+    stream.write(`id: ${eventSeq}\nevent: ledger\ndata: ${JSON.stringify(event)}\n\n`);
+}
 const root = fixtureRoot();
 const server = createServer(async (req, res) => {
   const url = new URL(req.url!, "http://localhost");
@@ -62,7 +75,9 @@ const server = createServer(async (req, res) => {
     return json({ token: "fixture", scope: "owner", deployment_id: "inbox-receipt" });
   if (path === "/api/v1/events") {
     res.setHeader("Content-Type", "text/event-stream");
-    res.write('event: start\ndata: {"event_seq":1}\n\n');
+    res.write(`event: start\ndata: ${JSON.stringify({ event_seq: eventSeq })}\n\n`);
+    streams.add(res);
+    res.on("close", () => streams.delete(res));
     return;
   }
   if (path === "/api/v1/snapshot")
@@ -86,6 +101,7 @@ const server = createServer(async (req, res) => {
         },
       });
     const answer = e.payload as RespondAttentionPayload;
+    assert(!["approve", "end_delivery"].includes(answer.option ?? "") || !answer.text);
     current = resolved(answer.option ?? "", answer.text);
     return json({ operation: { request_id: e.request_id, status: "succeeded", result: current } });
   }
@@ -137,6 +153,13 @@ try {
     { width: 390, name: "phone", local: "批准", actual: "批准已记录", note: "" },
     { width: 390, name: "failure", local: "延期", actual: "延期决定已记录", note: "请下周继续" },
     {
+      width: 390,
+      name: "conditional-reply",
+      local: "仅回复说明",
+      actual: "答复已记录",
+      note: "通过回归后再批准",
+    },
+    {
       width: 1024,
       name: "unknown-cross-device",
       local: "批准",
@@ -172,15 +195,20 @@ try {
       await page.goto(`${origin}/inbox/${id}`);
       assert.equal(await page.title(), "tend");
       const submit = page.getByRole("button", { name: "提交决定", exact: true });
-      const explanation = page.getByRole("textbox", { name: /补充说明/ });
+      const explanation = page.getByRole("textbox", { name: /说明/ });
       const radio = page.getByRole("radio", { name: scenario.local, exact: true });
-      const badge = page.locator('a[href="/inbox"][aria-description]').filter({ visible: true });
-      await page.waitForFunction(() =>
-        [...document.querySelectorAll('a[href="/inbox"][aria-description]')].some(
-          (a) => a.getAttribute("aria-description") === "1 项待处理",
-        ),
-      );
+      const badge = page
+        .getByRole("navigation", {
+          name: phone ? "视图" : "主导航",
+          exact: true,
+        })
+        .getByRole("link", { name: "收件箱", exact: true });
+      await badge.waitFor({ state: "visible" });
+      const pendingBadge = badge.locator('[data-badge="pending"]');
+      await pendingBadge.waitFor({ state: "visible" });
+      assert.equal(await badge.getAttribute("aria-description"), "1 项待处理");
       await radio.check();
+      if (scenario.local === "批准") assert(await explanation.isDisabled());
       if (scenario.note) await explanation.fill(scenario.note);
       await submit.click();
       await page.getByText("正在提交决定…", { exact: true }).waitFor();
@@ -216,7 +244,7 @@ try {
         assert.equal(submissions.length, 1);
         assert.equal(submissions[0]!.request_id, requestID);
         current = resolved("end_delivery", "从另一端记录的说明");
-        await reconcile.click();
+        publishAnswer();
       }
       const receipt = page.getByRole("status").filter({ hasText: scenario.actual });
       await receipt.waitFor();
@@ -236,12 +264,21 @@ try {
         assert((await receipt.textContent())?.includes("从另一端记录的说明"));
         assert((await receipt.textContent())?.includes("本次选择未采用"));
       }
-      await page.waitForFunction(() =>
-        [...document.querySelectorAll('a[href="/inbox"][aria-description]')].some(
-          (a) => a.getAttribute("aria-description") === "0 项待处理",
-        ),
-      );
-      assert.equal(await badge.locator('[data-badge="pending"]').count(), 0);
+      await badge.waitFor({ state: "visible" });
+      await pendingBadge.waitFor({ state: "hidden" });
+      assert.equal(await badge.getAttribute("aria-description"), "0 项待处理");
+      if (lose) {
+        assert.equal(
+          await page.getByRole("button", { name: "核实原提交结果", exact: true }).count(),
+          0,
+        );
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll("button")].some(
+            (b) => b.textContent === "标记已读" && !b.disabled,
+          ),
+        );
+        assert.equal(submissions.length, 1);
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), scenario.width);
       assert.equal(await page.locator("vite-error-overlay").count(), 0);
       if (output) await page.screenshot({ path: join(output, `${scenario.name}-receipt.png`) });
