@@ -254,6 +254,24 @@ func TestHTTPStreamObservesResetAndBoundsRoutineActivity(t *testing.T) {
 	if start := failed.next(); start.name != "start" {
 		t.Fatal(start)
 	}
+
+	// Expired reconnects can fill the unexpected-end budget while a healthy
+	// stream is open. The cap still applies after the first reset and refusal.
+	for range 12 {
+		attempt := openStream(t, server.URL, token, "?after=1")
+		if attempt.status != http.StatusConflict {
+			t.Fatalf("expected cursor rejection, got %d", attempt.status)
+		}
+		for range attempt.events {
+		}
+	}
+	if got := len(rows) + 2; got != 10 {
+		t.Fatalf("expected ten unexpected-end summaries, got %d", got)
+	}
+	for range len(rows) {
+		<-rows
+	}
+
 	if err := e.store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -267,16 +285,4 @@ func TestHTTPStreamObservesResetAndBoundsRoutineActivity(t *testing.T) {
 		t.Fatal("late read failure was not correlated to its open response", row)
 	}
 
-	// Invalid attempts share the bounded unexpected-end budget with resets and failures.
-	for range 12 {
-		attempt := openStream(t, server.URL, token, "?after=invalid-private-cursor")
-		if attempt.status != http.StatusBadRequest {
-			t.Fatal(attempt.status)
-		}
-		for range attempt.events {
-		}
-	}
-	if len(rows) != 7 {
-		t.Fatalf("expected an aggregate cap of ten summaries in the window, got %d", len(rows)+3)
-	}
 }

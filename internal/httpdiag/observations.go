@@ -23,6 +23,7 @@ const (
 	abnormalRead
 	streamEnd
 	abnormalStream
+	streamReadFailure
 	summaryClasses
 )
 
@@ -61,13 +62,17 @@ func SetTraceHeader(ctx context.Context, w http.ResponseWriter) bool {
 }
 
 // StreamEnded reports a single terminal observation for an authenticated stream.
-func StreamEnded(ctx context.Context, expected bool, attrs ...any) {
+func StreamEnded(ctx context.Context, reason string, attrs ...any) {
 	if q, ok := ctx.Value(requestKey{}).(*request); ok {
 		class, level := abnormalStream, slog.LevelWarn
-		if expected {
+		switch reason {
+		case "cancelled", "server_shutdown":
 			class, level = streamEnd, slog.LevelInfo
+		case "initial_read_failed", "read_failed":
+			// A wave of rejected cursors must leave room for database failures.
+			class = streamReadFailure
 		}
-		q.report(ctx, class, q.tracker.now(), level, "HTTP event stream ended", attrs...)
+		q.report(ctx, class, q.tracker.now(), level, "HTTP event stream ended", append(attrs, "end_reason", reason)...)
 	}
 }
 
