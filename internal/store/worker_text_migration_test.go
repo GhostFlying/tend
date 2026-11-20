@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/GhostFlying/tend/internal/blobstore"
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
@@ -18,7 +20,11 @@ func TestWorkerTextMigrationRetainsOriginalCursorAndBusinessEvents(t *testing.T)
 		t.Fatal(err)
 	}
 	defer db.Close()
-	s := &Store{write: db, read: db, now: clock.Now}
+	files, err := blobstore.New(path + ".files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{path: path, write: db, read: db, now: clock.Now, files: files}
 	if err := s.migrate(ctx, 139); err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +48,28 @@ func TestWorkerTextMigrationRetainsOriginalCursorAndBusinessEvents(t *testing.T)
 	for i, body := range business {
 		mustExec(t, s, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('run-issue:worker',?,?)`, 44+i, body)
 	}
+	want := map[int]string{58: "片", 59: "", 60: strings.Repeat("片", 2048)}
+	originals := make(map[int]string)
 	for seq := 47; seq <= 60; seq++ {
-		mustExec(t, s, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('run-issue:worker',?,?)`, seq, fragment)
+		raw := fragment
+		if piece, ok := want[seq]; ok {
+			raw = strings.Replace(fragment, "片", piece, 1)
+		}
+		staged, err := s.StageEventOriginals(ctx, "worker-before-upgrade", []byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Write(staged, func(tx *Tx) error {
+			body, err := tx.RetainEventJSON(staged, raw)
+			if err != nil {
+				return err
+			}
+			originals[seq] = body
+			_, err = tx.Exec(staged, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('run-issue:worker',?,?)`, seq, body)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mustExec(t, s, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('run-main',1,?)`, fragment)
 	if err := db.Close(); err != nil {
@@ -56,11 +82,24 @@ func TestWorkerTextMigrationRetainsOriginalCursorAndBusinessEvents(t *testing.T)
 	defer upgraded.Close()
 	if err := upgraded.Read(ctx, func(tx *ReadTx) error {
 		var texts, pending, last int
-		if err := tx.Q().QueryRowContext(ctx, `SELECT SUM(applied=1 AND body_json=?),SUM(applied=0),MAX(seq) FROM manager_native_events WHERE run_id='run-issue:worker'`, fragment).Scan(&texts, &pending, &last); err != nil {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT SUM(applied=1 AND seq>=47),SUM(applied=0),MAX(seq) FROM manager_native_events WHERE run_id='run-issue:worker'`).Scan(&texts, &pending, &last); err != nil {
 			return err
 		}
 		if texts != 14 || pending != len(business) || last != 60 {
 			return fmt.Errorf("retained texts=%d pending business events=%d sequence=%d", texts, pending, last)
+		}
+		for seq, expected := range want {
+			var stored string
+			if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM manager_native_events WHERE run_id='run-issue:worker' AND seq=?`, seq).Scan(&stored); err != nil {
+				return err
+			}
+			var original struct{ Native struct{ Text *string } }
+			if err := DecodeJSON(ctx, tx.Q(), stored, &original); err != nil {
+				return err
+			}
+			if stored != originals[seq] || original.Native.Text == nil || *original.Native.Text != expected {
+				return fmt.Errorf("migration changed the original body at %d", seq)
+			}
 		}
 		var main int
 		if err := tx.Q().QueryRowContext(ctx, `SELECT applied FROM manager_native_events WHERE run_id='run-main' AND body_json=?`, fragment).Scan(&main); err != nil {

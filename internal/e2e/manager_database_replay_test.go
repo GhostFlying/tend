@@ -166,7 +166,10 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	for sequence := int64(1); sequence <= lastSequence; sequence++ {
 		body := json.RawMessage(`{"thread_id":"original-native","native":{"Kind":"request_usage"}}`)
 		if sequence >= 47 {
-			text := fmt.Sprintf("part%d", sequence)
+			text := "片"
+			if sequence == lastSequence {
+				text = strings.Repeat("片", 5)
+			}
 			if options.empty {
 				text = ""
 			}
@@ -214,6 +217,9 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	// application dependency on a visible or buffered conversation item.
 	if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND seq BETWEEN 47 AND 60 AND applied=1`, as.RunID) != 14 {
 		t.Fatal("legacy fragments still required a conversation acknowledgement")
+	}
+	if !options.empty && s.count(`SELECT SUM(length(json_extract(body_json,'$.native.Text'))) FROM manager_native_events WHERE run_id=? AND seq BETWEEN 47 AND 60`, as.RunID) != 18 {
+		t.Fatal("legacy fixture did not retain its original 18 characters")
 	}
 	if err := s.app.AcknowledgeManagerEvent(ctx, as.RunID, 46, "original-native", "", "", false); err != nil {
 		t.Fatal(err)

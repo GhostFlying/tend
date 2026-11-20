@@ -29,6 +29,7 @@ import {
 } from "./model.ts";
 import { useRunWindow, previewStateLabel } from "./useRunWindow.ts";
 import { NativeContent } from "./NativeContent.tsx";
+import { ProcessText } from "./ProcessText.tsx";
 import { RolloutOverview, type SequenceRange } from "./Overview.tsx";
 import styles from "./Monitor.module.css";
 
@@ -581,17 +582,12 @@ function MonitorWindow({
           原件或来源发生变化，已重新读取当前记录窗口。
         </p>
       )}
-      {window.native && window.live && !!window.preview?.live_text?.length && (
-        <details className={styles.liveText}>
-          <summary>正在生成的回复片段</summary>
-          {window.preview.live_text.map((fragment) => (
-            <div key={JSON.stringify([fragment.thread_id, fragment.turn_id, fragment.item_id])}>
-              <p>{fragment.text}</p>
-              {fragment.truncated && <small>已采集片段到此为止</small>}
-            </div>
-          ))}
-        </details>
-      )}
+      {window.live &&
+        (window.native ? (
+          <ProcessText parts={window.preview?.live_text} title="正在生成的回复片段" />
+        ) : (
+          <ProcessText parts={window.page?.close_process_text} title="关闭时采集的回复片段" />
+        ))}
       {(window.error ||
         (window.native &&
           window.preview &&

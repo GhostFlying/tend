@@ -72,6 +72,7 @@ func (a *App) stageRetainedInput(ctx context.Context, env *protocol.Envelope, do
 		if json.Unmarshal(env.Payload, &p) != nil {
 			return ctx, nil
 		}
+		p.ProcessText = nil // Optional close diagnostics use the existing Run.
 		raw, err := json.Marshal(p)
 		if err != nil {
 			return ctx, err

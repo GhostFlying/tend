@@ -241,10 +241,10 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	nativeClosed := false
 	var emitMu sync.Mutex
 	streamText := as.Manager.ConversationID == "" || as.Manager.ConversationID == "main"
-	processText := &workerProcessText{}
+	processText := &harness.WorkerProcessTextBuffer{}
 	if active := r.lookup(as.RunID); !streamText && active != nil {
 		processText = &active.processText
-		defer processText.reset()
+		defer processText.Drain("", "")
 	}
 	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, NativeOwnerTools: as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
@@ -314,8 +314,15 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	driver.Emit = func(ctx context.Context, event coordination.Event) error {
 		emitMu.Lock()
 		defer emitMu.Unlock()
-		if !streamText && processText.capture(&event) {
-			return nil
+		if !streamText {
+			if event.Disconnected {
+				event.ProcessText = processText.Drain(event.ThreadID, "")
+			} else if event.Native != nil {
+				event.ProcessText = processText.Observe(event.ThreadID, *event.Native)
+				if event.Native.Kind == harness.EventAgentMessageDelta {
+					return nil
+				}
+			}
 		}
 		if event.Native != nil {
 			native := *event.Native
@@ -509,6 +516,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					// Delivery can be cancelled after this physical close. No
 					// cleanup event may follow its frozen event cursor.
 					nativeClosed = true
+					reply.ProcessText = processText.Drain("", "")
 				}
 				if callErr != nil {
 					reply.Error = "Native coordinator operation failed"

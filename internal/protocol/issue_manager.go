@@ -93,12 +93,13 @@ const (
 )
 
 type ManagerNativeReply struct {
-	Method       string          `json:"method,omitempty"`
-	LastSequence int64           `json:"last_sequence,omitempty"`
-	ID           string          `json:"id"`
-	Result       json.RawMessage `json:"result"`
-	Error        string          `json:"error,omitempty"`
-	Rejected     bool            `json:"rejected,omitempty"`
+	Method       string              `json:"method,omitempty"`
+	LastSequence int64               `json:"last_sequence,omitempty"`
+	ID           string              `json:"id"`
+	Result       json.RawMessage     `json:"result"`
+	Error        string              `json:"error,omitempty"`
+	Rejected     bool                `json:"rejected,omitempty"`
+	ProcessText  []WorkerProcessText `json:"process_text,omitempty"`
 }
 
 type ManagerNativeEvent struct {
@@ -106,8 +107,13 @@ type ManagerNativeEvent struct {
 	Body     json.RawMessage `json:"body"`
 }
 
-// WorkerProcessText is an observed partial reply attached to an existing
-// native event. It has no separate event sequence or acknowledgement.
+const (
+	MaxWorkerProcessTextItems = 4
+	MaxWorkerProcessTextBytes = 8 << 10
+)
+
+// WorkerProcessText is an observed partial reply for process diagnostics.
+// It has no separate event sequence or acknowledgement.
 type WorkerProcessText struct {
 	ThreadID  string `json:"thread_id"`
 	TurnID    string `json:"turn_id"`

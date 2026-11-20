@@ -1984,10 +1984,22 @@ export interface PreparationChange {
 export interface AgentRolloutPage {
   conversation_id: string;
   coverage: string;
+  live_text?: WorkerProcessText[];
   more: boolean;
   next: number;
   records: AgentRolloutRecord[] | null;
   threads: string[] | null;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkerProcessText".
+ */
+export interface WorkerProcessText {
+  item_id: string;
+  text: string;
+  thread_id: string;
+  truncated?: boolean;
+  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -6962,22 +6974,12 @@ export interface RolloutPreviewReference {
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "WorkerProcessText".
- */
-export interface WorkerProcessText {
-  item_id: string;
-  text: string;
-  thread_id: string;
-  truncated?: boolean;
-  turn_id: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "RunRolloutPage".
  */
 export interface RunRolloutPage {
   after: number;
   before: number;
+  close_process_text?: WorkerProcessText[];
   logs: RunLogView[] | null;
   more_after: boolean;
   more_before: boolean;

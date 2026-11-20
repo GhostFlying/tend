@@ -1,6 +1,7 @@
 import { rememberOpener } from "../ui/focus.ts";
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../app/services.tsx";
+import { ProcessText } from "../rollout/ProcessText.tsx";
 import type {
   AgentRolloutPage,
   AgentRolloutRecord,
@@ -11,6 +12,7 @@ export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
   const { client, conversation } = useServices();
   const [page, setPage] = useState<AgentRolloutPage | null>(null);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   const ref = useRef<HTMLDialogElement>(null);
   const path = `/api/v1/agent-conversations/${encodeURIComponent(conversation?.id ?? "main")}/rollout`;
   useEffect(() => {
@@ -19,15 +21,22 @@ export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
       rememberOpener(ref.current, document.activeElement);
       ref.current.showModal();
     }
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
     const abort = new AbortController();
     void client
       .get<AgentRolloutPage>(path, abort.signal)
-      .then(setPage)
+      .then((result) => {
+        if (abort.signal.aborted) return;
+        setPage(result);
+        setError("");
+      })
       .catch((e) => {
         if (!abort.signal.aborted) setError(String(e));
       });
     return () => abort.abort();
-  }, [open, client, path]);
+  }, [open, client, path, refresh]);
   const more = async () => {
     try {
       const next = await client.get<AgentRolloutPage>(`${path}?after=${page?.next ?? 0}`);
@@ -52,11 +61,13 @@ export function Rollout({ open, onClose }: { open: boolean; onClose(): void }) {
           </p>
           <p>Thread 代次：{page?.threads?.length ?? 0}</p>
           {error && <p role="alert">{error}</p>}
+          <ProcessText parts={page?.live_text} title="正在生成的回复片段" />
           {page?.records?.map((r) => (
             <Record key={r.seq} record={r} path={path} />
           ))}
           {page?.more && <button onClick={() => void more()}>加载更多</button>}
           <footer>
+            <button onClick={() => setRefresh((version) => version + 1)}>刷新记录</button>
             <button onClick={onClose}>关闭</button>
           </footer>
         </dialog>

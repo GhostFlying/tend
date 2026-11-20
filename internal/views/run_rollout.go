@@ -22,8 +22,16 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 	fields := "seq,COALESCE(native_id,''),kind,body_json,created_at"
 	process := false
 	if includeProcessText && run.Role == protocol.RoleIssueManager {
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main')) AND NOT EXISTS(SELECT 1 FROM run_logs WHERE run_id=?)`, run.TaskID, id).Scan(&process); err != nil {
+		var worker, collected bool
+		var closeText string
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main')), EXISTS(SELECT 1 FROM run_logs WHERE run_id=?), native_close_process_text_json FROM runs WHERE run_id=?`, run.TaskID, id, id).Scan(&worker, &collected, &closeText); err != nil {
 			return v, err
+		}
+		if worker {
+			if err := json.Unmarshal([]byte(closeText), &v.CloseProcessText); err != nil {
+				return v, err
+			}
+			process = !collected
 		}
 		if process {
 			source, fields = "manager_native_events", "seq,'','',body_json,0"

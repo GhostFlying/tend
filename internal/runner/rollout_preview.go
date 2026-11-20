@@ -209,7 +209,7 @@ func (r *Runner) readRollout(ctx context.Context, reader *rollout.Reader, work p
 	if active := r.lookup(work.RunID); work.RequireTurn && work.Query.Record == 0 && active != nil {
 		// The file window keeps its native cursor. Live fragments come from
 		// this Run's bounded memory and have no stable record number.
-		defer func() { result.LiveText = active.processText.live() }()
+		defer func() { result.LiveText = active.processText.Snapshot("", "") }()
 	}
 	sources, err := r.cfg.Journal.RolloutSources(ctx, work.DeploymentID, work.RunID)
 	if err != nil {
