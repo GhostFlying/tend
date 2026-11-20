@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -495,6 +496,19 @@ func TestIssueActivityReadableReadsCoalescedPublicProcessChanges(t *testing.T) {
 	if status := e.do("GET", "/api/v1/conversation/blocks/"+source, token, nil, &detail); status != http.StatusOK ||
 		detail.Process == nil || len(detail.Process.Items) != 1 || detail.Process.Items[0].Tool.Status != "completed" {
 		t.Fatal("updated process detail failed", status, detail)
+	}
+	path := "/api/v1/messages/" + detail.Process.Items[0].MessageID
+	var anchor protocol.IssueConversationItem
+	if status := e.do("GET", path, token, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("unpublished tool on unscoped message read: status %d", status)
+	}
+	if status := e.do("GET", path+"?conversation_id="+url.QueryEscape(conversation+"-other"), token, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("unpublished tool in a different conversation: status %d", status)
+	}
+	if status := e.do("GET", path+"?conversation_id="+url.QueryEscape(conversation), token, nil, &anchor); status != http.StatusOK ||
+		anchor.MessageID != detail.Process.Items[0].MessageID || anchor.ReplyTo != source ||
+		anchor.ConversationID != conversation || anchor.Tool != nil || anchor.Body != "" {
+		t.Fatalf("scoped tool anchor: status %d, result %+v", status, anchor)
 	}
 }
 

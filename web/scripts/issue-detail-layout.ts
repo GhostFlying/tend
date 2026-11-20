@@ -979,7 +979,17 @@ async function verifyShortNumbers() {
         });
         await page.goto(`${base}/issues/${issue.issue_id}?message=${deferredToolID}`);
         await processContinuation;
-        await detail.locator(`[data-tool-item="${deferredToolID}"]`).waitFor();
+        await page.waitForFunction((id) => {
+          const tool = document.querySelector(`[data-tool-item="${id}"]`);
+          const bounds = tool?.getBoundingClientRect();
+          const scrollport = tool?.closest("[data-issue-scroll]")?.getBoundingClientRect();
+          return (
+            !!bounds &&
+            !!scrollport &&
+            bounds.bottom > scrollport.top &&
+            bounds.top < scrollport.bottom
+          );
+        }, deferredToolID);
         console.log(`PASS scoped deferred tool anchor before publication (${width}px)`);
         await page.goto(`${base}/issues/t123?keep=1#section`);
         await page.waitForURL("**/issues/T123?keep=1#section");

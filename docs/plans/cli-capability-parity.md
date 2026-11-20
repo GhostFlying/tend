@@ -84,7 +84,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/issues/{id}/followups` | `issue followups` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/followups/{rule}/history` | `issue followup-history` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/results` | `issue results` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/messages/{id}` | `message original` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/messages/{id}` | `message original` | `--conversation` 可限定公开工具定位的会话 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/messages/{id}/associations` | `message associations` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/messaging/channels` | `channel list` | 按命令帮助选择身份；已有参数保留 | API；Telegram 共用业务 | CLI/HTTP；读取无写入 |
 | `GET /api/v1/messaging/channels/{channel}` | `channel show` | 按命令帮助选择身份；已有参数保留 | API；Telegram 共用业务 | CLI/HTTP；读取无写入 |
