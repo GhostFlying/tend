@@ -147,6 +147,10 @@ func TestExternalWaitRecoveryDoesNotStartAnotherModel(t *testing.T) {
 }
 
 func TestExternalWaitLostNativeCloseReplyReconcilesOriginalReceipt(t *testing.T) {
+	t.Run("yield already settled", func(t *testing.T) { managerYieldWithPendingReply(t, true) })
+	t.Run("yield succeeds", func(t *testing.T) { managerYieldWithPendingReply(t, false) })
+}
+func managerYieldWithPendingReply(t *testing.T, previouslyReleased bool) {
 	clock := testkit.NewClock()
 	j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), clock.Now)
 	if err != nil {
@@ -184,6 +188,10 @@ func TestExternalWaitLostNativeCloseReplyReconcilesOriginalReceipt(t *testing.T)
 			return
 		}
 		if env.Operation == protocol.OpRunsYieldExternalWait {
+			if !previouslyReleased {
+				_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
+				return
+			}
 			w.WriteHeader(http.StatusForbidden)
 			_ = json.NewEncoder(w).Encode(rpcResponse{Error: protocol.Errorf(protocol.CodeForbidden, "the original native close already released this lease")})
 			return

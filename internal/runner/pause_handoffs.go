@@ -278,7 +278,7 @@ func (r *Runner) reportPause(ctx context.Context, as protocol.Assignment, a *act
 	if r.pauseStopDesired(a) == protocol.DesiredHeld {
 		return &pauseStopPending{errHeld}
 	}
-	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunsYieldPause)
+	requests, err := r.cfg.Journal.ManagerControlRequests(ctx, as.RunID)
 	if err != nil {
 		return err
 	}
