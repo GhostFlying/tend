@@ -71,14 +71,19 @@ func TestManagerFindIsVolatileAndNeverReplaysBusiness(t *testing.T) {
 	}
 	queryCtx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	queries := []json.RawMessage{
-		json.RawMessage(`{"thread_id":"original-thread","message_id":"original-repair","turn_id":"original-turn"}`),
-		json.RawMessage(`{"thread_id":"another-thread","message_id":"original-repair","turn_id":"original-turn"}`),
-		json.RawMessage(`{"thread_id":"original-thread","message_id":"original-repair","turn_id":"another-turn"}`),
+	queries := []struct {
+		method, payload, result string
+	}{
+		{"find", `{"thread_id":"original-thread","message_id":"original-repair","turn_id":"original-turn"}`, `{"Found":false}`},
+		{"find", `{"thread_id":"another-thread","message_id":"original-repair","turn_id":"original-turn"}`, `{"Found":false}`},
+		{"find", `{"thread_id":"original-thread","message_id":"original-repair","turn_id":"another-turn"}`, `{"Found":false}`},
+		{"models", `{}`, `[]`},
+		{"usage", `{"thread_id":"original-thread"}`, `null`},
 	}
 	seen := map[string]bool{}
-	for _, payload := range queries {
-		id, err := h.app.QueueManagerNative(queryCtx, as.RunID, "find", payload)
+	for _, query := range queries {
+		payload := json.RawMessage(query.payload)
+		id, err := h.app.QueueManagerNative(queryCtx, as.RunID, query.method, payload)
 		if err != nil || seen[id] {
 			t.Fatal("distinct observation lost its identity", id, err)
 		}
@@ -86,14 +91,16 @@ func TestManagerFindIsVolatileAndNeverReplaysBusiness(t *testing.T) {
 		if reply, ready, err := h.app.ManagerNativeResult(t.Context(), as.RunID, id); err != nil || ready || reply.ID != "" {
 			t.Fatal("unobserved result became certain", reply, ready, err)
 		}
-		var command protocol.ManagerNativeRequest
+		var claim protocol.ManagerNativeClaimResult
 		for range 2 {
 			op := h.runAs(as, protocol.OpManagerNativeClaim, struct{}{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
-			if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &command) != nil || command.ID != id || command.Method != "find" || !bytes.Equal(command.Payload, payload) {
-				t.Fatal("claim retry changed original read identity", op, command)
+			if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &claim) != nil || claim.ID != id ||
+				claim.Method != query.method || !bytes.Equal(claim.Payload, payload) ||
+				!claim.AcceptsDisconnectProcessText || claim.AcceptsCloseProcessText {
+				t.Fatal("claim retry changed original observation or disconnect support", op, claim)
 			}
 		}
-		reply := protocol.ManagerNativeReply{ID: id, Method: "find", Result: json.RawMessage(`{"Found":false}`)}
+		reply := protocol.ManagerNativeReply{ID: id, Method: query.method, Result: json.RawMessage(query.result)}
 		foreign, err := h.app.Execute(t.Context(), runPrincipal("foreign-run", protocol.RoleIssueManager), h.env(protocol.OpManagerNativeReply, protocol.Target{Type: "run", ID: as.RunID}, reply, nil), ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 		if protocol.CodeOf(err) != protocol.CodeForbidden && (foreign.Error == nil || foreign.Error.Code != protocol.CodeForbidden) {
 			t.Fatal("foreign Run delivered an observation", foreign, err)
@@ -106,7 +113,7 @@ func TestManagerFindIsVolatileAndNeverReplaysBusiness(t *testing.T) {
 			t.Fatal("negative observation lost its actual result", got, ready, err)
 		}
 	}
-	fresh, err := h.app.QueueManagerNative(queryCtx, as.RunID, "find", queries[0])
+	fresh, err := h.app.QueueManagerNative(queryCtx, as.RunID, queries[0].method, json.RawMessage(queries[0].payload))
 	if err != nil || seen[fresh] {
 		t.Fatal("completed observation blocked a new read", fresh, err)
 	}

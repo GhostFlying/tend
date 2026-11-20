@@ -176,7 +176,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			var payload, status string
 			err := tx.Q().QueryRowContext(ctx, `SELECT request_id,method,payload_json,status FROM manager_native_requests WHERE run_id=? AND status IN ('pending','started') ORDER BY CASE WHEN status='started' THEN 0 ELSE 1 END,created_at,rowid LIMIT 1`, run).Scan(&p.ID, &p.Method, &payload, &status)
 			if errors.Is(err, sql.ErrNoRows) {
-				return Outcome{NoEffect: !changed, Result: map[string]any{"request": nil, "accepts_disconnect_process_text": true}}, nil
+				return Outcome{NoEffect: !changed, Result: activeManagerClaimResult(nil)}, nil
 			}
 			if err != nil {
 				return Outcome{}, err
@@ -186,11 +186,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			p.Payload = json.RawMessage(payload)
-			claimResult := protocol.ManagerNativeClaimResult{
-				ManagerNativeRequest:         p,
-				AcceptsCloseProcessText:      p.Method == "close",
-				AcceptsDisconnectProcessText: true,
-			}
+			claimResult := activeManagerClaimResult(&p)
 			if status == "started" {
 				return Outcome{NoEffect: !changed, Result: claimResult}, nil
 			}
