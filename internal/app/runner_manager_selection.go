@@ -129,7 +129,8 @@ func (a *App) AgentConversationClaimed(ctx context.Context, conversation string)
 
 const runnerReceiptHistoryTaskQuery = pendingManagerReceiptRuns + `
  SELECT receipt.task_id FROM pending_receipt_runs receipt
- WHERE (SELECT m.issue_id FROM issue_manager_tasks m WHERE m.task_id=receipt.task_id)=?
+ WHERE (SELECT m.issue_id FROM issue_manager_tasks m INDEXED BY sqlite_autoindex_issue_manager_tasks_1
+        WHERE m.task_id=receipt.task_id LIMIT 1)=?
  AND receipt.observed_state IN ('finished','failed')
  AND receipt.native_closed_at>0 AND receipt.native_close_activity=receipt.native_activity
  ORDER BY receipt.created_at LIMIT 1`
