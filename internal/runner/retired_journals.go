@@ -56,8 +56,8 @@ func (r *Runner) maintainRetiredJournals(ctx context.Context) {
 	}
 }
 
-func (r *Runner) serviceRetiredJournal(ctx context.Context, id string, c retiredCursor, work protocol.RetiredJournalWork) (retiredCursor, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
+func (r *Runner) serviceRetiredJournal(parent context.Context, id string, c retiredCursor, work protocol.RetiredJournalWork) (retiredCursor, error) {
+	ctx, cancel := context.WithTimeout(parent, r.cfg.RequestTimeout)
 	defer cancel()
 	j, err := r.openRetiredJournal(ctx, id)
 	if err != nil {
@@ -81,19 +81,6 @@ func (r *Runner) serviceRetiredJournal(ctx context.Context, id string, c retired
 	archivesEnabled := r.previewDeployment != "" && len(cfg.RolloutRoots) > 0
 	r.controlMu.Unlock()
 	var failures []error
-	if !c.eventsDone {
-		runs, err := j.PendingEventRuns(ctx)
-		for _, as := range runs {
-			if e := retained.flushEvents(ctx, as); e != nil {
-				err = errors.Join(err, e)
-			}
-		}
-		if err == nil {
-			_, err = j.PruneSpool(ctx)
-		}
-		c.eventsDone = err == nil
-		failures = append(failures, err)
-	}
 
 	if work.Workspace {
 		failures = append(failures, retained.maintainWorkspaces(ctx))
@@ -112,6 +99,21 @@ func (r *Runner) serviceRetiredJournal(ctx context.Context, id string, c retired
 	}
 	if !c.archiveDone && archivesEnabled {
 		c.after, c.archiveDone, err = r.continueRetiredArchive(ctx, j, c.after)
+		failures = append(failures, err)
+	}
+	if !c.eventsDone {
+		eventCtx, cancelEvents := context.WithTimeout(parent, r.cfg.RequestTimeout)
+		defer cancelEvents()
+		runs, err := j.PendingEventRuns(eventCtx)
+		for _, as := range runs {
+			if e := retained.flushEvents(eventCtx, as); e != nil {
+				err = errors.Join(err, e)
+			}
+		}
+		if err == nil {
+			_, err = j.PruneSpool(eventCtx)
+		}
+		c.eventsDone = err == nil
 		failures = append(failures, err)
 	}
 	return c, errors.Join(failures...)
