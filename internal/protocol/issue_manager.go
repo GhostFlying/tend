@@ -85,6 +85,13 @@ type ManagerNativeRequest struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+// ManagerNativeClaimResult adds transport options to the original command.
+// The durable command and its retry identity exclude these options.
+type ManagerNativeClaimResult struct {
+	ManagerNativeRequest
+	AcceptsCloseProcessText bool `json:"accepts_close_process_text,omitempty"`
+}
+
 const (
 	OpManagerNativeClaim   = "manager.native_claim"
 	OpManagerNativeReply   = "manager.native_reply"

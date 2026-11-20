@@ -186,8 +186,12 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				return Outcome{}, err
 			}
 			p.Payload = json.RawMessage(payload)
+			claimResult := protocol.ManagerNativeClaimResult{
+				ManagerNativeRequest:    p,
+				AcceptsCloseProcessText: p.Method == "close",
+			}
 			if status == "started" {
-				return Outcome{NoEffect: !changed, Result: p}, nil
+				return Outcome{NoEffect: !changed, Result: claimResult}, nil
 			}
 
 			var rejection, steerReason string
@@ -228,7 +232,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				changed = true
 				continue
 			}
-			out := Outcome{Result: p}
+			out := Outcome{Result: claimResult}
 			if r.ObservedState == protocol.RunStarting {
 				if _, err := tx.Exec(ctx, `UPDATE runs SET observed_state='running' WHERE run_id=?`, run); err != nil {
 					return Outcome{}, err
