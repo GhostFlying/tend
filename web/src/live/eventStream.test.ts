@@ -13,6 +13,7 @@ interface Open {
 /** A fake tend whose streams the test writes to. */
 class FakeTend {
   opens: Open[] = [];
+  traceID: string | undefined = "trc_00000000000000000000000001";
   /** When each open was tried, refused ones included. */
   attempts: { at: number; after: number | undefined }[] = [];
   /** Answers an open instead of a stream when it returns an error. */
@@ -47,7 +48,9 @@ class FakeTend {
         ctrl.close();
       },
     });
-    return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    const headers = new Headers({ "Content-Type": "text/event-stream" });
+    if (this.traceID) headers.set("X-Tend-Trace-ID", this.traceID);
+    return new Response(body, { headers });
   };
 
   get last(): Open {
@@ -71,7 +74,8 @@ function ledger(seq: number, objectType = "task"): string {
 let tend: FakeTend;
 let starts: [number, boolean][];
 let events: number[];
-let lost: string[];
+let lost: [string, string | undefined][];
+let resets: [string | undefined, string | undefined][];
 let stream: EventStream;
 
 const tick = (ms = 0) => vi.advanceTimersByTimeAsync(ms);
@@ -82,11 +86,13 @@ beforeEach(() => {
   starts = [];
   events = [];
   lost = [];
+  resets = [];
   stream = new EventStream({
     open: tend.open,
     onStart: (seq, fresh) => starts.push([seq, fresh]),
     onEvent: (ev) => events.push(ev.event_seq),
-    onLost: (reason) => lost.push(reason),
+    onLost: (reason, traceID) => lost.push([reason, traceID]),
+    onReset: (reason, traceID) => resets.push([reason, traceID]),
     silenceMs: 45_000,
   });
 });
@@ -105,6 +111,7 @@ describe("EventStream", () => {
     tend.last.push('event: reset\ndata: {"event_seq":10}\n\n');
     await tick();
     expect(tend.opens.map((o) => o.after)).toEqual([undefined, undefined]);
+    expect(resets).toEqual([["服务端要求重新同步游标", tend.traceID]]);
     tend.last.push(start(10));
     await tick();
     expect(starts).toEqual([
@@ -197,15 +204,23 @@ describe("EventStream", () => {
     expect(tend.last.signal.aborted).toBe(false);
     await tick(1);
     expect(tend.opens[0]!.signal.aborted).toBe(true);
-    expect(lost).toEqual(["事件流太久没有消息"]);
+    expect(lost).toEqual([["事件流心跳超时，期间未收到数据", tend.traceID]]);
     await tick(1_000);
     expect(tend.opens.map((o) => o.after)).toEqual([undefined, 3]);
   });
 
-  test("a stream that never answers counts as lost too", async () => {
+  test("a failed retry before receiving headers does not reuse the prior trace", async () => {
     stream.start();
-    await tick(45_000);
-    expect(lost).toHaveLength(1);
+    await tick();
+    tend.last.push(start(3));
+    await tick();
+    tend.last.end();
+    tend.refuse = () => new NetworkError(new Error("no response"));
+    await tick(1_000);
+    expect(lost).toEqual([
+      ["事件流已结束", tend.traceID],
+      ["未能打开事件流", undefined],
+    ]);
   });
 
   test.each([400, 409])("a refused cursor (%s) reconnects at once without one", async (status) => {

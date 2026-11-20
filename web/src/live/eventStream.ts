@@ -9,7 +9,7 @@
 // refuses (a 4xx other than 401, such as one past a restored ledger)
 // means everything the client holds may be wrong: it drops the cursor and
 // connects again without one, and the fresh start reloads every view.
-import { ApiError } from "../api/client.ts";
+import { ApiError, responseTraceID } from "../api/client.ts";
 import type { LedgerEvent, StreamStart } from "../api/generated/api.ts";
 import { Store, type Readable } from "../state/store.ts";
 import { SseParser } from "./sse.ts";
@@ -36,9 +36,9 @@ export interface StreamOptions {
   /** Anything arrived, a heartbeat included. */
   onAlive?(): void;
   /** The connection was lost; it reconnects by itself. */
-  onLost?(reason: string): void;
+  onLost?(reason: string, traceID: string | undefined): void;
   /** A cursor-free reconnect was requested, with any reported detail. */
-  onReset?(reason: string | undefined): void;
+  onReset?(reason: string | undefined, traceID: string | undefined): void;
   /** How long a silent stream counts as alive. Default 45 seconds, three heartbeats. */
   silenceMs?: number;
   /** The pause before the given reconnection attempt, from 0. */
@@ -47,8 +47,8 @@ export interface StreamOptions {
 
 /** How one connection ended. */
 type Ending =
-  | { kind: "lost"; reason: string; started: boolean }
-  | { kind: "reset"; reason?: string }
+  | { kind: "lost"; reason: string; started: boolean; traceID: string | undefined }
+  | { kind: "reset"; reason?: string; traceID: string | undefined }
   | { kind: "stopped" };
 
 const defaultBackoff = (attempt: number): number => Math.min(1_000 * 2 ** attempt, 30_000);
@@ -113,7 +113,7 @@ export class EventStream {
       let pause: number;
       if (ending.kind === "reset") {
         this.cursorSeq = undefined;
-        this.call(() => this.options.onReset?.(ending.reason));
+        this.call(() => this.options.onReset?.(ending.reason, ending.traceID));
         // Straight back, unless tend keeps refusing.
         pause = resets === 0 ? 0 : this.backoffMs(resets - 1);
         resets++;
@@ -122,7 +122,7 @@ export class EventStream {
           failures = 0;
           resets = 0;
         }
-        this.call(() => this.options.onLost?.(ending.reason));
+        this.call(() => this.options.onLost?.(ending.reason, ending.traceID));
         pause = this.backoffMs(failures);
         failures++;
       }
@@ -147,13 +147,15 @@ export class EventStream {
       }, this.silenceMs);
     };
     let opened = false;
+    let traceID: string | undefined;
     let started = false;
     arm();
     try {
       const res = await this.options.open(this.cursorSeq, ctrl.signal);
       opened = true;
+      traceID = responseTraceID(res);
       if (!res.body) {
-        return { kind: "lost", reason: "事件流没有内容", started };
+        return { kind: "lost", reason: "事件流没有内容", started, traceID };
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -161,7 +163,7 @@ export class EventStream {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) {
-          return { kind: "lost", reason: "事件流已结束", started };
+          return { kind: "lost", reason: "事件流已结束", started, traceID };
         }
         arm();
         this.call(() => this.options.onAlive?.());
@@ -169,7 +171,7 @@ export class EventStream {
           if (m.event === "reset") {
             // A coalesced refresh position expired while connected. Rebuild
             // current views on the next cursor-free start, not from stale deltas.
-            return { kind: "reset" };
+            return { kind: "reset", reason: "服务端要求重新同步游标", traceID };
           } else if (m.event === "start") {
             const start = JSON.parse(m.data) as StreamStart;
             const fresh = this.cursorSeq === undefined;
@@ -177,14 +179,14 @@ export class EventStream {
             started = true;
             this.status.set("live");
             if (!this.call(() => this.options.onStart(start.event_seq, fresh)))
-              return { kind: "reset" };
+              return { kind: "reset", traceID };
           } else if (m.event === "ledger") {
             const event = JSON.parse(m.data) as LedgerEvent;
             if (this.cursorSeq !== undefined && event.event_seq <= this.cursorSeq) {
               continue;
             }
             // A receiver that failed to apply an event cannot resume from it.
-            if (!this.call(() => this.options.onEvent(event))) return { kind: "reset" };
+            if (!this.call(() => this.options.onEvent(event))) return { kind: "reset", traceID };
             this.cursorSeq = event.event_seq;
           }
         }
@@ -194,15 +196,25 @@ export class EventStream {
         return { kind: "stopped" };
       }
       if (err instanceof ApiError && refusesCursor(err.status)) {
-        return { kind: "reset", reason: err.message };
+        return { kind: "reset", reason: err.message, traceID: err.traceID };
       }
       if (silent) {
-        return { kind: "lost", reason: "事件流太久没有消息", started };
+        return {
+          kind: "lost",
+          reason: opened ? "事件流心跳超时，期间未收到数据" : "等待事件流响应超时",
+          started,
+          traceID,
+        };
       }
       if (err instanceof ApiError) {
-        return { kind: "lost", reason: err.message, started };
+        return { kind: "lost", reason: err.message, started, traceID: err.traceID };
       }
-      return { kind: "lost", reason: opened ? "未能读取事件流" : "未能打开事件流", started };
+      return {
+        kind: "lost",
+        reason: opened ? "未能读取事件流" : "未能打开事件流",
+        started,
+        traceID,
+      };
     } finally {
       clearTimeout(timer);
       ctrl.abort();

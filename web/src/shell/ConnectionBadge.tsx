@@ -42,20 +42,27 @@ export function ConnectionBadge({
         {offline ? null : <StatusDot tone={tone} />}
         {compact && !offline ? <span className={styles.hidden}>{label}</span> : label}
       </span>
-      {offline ? <ReconnectBadge reason={connection.reason} compact={compact} /> : null}
+      {offline ? <ReconnectBadge connection={connection} compact={compact} /> : null}
     </>
   );
 }
 
 type OpenBy = "hover" | "focus" | "activation";
 
-function ReconnectBadge({ reason, compact }: { reason: string | undefined; compact: boolean }) {
+function ReconnectBadge({
+  connection,
+  compact,
+}: {
+  connection: Extract<Connection, { status: "offline" }>;
+  compact: boolean;
+}) {
   const { tone, label } = look.offline;
   const id = useId();
   const root = useRef<HTMLSpanElement>(null);
   const [openBy, setOpenBy] = useState<OpenBy | null>(null);
   const open = openBy !== null;
-  const detail = reason?.trim();
+  const detail = connection.reason?.trim();
+  const traceID = connection.streamTraceID;
 
   useEffect(() => {
     if (!open) return;
@@ -103,7 +110,15 @@ function ReconnectBadge({ reason, compact }: { reason: string | undefined; compa
         {compact ? null : label}
       </button>
       <span id={id} className={styles.panelPosition} hidden={!open}>
-        <span className={styles.panel}>{detail ? `浏览器观察：${detail}` : "原因未知"}</span>
+        <span className={styles.panel}>
+          <span>{detail ? `浏览器观察：${detail}` : "原因未知"}</span>
+          {traceID !== undefined && (
+            <>
+              <br />
+              <span>{traceID ? `服务端诊断 ID：${traceID}` : "服务端诊断 ID 未确认"}</span>
+            </>
+          )}
+        </span>
       </span>
     </span>
   );

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/GhostFlying/tend/internal/app"
+	"github.com/GhostFlying/tend/internal/httpdiag"
 	"github.com/GhostFlying/tend/internal/protocol"
 )
 
@@ -26,6 +27,7 @@ type stream struct {
 	cancel context.CancelFunc
 	events chan sse
 	status int
+	trace  string
 }
 
 // openStream connects to the event stream of the server at base.
@@ -39,7 +41,7 @@ func openStream(t *testing.T, base, token, query string) *stream {
 		cancel()
 		t.Fatal(err)
 	}
-	s := &stream{t: t, cancel: cancel, events: make(chan sse, 100), status: resp.StatusCode}
+	s := &stream{t: t, cancel: cancel, events: make(chan sse, 100), status: resp.StatusCode, trace: resp.Header.Get(httpdiag.TraceHeader)}
 	go func() {
 		defer resp.Body.Close()
 		defer close(s.events)
