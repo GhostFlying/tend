@@ -459,14 +459,14 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				return err
 			}
 		}
-		var command protocol.ManagerNativeRequest
+		var claim protocol.ManagerNativeClaimResult
 		if protocol.RunnerOwnsExecution(as.Protocol) {
-			command, err = r.cfg.Journal.ReceivedManagerOperation(ctx, as.RunID)
+			claim.ManagerNativeRequest, err = r.cfg.Journal.ReceivedManagerOperation(ctx, as.RunID)
 			if err != nil {
 				return err
 			}
 		}
-		if command.ID == "" {
+		if claim.ID == "" {
 			op, err := r.send(liveSession, runCredential(as), request)
 			if err != nil {
 				return err
@@ -477,10 +477,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			if err = r.confirmManagerClaim(ctx, as, request); err != nil {
 				return err
 			}
-			if err = json.Unmarshal(op.Result, &command); err != nil {
+			if err = json.Unmarshal(op.Result, &claim); err != nil {
 				return err
 			}
 		}
+		command := claim.ManagerNativeRequest
 		if command.ID == "" {
 			if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {
 				return err
@@ -516,7 +517,9 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 					// The driver has stopped its event producers. The cursor
 					// must also exclude any cleanup event from this attempt.
 					nativeClosed = true
-					reply.ProcessText = processText.Drain("", "")
+					if claim.AcceptsCloseProcessText {
+						reply.ProcessText = processText.Drain("", "")
+					}
 				}
 				if callErr != nil {
 					reply.Error = "Native coordinator operation failed"
