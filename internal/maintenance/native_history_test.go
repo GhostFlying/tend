@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/testkit"
@@ -115,23 +116,70 @@ func TestMaintenanceReconcilesAuditAgainstBoundedNativeHistory(t *testing.T) {
 }
 
 func TestMaintenanceLegacyNativeReadDoesNotEnableAuditReuse(t *testing.T) {
-	c, _, cfg, _ := fixture(t)
+	for _, legacyVariant := range []bool{false, true} {
+		t.Run(fmt.Sprintf("codex_variant=%t", legacyVariant), func(t *testing.T) {
+			testMaintenanceLegacyNativeRead(t, legacyVariant)
+		})
+	}
+}
+
+func testMaintenanceLegacyNativeRead(t *testing.T, legacyVariant bool) {
+	c, _, _, _ := fixture(t)
 	socket := testkit.SocketPath(t, "native.sock")
-	backend := cfg.Backend
-	backend.Socket = socket
-	native := &auditNativeFixture{threads: map[string][]NativeTurn{
-		"legacy": {{ID: "completed-turn", InputID: "input", Status: "completed"}},
-	}, legacyRead: true}
+	c.state.Backend.Socket = socket
+	now := c.opts.Now()
+	c.opts.Now = func() time.Time { return now }
+	native := &auditNativeFixture{
+		threads: map[string][]NativeTurn{
+			"legacy": {{ID: "completed-turn", InputID: "input", Status: "completed"}},
+		},
+		creates: 1, legacyRead: true, legacyVariant: legacyVariant,
+	}
 	listenAuditFixture(t, socket, http.HandlerFunc(native.serve))
 	c.opts.Native = &NativeClient{}
-	c.state.Active = &protocol.MaintenanceSession{
-		ID: "audit", Phase: "running", Backend: backend, SessionID: "legacy",
-		InputID: "input", TurnID: "completed-turn", ScheduledAuditID: "timer",
-		SessionProfile: "fixture", Audit: &protocol.MaintenanceAudit{Through: 12},
+	_, profile, err := c.auditThreadProfile()
+	if err != nil {
+		t.Fatal(err)
 	}
+	c.state.Active = &protocol.MaintenanceSession{
+		ID: "audit", Phase: "running", Backend: c.state.Backend, SessionID: "legacy",
+		InputID: "input", TurnID: "completed-turn", ScheduledAuditID: "timer",
+		SessionProfile: profile, Audit: &protocol.MaintenanceAudit{Through: 12},
+	}
+	c.enqueue("repair after audit")
 	step(t, c)
 	s := c.Status()
-	if s.Active != nil || s.AuditedThrough != 12 || s.IdleAuditSession != nil {
-		t.Fatalf("legacy provider did not finish within its original single-use behavior: %+v", s)
+	if s.Active == nil || s.Active.HistoryRead != nativeHistoryLegacy || s.AuditedThrough != 12 || s.IdleAuditSession != nil {
+		t.Fatalf("legacy provider did not finish and record its read capability: %+v", s)
+	}
+	step(t, c)
+	repair := c.Status().Active
+	if repair.SessionID != "legacy" || repair.InputID == "" || repair.ScheduledAuditID != "" {
+		t.Fatalf("original repair did not stay on the existing legacy thread: %+v", repair)
+	}
+	// Queue the next timer while the original repair is still active.
+	now = now.Add(2 * time.Hour)
+	command(t, c, "audit", protocol.MaintenanceRequest{ScheduledAudit: true})
+	next := c.Status().PendingAudits[0]
+	native.complete("legacy")
+	for range 4 {
+		step(t, c)
+	}
+	a := c.Status().Active
+	if a == nil || a.SessionID == "legacy" || a.ScheduledAuditID != next {
+		t.Fatalf("subsequent timer did not get its own thread: %+v", a)
+	}
+}
+
+func TestNativeUnknownTurnListDoesNotMaskOtherRejections(t *testing.T) {
+	for _, rejection := range []nativeRPCError{
+		{Code: -32600, Message: "Invalid request: missing field `threadId`"},
+		{Code: -32600, Message: "Invalid request: unknown variant `notLoaded`, expected `full`"},
+		{Code: -32600, Message: "Invalid request: unknown variant `thread/turns/list-other`, expected `initialize`"},
+		{Code: -32603, Message: "Invalid request: unknown variant `thread/turns/list`"},
+	} {
+		if rejection.unknownTurnList() {
+			t.Fatalf("ordinary rejection treated as unsupported method: %+v", rejection)
+		}
 	}
 }
