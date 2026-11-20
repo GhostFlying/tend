@@ -2274,12 +2274,12 @@ async function checkNavigation() {
         if (await auxiliary.isVisible())
           await auxiliary.getByRole("button", { name: /^关闭/ }).first().click();
       }
-      const detail = [
-        "/issues/issue-root",
-        "/inbox/attention-decision",
-        `/tasks/${activeTask.task_id}`,
-      ].includes(path);
-      assert.equal(await tabs.isVisible(), mobile && !detail, `tabs ${viewport.width} ${path}`);
+      const hidesMobileTabs = ["/issues/issue-root", `/tasks/${activeTask.task_id}`].includes(path);
+      assert.equal(
+        await tabs.isVisible(),
+        mobile && !hidesMobileTabs,
+        `tabs ${viewport.width} ${path}`,
+      );
       if (!mobile) {
         assert.equal((await sidebar.boundingBox())!.width, width, `sidebar width ${path}`);
         if (path === "/issues/issue-root")
@@ -2289,7 +2289,7 @@ async function checkNavigation() {
               .getAttribute("aria-current"),
             "page",
           );
-      } else if (!detail) {
+      } else if (!hidesMobileTabs) {
         const main = (await page.locator("main").boundingBox())!;
         const bar = (await tabs.boundingBox())!;
         assert(main.y + main.height <= bar.y + 1, `content avoids tabs ${path}`);
