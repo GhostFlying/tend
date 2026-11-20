@@ -64,7 +64,7 @@ func (r *Runner) readAgentInventory(ctx context.Context, runtime *protocol.Runne
 }
 
 func (r *Runner) pendingInventory(ctx context.Context) (*protocol.Envelope, error) {
-	requests, err := r.cfg.Journal.Requests(ctx)
+	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunnerInventoryRegister)
 	if err != nil {
 		return nil, err
 	}

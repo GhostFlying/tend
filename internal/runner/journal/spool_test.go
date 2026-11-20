@@ -276,3 +276,32 @@ func TestSpoolWorkerResultRequiresExactSuccessfulFinalAcknowledgement(t *testing
 		})
 	}
 }
+
+func TestControlRequestReadsDoNotLoadUnrelatedManagerOriginals(t *testing.T) {
+	j := open(t, filepath.Join(t.TempDir(), "journal.db"))
+	as := protocol.Assignment{RunID: "manager"}
+	ctx := t.Context()
+	if err := j.AcceptAssignment(ctx, as, ""); err != nil {
+		t.Fatal(err)
+	}
+	env := protocol.Envelope{RequestID: "event", Operation: protocol.OpManagerNativeEvent, Target: protocol.Target{Type: "run", ID: as.RunID}}
+	if err := j.SaveManagerEvent(ctx, as.RunID, &env, largeSpoolBody()); err != nil {
+		t.Fatal(err)
+	}
+	files := spoolFiles(t, j)
+	if len(files) != 1 {
+		t.Fatal(files)
+	}
+	if err := os.Remove(files[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.RequestsByOperation(ctx, protocol.OpRunnerClaim, protocol.OpRunnerUsageUpload); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := j.RequestForRun(ctx, "other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.NextManagerEvent(ctx, as.RunID); err == nil {
+		t.Fatal("missing original was acknowledged")
+	}
+}

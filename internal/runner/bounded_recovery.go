@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -83,40 +82,24 @@ func (r *Runner) boundedContinuationMatches(resume *protocol.RetainedRunResume) 
 func (r *Runner) replayBoundedFacts(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	requests, err := r.cfg.Journal.Requests(ctx)
+	ids, err := r.cfg.Journal.RecoveryRequestIDs(ctx)
 	if err != nil {
 		return
 	}
-	// Physical stop must reach the server before a business close reply that
-	// may await event application, just as in ordinary manager recovery.
-	rank := func(operation string) int {
-		switch operation {
-		case protocol.OpManagerNativeEvent:
-			return 0
-		case protocol.OpManagerNativeStopped:
-			return 1
-		case protocol.OpManagerNativeReply:
-			return 2
-		default:
-			return 3
-		}
-	}
-	sort.SliceStable(requests, func(i, j int) bool {
-		if requests[i].RunID != requests[j].RunID {
-			return requests[i].RunID < requests[j].RunID
-		}
-		ir, jr := rank(requests[i].Envelope.Operation), rank(requests[j].Envelope.Operation)
-		if ir == 0 && jr == 0 {
-			var ie, je protocol.ManagerNativeEvent
-			_ = json.Unmarshal(requests[i].Envelope.Payload, &ie)
-			_ = json.Unmarshal(requests[j].Envelope.Payload, &je)
-			return ie.Sequence < je.Sequence
-		}
-		return ir < jr
-	})
 	blocked := map[string]bool{}
-	for _, request := range requests {
-		if ctx.Err() != nil || request.RunID == "" || blocked[request.RunID] {
+	for _, id := range ids {
+		if ctx.Err() != nil {
+			break
+		}
+		rows, err := r.cfg.Journal.RequestByID(ctx, id)
+		if err != nil {
+			return
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		request := rows[0]
+		if blocked[request.RunID] {
 			continue
 		}
 		protected, err := r.cfg.Journal.BoundedRequestQuarantined(ctx, request.Envelope.RequestID)

@@ -202,7 +202,7 @@ func (r *Runner) resourceQuarantine(ctx context.Context, p protocol.WorkspaceRec
 	if active {
 		return false, nil
 	}
-	requests, err := r.cfg.Journal.Requests(ctx)
+	requests, _, err := r.cfg.Journal.PendingRequestCounts(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -210,7 +210,7 @@ func (r *Runner) resourceQuarantine(ctx context.Context, p protocol.WorkspaceRec
 	if err != nil {
 		return false, err
 	}
-	if len(requests) != 0 || len(releases) != 0 {
+	if requests != 0 || len(releases) != 0 {
 		return false, nil
 	}
 	for _, id := range p.RunIDs {

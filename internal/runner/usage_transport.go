@@ -32,7 +32,7 @@ func (r *Runner) localUsageRPC(w http.ResponseWriter, q *http.Request) {
 		return
 	}
 	if env.Operation == protocol.OpRunnerUsageUpload {
-		pending, err := r.cfg.Journal.Requests(q.Context())
+		pending, err := r.cfg.Journal.RequestByID(q.Context(), env.RequestID)
 		if err != nil {
 			http.Error(w, "usage journal unavailable", http.StatusServiceUnavailable)
 			return
@@ -76,7 +76,7 @@ func (r *Runner) localUsageJournal(w http.ResponseWriter, q *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		requests, err := r.cfg.Journal.Requests(q.Context())
+		requests, err := r.cfg.Journal.RequestsByOperation(q.Context(), protocol.OpRunnerUsageUpload)
 		if err != nil {
 			http.Error(w, "usage journal unavailable", http.StatusServiceUnavailable)
 			return

@@ -482,7 +482,7 @@ var errClaimRefused = errors.New("runner: claim refused")
 // answered: the same request ID returns the same assignment. Its lease may
 // have lapsed meanwhile, so the run only starts once hello confirms it.
 func (r *Runner) resendClaims(ctx context.Context) error {
-	reqs, err := r.cfg.Journal.Requests(ctx)
+	reqs, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunnerClaim)
 	if err != nil {
 		return err
 	}

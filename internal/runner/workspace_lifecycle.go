@@ -37,7 +37,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 		safe := r.resourceReconciled && !r.resourceBusy && len(r.resourceBlockers) == 0
 		r.mu.Unlock()
 		if safe {
-			requests, err := r.cfg.Journal.Requests(ctx)
+			requests, _, err := r.cfg.Journal.PendingRequestCounts(ctx)
 			if err != nil {
 				return err
 			}
@@ -45,7 +45,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 			if err != nil {
 				return err
 			}
-			if len(requests) == 0 && len(releases) == 0 {
+			if requests == 0 && len(releases) == 0 {
 				return nil
 			}
 		}
@@ -78,7 +78,7 @@ func (r *Runner) maintainWorkspaces(ctx context.Context) (resultErr error) {
 	if reconcileErr != nil {
 		deferred = append(deferred, fmt.Errorf("reconcile workspace processes: %w", reconcileErr))
 	}
-	pending, err := r.cfg.Journal.Requests(ctx)
+	pending, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpWorkspaceRelease, protocol.OpWorkspaceCleanup, protocol.OpWorkspaceCleanupDone)
 	if err != nil {
 		return errors.Join(append(deferred, err)...)
 	}
@@ -200,7 +200,7 @@ func (r *Runner) cleanupRequest(ctx context.Context, cleaner workspaceCleaner, e
 	if err := json.Unmarshal(op.Result, &result); err != nil {
 		return err
 	}
-	pending, err := r.cfg.Journal.Requests(ctx)
+	pending, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpWorkspaceCleanupDone)
 	if err != nil {
 		return err
 	}

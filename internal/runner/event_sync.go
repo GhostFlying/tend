@@ -60,6 +60,8 @@ func (r *Runner) wakeEventSync() {
 }
 
 func (r *Runner) syncJournalEvents(ctx context.Context) {
+	// Transport retry timing uses the monotonic clock, independent of business time.
+	retryAt := make(map[string]time.Time)
 	var prune <-chan time.Time
 	pruneSpool := func() {
 		prune = nil
@@ -78,11 +80,26 @@ func (r *Runner) syncJournalEvents(ctx context.Context) {
 		if err != nil {
 			r.cfg.Log.ErrorContext(ctx, "read pending run events", "err", err)
 		}
+		for run, due := range retryAt {
+			if !due.After(time.Now()) {
+				delete(retryAt, run)
+			}
+		}
 		progress := false
+		nextRetry := r.cfg.EventFlush
 		for _, as := range runs {
+			if due, failed := retryAt[as.RunID]; failed {
+				if remaining := time.Until(due); remaining > 0 {
+					nextRetry = min(nextRetry, remaining)
+					continue
+				}
+				delete(retryAt, as.RunID)
+			}
 			sent, err := r.flushEventBatch(ctx, as)
 			progress = progress || sent
 			if err != nil && ctx.Err() == nil {
+				retryAt[as.RunID] = time.Now().Add(r.cfg.RetryDelay)
+				nextRetry = min(nextRetry, r.cfg.RetryDelay)
 				r.cfg.Log.WarnContext(ctx, "run event sync pending", "run_id", as.RunID, "err", err)
 			}
 		}
@@ -92,10 +109,7 @@ func (r *Runner) syncJournalEvents(ctx context.Context) {
 			}
 			continue
 		}
-		delay := r.cfg.EventFlush
-		if len(runs) > 0 {
-			delay = min(delay, r.cfg.RetryDelay)
-		}
+		delay := nextRetry
 		select {
 		case <-ctx.Done():
 			return
