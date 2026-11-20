@@ -242,6 +242,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	nativeClosed := false
 	var emitMu sync.Mutex
 	var acceptsDisconnectProcessText atomic.Bool
+	var acceptsShutdownProcessText atomic.Bool
 	streamText := as.Manager.ConversationID == "" || as.Manager.ConversationID == "main"
 	processText := &harness.WorkerProcessTextBuffer{}
 	if active := r.lookup(as.RunID); !streamText && active != nil {
@@ -313,6 +314,20 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		}()
 		defer func() { stopUploads(); <-uploadDone }()
 	}
+	retainEvent := func(ctx context.Context, event coordination.Event) error {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("encode manager event: %w", err)
+		}
+		env, err := r.newEnvelope(protocol.OpManagerNativeEvent, runTarget(as), nil)
+		if err != nil {
+			return err
+		}
+		if err = r.cfg.Journal.SaveManagerEvent(ctx, as.RunID, env, raw); err != nil {
+			return fmt.Errorf("persist manager event: %w", err)
+		}
+		return nil
+	}
 	driver.Emit = func(ctx context.Context, event coordination.Event) error {
 		emitMu.Lock()
 		defer emitMu.Unlock()
@@ -345,16 +360,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			}
 			event.Native = &native
 		}
-		raw, err := json.Marshal(event)
-		if err != nil {
-			return fmt.Errorf("encode manager event: %w", err)
-		}
-		env, err := r.newEnvelope(protocol.OpManagerNativeEvent, runTarget(as), nil)
-		if err != nil {
+		if err := retainEvent(ctx, event); err != nil {
 			return err
-		}
-		if err = r.cfg.Journal.SaveManagerEvent(ctx, as.RunID, env, raw); err != nil {
-			return fmt.Errorf("persist manager event: %w", err)
 		}
 		if as.EventSync {
 			select {
@@ -363,10 +370,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			}
 			return nil
 		}
-		if err = r.flushManagerEvents(ctx, as); err != nil {
-			return fmt.Errorf("deliver persisted manager event %s: %w", env.RequestID, err)
-		}
-		return nil
+		return r.flushManagerEvents(ctx, as)
 	}
 	defer func() {
 		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
@@ -375,8 +379,28 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		if closeErr == nil {
 			_ = r.cfg.Journal.ConfirmStopped(receiptCtx, as.RunID)
 		}
-		if !nativeClosed && lifetime.Err() == nil {
+		if nativeClosed {
+			return
+		}
+		if lifetime.Err() == nil {
 			_ = driver.Emit(receiptCtx, coordination.Event{Disconnected: true})
+			return
+		}
+		if closeErr != nil || streamText || !acceptsShutdownProcessText.Load() {
+			return
+		}
+		parts := processText.Drain("", "")
+		if len(parts) == 0 {
+			return
+		}
+		// The native producers have stopped. Persist only the observed text,
+		// so recovery keeps its usual connection-end semantics.
+		eventCtx, cancelEvent := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
+		defer cancelEvent()
+		if err := retainEvent(eventCtx, coordination.Event{ProcessText: parts}); err != nil {
+			r.cfg.Log.WarnContext(eventCtx, "manager shutdown process text could not be retained", "run_id", as.RunID, "err", err)
+		} else if err := r.flushManagerEvents(eventCtx, as); err != nil {
+			r.cfg.Log.WarnContext(eventCtx, "manager shutdown process text delivery pending", "run_id", as.RunID, "err", err)
 		}
 	}()
 	if err = r.cfg.Journal.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
@@ -490,6 +514,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			// A retained command stores only its original identity and
 			// payload. Only an actual claim response can change capabilities.
 			acceptsDisconnectProcessText.Store(claim.AcceptsDisconnectProcessText)
+			acceptsShutdownProcessText.Store(claim.AcceptsShutdownProcessText)
 		}
 		command := claim.ManagerNativeRequest
 		if command.ID == "" {

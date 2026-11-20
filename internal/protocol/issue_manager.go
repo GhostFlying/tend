@@ -91,6 +91,7 @@ type ManagerNativeClaimResult struct {
 	ManagerNativeRequest
 	AcceptsCloseProcessText      bool `json:"accepts_close_process_text,omitempty"`
 	AcceptsDisconnectProcessText bool `json:"accepts_disconnect_process_text,omitempty"`
+	AcceptsShutdownProcessText   bool `json:"accepts_shutdown_process_text,omitempty"`
 }
 
 const (
@@ -148,7 +149,7 @@ const (
 )
 
 // WorkerProcessText is an observed partial reply for process diagnostics.
-// It has no separate event sequence or acknowledgement.
+// Each fragment uses the sequence and acknowledgement of its enclosing record.
 type WorkerProcessText struct {
 	ThreadID  string `json:"thread_id"`
 	TurnID    string `json:"turn_id"`

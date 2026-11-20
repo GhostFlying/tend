@@ -480,6 +480,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			ThreadID     string          `json:"thread_id"`
 			Call         json.RawMessage `json:"call"`
 			Disconnected bool            `json:"disconnected"`
+			ProcessText  json.RawMessage `json:"process_text"`
 			Native       *struct {
 				Kind         string
 				TurnID       string
@@ -524,20 +525,32 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		// Old runners still send text on the original sequence. Retain the
 		// event for process reads but do not wait for a conversation write.
-		processText := false
-		if parsed && event.Native != nil && event.Native.Kind == "agent_message_delta" &&
+		noCall := len(event.Call) == 0 || string(event.Call) == "null"
+		legacyText := parsed && event.Native != nil && event.Native.Kind == "agent_message_delta" &&
 			(event.Native.ItemType == "" || event.Native.ItemType == "agentMessage") &&
 			event.ThreadID != "" && event.Native.TurnID != "" && event.Native.ItemID != "" && event.Native.Text != nil &&
-			!event.Disconnected && (len(event.Call) == 0 || string(event.Call) == "null") &&
+			!event.Disconnected && noCall &&
 			(len(event.Native.Tool) == 0 || string(event.Native.Tool) == "null") &&
 			(len(event.Native.RequestUsage) == 0 || string(event.Native.RequestUsage) == "null") &&
 			(len(event.Native.ContextUsage) == 0 || string(event.Native.ContextUsage) == "null") &&
-			event.Native.TurnStatus == "" && event.Native.Failure == nil {
+			event.Native.TurnStatus == "" && event.Native.Failure == nil
+		// Graceful shutdown can retain observed process text without ending
+		// a coordinator connection or supplying any native business fact.
+		shutdownText := parsed && len(event.ProcessText) != 0 && event.Native == nil &&
+			event.ThreadID == "" && event.Root == "" && !event.Continued && !event.Disconnected && noCall
+		processText := false
+		if legacyText || shutdownText {
 			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main'))`, r.TaskID).Scan(&processText); err != nil {
 				return Outcome{}, err
 			}
 		}
-		projectionOnly := false
+		if shutdownText {
+			var parts []protocol.WorkerProcessText
+			if !processText || json.Unmarshal(event.ProcessText, &parts) != nil || !validWorkerProcessText(parts) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "invalid worker shutdown process text")
+			}
+		}
+		projectionOnly := shutdownText
 		if parsed && event.Native != nil {
 			switch event.Native.Kind {
 			case "agent_message_delta", "item_started", "item_completed", "context_usage", "request_usage", "child_rollout":

@@ -96,8 +96,8 @@ func TestManagerFindIsVolatileAndNeverReplaysBusiness(t *testing.T) {
 			op := h.runAs(as, protocol.OpManagerNativeClaim, struct{}{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
 			if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &claim) != nil || claim.ID != id ||
 				claim.Method != query.method || !bytes.Equal(claim.Payload, payload) ||
-				!claim.AcceptsDisconnectProcessText || claim.AcceptsCloseProcessText {
-				t.Fatal("claim retry changed original observation or disconnect support", op, claim)
+				!claim.AcceptsDisconnectProcessText || !claim.AcceptsShutdownProcessText || claim.AcceptsCloseProcessText {
+				t.Fatal("claim retry changed original observation or process text support", op, claim)
 			}
 		}
 		reply := protocol.ManagerNativeReply{ID: id, Method: query.method, Result: json.RawMessage(query.result)}
