@@ -202,7 +202,12 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.ExternalWait) (bool, string, error) {
 	switch v.Kind {
 	case "checks":
-		return store.ObserveChecksWait(ctx, q, v)
+		row, err := store.GetDeliveryObservation(ctx, q, v.IssueID, v.TargetID)
+		if err != nil {
+			return false, "", err
+		}
+		ready, reason := store.ApplyChecksWaitObservation(v, row)
+		return ready, reason, nil
 	case "review":
 		var raw string
 		if err := q.QueryRowContext(ctx, `SELECT body_json FROM shared_delivery_reviews WHERE review_id=?`, v.TargetID).Scan(&raw); err != nil {

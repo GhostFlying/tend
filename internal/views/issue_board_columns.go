@@ -2,10 +2,9 @@ package views
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -124,7 +123,8 @@ func boardPlacementForIssue(ctx context.Context, q store.Querier, issue protocol
 	if issue.BoardStatus() == protocol.IssueBacklog {
 		return boardPlacement{column: protocol.IssueColumnBacklog}, nil
 	}
-	if !runs.unsettled && issue.AssignmentState == "active" && issue.State == protocol.IssueActive {
+	mayWait := !runs.unsettled && issue.AssignmentState == "active" && issue.State == protocol.IssueActive
+	if mayWait {
 		decision, err := boardHasOpenOwnerDecision(ctx, q, issue.IssueID)
 		if err != nil {
 			return boardPlacement{}, err
@@ -132,29 +132,16 @@ func boardPlacementForIssue(ctx context.Context, q store.Querier, issue protocol
 		if decision {
 			return boardPlacement{protocol.IssueColumnWaiting, protocol.IssueBoardWaitDecision}, nil
 		}
-		for _, runID := range runs.checks {
-			wait, err := store.GetExternalWait(ctx, q, runID)
-			if err != nil {
-				return boardPlacement{}, err
-			}
-			if wait == nil || wait.ResumeReason != "" {
-				continue
-			}
-			ready, _, err := store.ObserveChecksWait(ctx, q, wait)
-			if errors.Is(err, store.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return boardPlacement{}, err
-			}
-			if !ready {
-				return boardPlacement{protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI}, nil
-			}
+	}
+	checksPending, checksPreviouslyWaited, err := boardCheckWaits(ctx, q, runs)
+	if err != nil {
+		return boardPlacement{}, err
+	}
+	if mayWait {
+		if checksPending {
+			return boardPlacement{protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI}, nil
 		}
-		if runs.externalWait {
-			return boardPlacement{column: protocol.IssueColumnWaiting}, nil
-		}
-		if queued {
+		if runs.externalWait || queued {
 			return boardPlacement{column: protocol.IssueColumnWaiting}, nil
 		}
 	}
@@ -162,9 +149,9 @@ func boardPlacementForIssue(ctx context.Context, q store.Querier, issue protocol
 	// A stopped wait can still explain the last placement after its condition
 	// clears. Only current proof above can produce a hint.
 	switch {
-	case runs.lastWait:
+	case !runs.startedUnsettled && (runs.lastWait || checksPreviouslyWaited):
 		return boardPlacement{column: protocol.IssueColumnWaiting}, nil
-	case runs.started:
+	case runs.lastStart > 0:
 		return boardPlacement{column: protocol.IssueColumnWIP}, nil
 	case issue.TodoAt > 0:
 		return boardPlacement{column: protocol.IssueColumnWaiting}, nil
@@ -173,19 +160,64 @@ func boardPlacementForIssue(ctx context.Context, q store.Querier, issue protocol
 	}
 }
 
+type boardCheckWait struct {
+	RunID     string `json:"run_id"`
+	StoppedAt int64  `json:"stopped_at"`
+	EndedAt   int64  `json:"ended_at"`
+	Current   bool   `json:"current"`
+}
+
 type issueBoardRuns struct {
-	live, unsettled, started, lastWait, externalWait bool
-	checks                                           []string
+	live, unsettled, startedUnsettled, lastWait, externalWait bool
+	lastStart, lastSettled                                    int64
+	checks                                                    []boardCheckWait
 }
 
 func boardRunFacts(ctx context.Context, q store.Querier, issueID string) (issueBoardRuns, error) {
 	var f issueBoardRuns
 	var checks string
-	err := q.QueryRowContext(ctx, boardRunFactsSQL, issueID).Scan(&f.live, &f.unsettled, &f.started, &f.lastWait, &f.externalWait, &checks)
-	if checks != "" {
-		f.checks = strings.Split(checks, ",")
+	err := q.QueryRowContext(ctx, boardRunFactsSQL, issueID).Scan(&f.live, &f.unsettled, &f.startedUnsettled, &f.lastStart, &f.lastSettled, &f.lastWait, &f.externalWait, &checks)
+	if err != nil {
+		return f, err
 	}
-	return f, err
+	return f, json.Unmarshal([]byte(checks), &f.checks)
+}
+
+func boardCheckWaits(ctx context.Context, q store.Querier, runs issueBoardRuns) (pending, previouslyWaited bool, err error) {
+	for _, check := range runs.checks {
+		wait, err := store.GetExternalWait(ctx, q, check.RunID)
+		if err != nil {
+			return false, false, err
+		}
+		if wait == nil {
+			continue
+		}
+		end := check.EndedAt
+		row, err := store.GetDeliveryObservation(ctx, q, wait.IssueID, wait.TargetID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return false, false, err
+		}
+		if err == nil {
+			ready, _ := store.ApplyChecksWaitObservation(wait, row)
+			if ready && row.Observation.CheckedAt > 0 && (end == 0 || row.Observation.CheckedAt < end) {
+				end = row.Observation.CheckedAt
+			}
+			pending = pending || check.Current && !ready && wait.ResumeReason == ""
+			// No time is available for an older observation. In that case only
+			// a recorded continuation or cancellation bounds historical use.
+			if ready && end == 0 {
+				continue
+			}
+		} else if end == 0 {
+			continue
+		}
+		// A parallel Run can take precedence and then stop while this wait
+		// is still effective. Use the overlap with settled execution, not the
+		// order in which the processes were allocated.
+		quietAt := max(check.StoppedAt, runs.lastStart, runs.lastSettled)
+		previouslyWaited = previouslyWaited || end == 0 || quietAt <= end
+	}
+	return pending, previouslyWaited, nil
 }
 
 // Use the same responsibility precedence as issueCounts. Explicit Run pins
@@ -204,7 +236,7 @@ related(run_id) AS (
  SELECT r.run_id FROM issue i JOIN task_execution_contracts c ON c.review_issue_id=i.issue_id JOIN runs r ON r.task_id=c.task_id AND r.role='accept'
 ),
 owned AS (
- SELECT r.*,l.status AS lease_status,i.todo_at,
+ SELECT r.*,l.status AS lease_status,l.updated_at AS lease_updated_at,i.todo_at,
    i.assignment_state='active' AND
    (p.run_id IS NULL OR (p.assignment_epoch=i.assignment_epoch AND p.agent_ref=i.assignee_ref)) AND
    (r.role<>'issue_manager' OR (m.state='assigned' AND m.assignment_epoch=i.assignment_epoch AND
@@ -218,33 +250,65 @@ owned AS (
  LEFT JOIN task_work_item_owners o USING(task_id) LEFT JOIN task_execution_contracts c USING(task_id)
  WHERE COALESCE(p.issue_id, CASE WHEN r.role='issue_manager' THEN m.issue_id WHEN r.role='accept' THEN c.review_issue_id END,o.work_item_id)=i.issue_id
 ),
-evidence AS (
+run_times AS (
  SELECT r.*,
-   r.observed_state IN ('running','waiting') AND r.lease_status='active' AS live_now,
-   r.observed_state NOT IN ('finished','failed') OR COALESCE(r.lease_status,'') IN ('active','lapsed') AS unsettled,
-   r.created_at>=r.todo_at AND (r.observed_state IN ('running','waiting') OR EXISTS (
-     SELECT 1 FROM events e WHERE e.object_type='run' AND e.object_id=r.run_id AND e.kind='run.manager_started'
-   ) OR EXISTS (
-     SELECT 1 FROM events e WHERE e.object_type='task' AND e.object_id=r.task_id AND e.kind='run.started' AND json_extract(e.body_json,'$.run_id')=r.run_id
-   )) AS started,
-   r.observed_state='finished' AND r.lease_status='released' AND json_extract(w.body_json,'$.stopped')=1 AS stopped_wait,
-   r.observed_state IN ('finished','failed') AND r.lease_status='released' AND h.stopped=1 AS stopped_question,
+   CASE WHEN r.created_at>=r.todo_at THEN MAX(
+     CASE WHEN r.observed_state IN ('running','waiting') THEN COALESCE(r.last_confirmed_at,r.created_at) ELSE 0 END,
+     COALESCE((SELECT MAX(e.created_at) FROM events e
+       WHERE e.object_type='run' AND e.object_id=r.run_id AND e.kind='run.manager_started'),0),
+     COALESCE((SELECT MAX(e.created_at) FROM events e
+       WHERE e.object_type='task' AND e.object_id=r.task_id AND e.kind='run.started'
+         AND json_extract(e.body_json,'$.run_id')=r.run_id),0)
+   ) ELSE 0 END AS started_at,
+   CASE WHEN r.observed_state IN ('finished','failed') AND r.lease_status='released'
+     THEN r.lease_updated_at ELSE 0 END AS stopped_at,
+   r.observed_state<>'starting' AND
+     (r.observed_state NOT IN ('finished','failed') OR COALESCE(r.lease_status,'') IN ('active','lapsed')) AS unsettled
+ FROM owned r
+),
+activity AS (
+ SELECT COALESCE(MAX(started_at),0) AS last_start,
+        COALESCE(MAX(CASE WHEN started_at>0 THEN stopped_at ELSE 0 END),0) AS last_settled
+ FROM run_times WHERE current_owner
+),
+waits AS (
+ SELECT r.*,
+   r.observed_state='finished' AND json_extract(w.body_json,'$.stopped')=1 AND COALESCE(wait_successor.started_at,0)=0 AS stopped_wait,
+   h.stopped=1 AND COALESCE(question_successor.started_at,0)=0 AS stopped_question,
    w.status='waiting' AND w.successor_run_id IS NULL AND a.status='dispatched' AND a.target_spec_version=t.spec_version AND
      t.lifecycle NOT IN ('completed','cancelled') AND t.control_mode='managed' AND
      (r.role<>'implement' OR a.generation=t.implement_generation) AND
      (r.role<>'accept' OR a.target_artifact_id=t.current_artifact_id) AS current_wait,
+   CASE w.status WHEN 'continued' THEN continuation.created_at WHEN 'cancelled' THEN w.next_check_at END AS wait_ended_at,
+   CASE WHEN d.status='open' THEN NULL ELSE d.updated_at END AS question_ended_at,
    json_extract(w.body_json,'$.kind') AS wait_kind
- FROM owned r LEFT JOIN run_external_waits w USING(run_id) LEFT JOIN run_question_handoffs h USING(run_id)
+ FROM run_times r
+ LEFT JOIN run_external_waits w USING(run_id) LEFT JOIN run_question_handoffs h USING(run_id)
+ LEFT JOIN decisions d ON d.decision_id=h.decision_id
+ LEFT JOIN run_times wait_successor ON wait_successor.run_id=w.successor_run_id
+ LEFT JOIN run_times question_successor ON question_successor.run_id=h.successor_run_id
+ LEFT JOIN plan_actions continuation ON continuation.action_id=w.continuation_action_id
  JOIN plan_actions a USING(action_id) JOIN tasks t ON t.task_id=r.task_id
+ WHERE r.current_owner AND r.created_at>=r.todo_at AND r.stopped_at>0
+),
+effective_waits AS (
+ SELECT w.*,MAX(w.stopped_at, a.last_start, a.last_settled) AS quiet_at
+ FROM waits w CROSS JOIN activity a
 )
 SELECT
- EXISTS(SELECT 1 FROM evidence WHERE current_owner AND live_now),
- EXISTS(SELECT 1 FROM evidence WHERE unsettled),
- EXISTS(SELECT 1 FROM evidence WHERE current_owner AND started),
- COALESCE((SELECT COALESCE(stopped_wait OR stopped_question,0) FROM evidence
-   WHERE current_owner AND started ORDER BY created_at DESC,run_id DESC LIMIT 1),0),
- EXISTS(SELECT 1 FROM evidence WHERE current_owner AND stopped_wait AND current_wait AND wait_kind<>'checks'),
- COALESCE((SELECT group_concat(run_id) FROM evidence WHERE current_owner AND stopped_wait AND current_wait AND wait_kind='checks'),'')
+ EXISTS(SELECT 1 FROM run_times WHERE current_owner AND observed_state IN ('running','waiting') AND lease_status='active'),
+ EXISTS(SELECT 1 FROM run_times WHERE unsettled),
+ EXISTS(SELECT 1 FROM run_times WHERE unsettled AND started_at>0),
+ last_start,
+ last_settled,
+ EXISTS(SELECT 1 FROM effective_waits WHERE
+   (stopped_question AND (question_ended_at IS NULL OR quiet_at<=question_ended_at)) OR
+   (stopped_wait AND wait_kind<>'checks' AND (current_wait OR quiet_at<=wait_ended_at))),
+ EXISTS(SELECT 1 FROM effective_waits WHERE stopped_wait AND current_wait AND wait_kind<>'checks'),
+ (SELECT json_group_array(json_object('run_id', run_id, 'stopped_at', stopped_at,
+    'ended_at', COALESCE(wait_ended_at,0), 'current', json(CASE WHEN current_wait THEN 'true' ELSE 'false' END)))
+   FROM effective_waits WHERE stopped_wait AND wait_kind='checks' AND (current_wait OR quiet_at<=wait_ended_at))
+FROM activity
 `
 
 func boardHasOpenOwnerDecision(ctx context.Context, q store.Querier, issueID string) (bool, error) {

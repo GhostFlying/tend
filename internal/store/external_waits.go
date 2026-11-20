@@ -168,13 +168,9 @@ func sessionExecutionMatches(previous, current *protocol.RunExecutionPin) bool {
 	return a == b
 }
 
-// ObserveChecksWait applies the same candidate and provider-result rules for a
-// scheduler wake and for read-only wait presentation.
-func ObserveChecksWait(ctx context.Context, q Querier, v *protocol.ExternalWait) (bool, string, error) {
-	row, err := GetDeliveryObservation(ctx, q, v.IssueID, v.TargetID)
-	if err != nil {
-		return false, "", err
-	}
+// ApplyChecksWaitObservation shares the exact candidate and provider-result
+// rules between a scheduler wake and read-only wait presentation.
+func ApplyChecksWaitObservation(v *protocol.ExternalWait, row DeliveryObservationRow) (bool, string) {
 	o := row.Observation
 	oldHead := v.ObservedHead
 	v.ObservedRevision = row.FactRevision
@@ -182,14 +178,14 @@ func ObserveChecksWait(ctx context.Context, q Querier, v *protocol.ExternalWait)
 	v.ObservedBase, v.ObservedTarget = o.BaseSHA, o.TargetSHA
 	v.ObservedState = o.State
 	if oldHead != "" && o.HeadSHA != "" && oldHead != o.HeadSHA {
-		return true, "candidate_changed", nil
+		return true, "candidate_changed"
 	}
 	if o.State == "closed" || o.State == "merged" {
-		return true, "pull_request_" + o.State, nil
+		return true, "pull_request_" + o.State
 	}
 	if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && (o.CI.State == "success" || o.CI.State == "failure" || o.CI.State == "cancelled" || o.CI.State == "skipped") {
 		v.ObservedState = o.CI.State
-		return true, "checks_" + o.CI.State, nil
+		return true, "checks_" + o.CI.State
 	}
-	return false, "", nil
+	return false, ""
 }

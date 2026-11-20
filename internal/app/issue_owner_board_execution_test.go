@@ -218,6 +218,12 @@ func TestIssueBoardKeepsOwnerExecutionUntilTerminalStop(t *testing.T) {
 }
 
 func TestIssueExecutionBoardWaitsForCISlotReleaseAndOwnerRestart(t *testing.T) {
+	for _, order := range []string{"owner only", "parallel run stops before CI", "CI ends before parallel run stops"} {
+		t.Run(order, func(t *testing.T) { testIssueExecutionBoardCI(t, order) })
+	}
+}
+
+func testIssueExecutionBoardCI(t *testing.T, order string) {
 	h, runtime := managerClaimHarness(t)
 	delivery := protocol.IssueDelivery{DeliveryID: "board-ci", Provider: "github", Repository: "example/project", Number: 7}
 	payload := protocol.CreateIssuePayload{Plan: protocol.IssuePlan{
@@ -282,6 +288,48 @@ func TestIssueExecutionBoardWaitsForCISlotReleaseAndOwnerRestart(t *testing.T) {
 		t.Fatal("the original stop receipt did not release the lease")
 	}
 
+	if order != "owner only" {
+		h.clock.Advance(time.Millisecond)
+		current := canonicalTaskIssue(t, h, issue.IssueID)
+		cmd := CanonicalOwnerTaskCreate{}
+		task := canonicalOwnerTaskPayload{
+			ExpectedAssignmentEpoch: current.AssignmentEpoch,
+			Title:                   "Parallel implementation",
+			Spec:                    testSpec,
+			Rating:                  protocol.RatingP1,
+			IndependentAcceptance:   &protocol.IndependentAcceptanceRequest{Required: false, Reason: "Complete the parallel fixture without a second Run"},
+		}
+		if op := h.exec(owner, h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, task, rev(current.Revision)), cmd); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		other := ownerClaim(t, h, runtime)
+		if other.Role != protocol.RoleImplement || h.run(other.RunID).ObservedState != protocol.RunStarting {
+			t.Fatal(other)
+		}
+		check("parallel worker claimed without starting", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)
+		if op := h.runAs(other, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		check("parallel worker running", protocol.IssueColumnWIP, "")
+		if order == "CI ends before parallel run stops" {
+			h.clock.Advance(time.Millisecond)
+			snapshot("success")
+			check("CI finished while parallel worker is live", protocol.IssueColumnWIP, "")
+		}
+		h.clock.Advance(time.Millisecond)
+		if op := h.runAs(other, protocol.OpRunsSubmitArtifact, testArtifact(h.task(other.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if h.lease(other.RunID).Status != store.LeaseReleased || h.task(other.TaskID).Lifecycle != protocol.TaskCompleted {
+			t.Fatal("parallel Run did not stop and complete")
+		}
+		if order == "CI ends before parallel run stops" {
+			check("parallel worker stops after CI finished", protocol.IssueColumnWIP, "")
+			return
+		}
+		check("parallel worker stops while CI is pending", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)
+	}
+	h.clock.Advance(time.Millisecond)
 	snapshot("success")
 	check("terminal provider result before scheduler sweep", protocol.IssueColumnWaiting, "")
 	h.clock.Advance(6 * time.Second)
