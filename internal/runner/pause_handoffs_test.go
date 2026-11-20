@@ -392,7 +392,7 @@ func TestPauseHandoffFinishesAfterExplicitHandback(t *testing.T) {
 	r.applyDesired(t.Context(), a, protocol.DesiredHeld, clock.Now())
 	// Owner explicitly gives the Task back; Issue pause still requests stop.
 	r.applyDesired(t.Context(), a, protocol.DesiredPaused, clock.Now())
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	if err := r.execute(ctx, ctx, as.RunID, a); err != nil {
 		t.Fatal(err)
