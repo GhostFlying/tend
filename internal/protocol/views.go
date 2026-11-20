@@ -415,6 +415,8 @@ type LedgerEvent struct {
 	CreatedAt  time.Time `json:"created_at"`
 	// ConversationID scopes a message invalidation without a body in the Chat stream.
 	ConversationID string `json:"conversation_id,omitempty"`
+	// ChatRemoved marks a withdrawn message without sending its body.
+	ChatRemoved bool `json:"chat_removed,omitempty"`
 	// Item is the conversation item a conversation event is about.
 	Item *ConversationItem `json:"item,omitempty"`
 }

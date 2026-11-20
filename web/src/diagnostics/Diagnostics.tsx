@@ -151,10 +151,10 @@ export function Diagnostics({
           事件记录
         </button>
         <button type="button" onClick={() => setRolloutOpen(true)}>
-          主 Agent 执行记录
+          会话执行记录
         </button>
       </nav>
-      <Rollout open={rolloutOpen} onClose={() => setRolloutOpen(false)} />
+      {rolloutOpen && <Rollout onClose={() => setRolloutOpen(false)} />}
       <div className={styles.filters}>
         <Input
           aria-label="搜索记录"

@@ -69,6 +69,10 @@ func conversationQueue(ctx context.Context, q store.Querier, category string, af
 			out.InterruptibleMessageID = turn.ID
 			if chat {
 				out.ProcessingStartedAt = turn.StartedAt
+				out.ProcessingOwnerInput, err = store.HasOwnerMessageAuthority(ctx, q, turn.ID)
+				if err != nil {
+					return out, err
+				}
 			}
 		}
 	}

@@ -108,7 +108,7 @@ func TestChatProjectionToolDenseHistoryAndStop(t *testing.T) {
 	if len(latest.Items) != 50 || latest.Items[0].MessageID != "reply-10" || latest.Items[49].MessageID != "reply-59" || !latest.More || latest.EventSeq == 0 {
 		t.Fatal("latest 50 visible replies were not returned")
 	}
-	if queue.InterruptibleMessageID != id || queue.ProcessingStartedAt != e.clock.Now().UnixMilli() || queue.Active != nil || queue.Total != 0 {
+	if queue.InterruptibleMessageID != id || !queue.ProcessingOwnerInput || queue.ProcessingStartedAt != e.clock.Now().UnixMilli() || queue.Active != nil || queue.Total != 0 {
 		t.Fatalf("stop target missing outside the latest page: %+v", queue)
 	}
 	read(fmt.Sprintf("/api/v1/conversation?projection=chat&limit=50&before=%d", latest.Items[0].Seq), &before)
@@ -284,5 +284,53 @@ func TestChatProjectionOpenChoicesAndScopedIssueInvalidation(t *testing.T) {
 	}
 	if status := e.do("GET", path, token, nil, &page); status != http.StatusOK || len(page.Items) != 0 {
 		t.Fatalf("answered notice stayed in Chat: status=%d page=%+v", status, page)
+	}
+}
+
+func TestChatProjectionWithdrawnInputDoesNotConsumePage(t *testing.T) {
+	e := newEnv(t)
+	e.server.cfg.HostedMainAgent = true
+	token := e.login(protocol.ScopeOwner)
+	e.say("previous visible message")
+	id := e.ids.New(protocol.PrefixMessage)
+	submit := e.envelope("conversation.submit_message", protocol.Target{Type: "conversation"}, nil,
+		protocol.SubmitMessagePayload{MessageID: id, Body: "withdrawn original body"})
+	var response protocol.APIResponse
+	if status := e.do("POST", "/api/v1/ops", token, submit, &response); status != http.StatusOK || response.Operation.Status != protocol.OpAccepted {
+		t.Fatalf("submit receipt: %d %+v", status, response)
+	}
+	const path = "/api/v1/conversation?projection=chat&limit=1"
+	var before protocol.IssueConversationPage
+	if status := e.do("GET", path, token, nil, &before); status != http.StatusOK ||
+		len(before.Items) != 1 || before.Items[0].MessageID != id || !before.More {
+		t.Fatalf("queued input must be visible: %d %+v", status, before)
+	}
+	rev := before.Items[0].Control.Revision
+	withdraw := e.envelope("conversation.withdraw_message", protocol.Target{Type: "message", ID: id}, &rev, protocol.WithdrawMessagePayload{})
+	if status := e.do("POST", "/api/v1/ops", token, withdraw, &response); status != http.StatusOK || response.Operation.Status != protocol.OpSucceeded {
+		t.Fatalf("withdraw receipt: %d %+v", status, response)
+	}
+	for _, query := range []string{path, fmt.Sprintf("%s&before=%d", path, before.Items[0].Seq)} {
+		var after protocol.IssueConversationPage
+		if status := e.do("GET", query, token, nil, &after); status != http.StatusOK ||
+			len(after.Items) != 1 || after.Items[0].Body != "previous visible message" || after.More {
+			t.Fatalf("withdrawal must not consume a visible page: %d %+v", status, after)
+		}
+	}
+
+	stream := openStream(t, e.url, token, fmt.Sprintf("?projection=chat&after=%d", before.EventSeq))
+	if ev := stream.next(); ev.name != "start" {
+		t.Fatal(ev)
+	}
+	frame := stream.next()
+	var event protocol.LedgerEvent
+	if frame.name != "ledger" || json.Unmarshal([]byte(frame.data), &event) != nil ||
+		event.ConversationID != "main" || event.ObjectID != id || !event.ChatRemoved || event.Item != nil {
+		t.Fatalf("withdrawal must remove the original message without its body: %+v", frame)
+	}
+	var history protocol.IssueConversationQueuePage
+	if status := e.do("GET", "/api/v1/conversation/queue?projection=chat&category=withdrawn", token, nil, &history); status != http.StatusOK ||
+		len(history.Items) != 1 || history.Items[0].Item.MessageID != id {
+		t.Fatalf("original withdrawn history missing: %d %+v", status, history)
 	}
 }

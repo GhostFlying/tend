@@ -12,7 +12,6 @@ import { createPortal } from "react-dom";
 import type { Connection } from "../api/client.ts";
 import type {
   AgentContextUsage,
-  AgentCompactionPage,
   IssueAgentConversation as AgentConversation,
 } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
@@ -25,7 +24,6 @@ export function ContextUsage({ connection }: { connection: Connection }) {
   const visible = useContext(OverlayVisibility);
   const id = conversation?.id ?? "main";
   const [usage, setUsage] = useState<AgentContextUsage | null>(null);
-  const [history, setHistory] = useState<AgentCompactionPage | null>(null);
   const [open, setOpen] = useOverlayState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -113,14 +111,9 @@ export function ContextUsage({ connection }: { connection: Connection }) {
     if (!visible || connection.status !== "online") return;
     const abort = new AbortController();
     const read = () => {
-      void Promise.all([
-        client.get<AgentContextUsage>(`${base}/usage`, abort.signal),
-        client.get<AgentCompactionPage>(`${base}/compactions`, abort.signal),
-      ])
-        .then(([u, h]) => {
-          setUsage(u);
-          setHistory(h);
-        })
+      void client
+        .get<AgentContextUsage>(`${base}/usage`, abort.signal)
+        .then(setUsage)
         .catch(() => {});
     };
     read();
@@ -144,14 +137,10 @@ export function ContextUsage({ connection }: { connection: Connection }) {
             },
       );
       setError(result.kind === "done" ? "已排队，当前回复结束后执行。" : result.message);
-      setHistory(await client.get<AgentCompactionPage>(`${base}/compactions`));
     } catch (e) {
       setError(String(e));
     }
   };
-  const pending = history?.items?.some((x) =>
-    ["queued", "starting", "running", "unknown"].includes(x.status),
-  );
   const percent = usage?.used_percentage;
   return (
     <div
@@ -226,37 +215,18 @@ export function ContextUsage({ connection }: { connection: Connection }) {
               disabled={
                 connection.status !== "online" ||
                 (!operation.pending && !usage?.compact_supported) ||
-                (!operation.pending && pending) ||
                 operation.busy ||
                 !!operation.storageError
               }
               onClick={() => void compact(operation.pending)}
             >
-              {operation.pending
-                ? "核对原请求"
-                : pending
-                  ? "Compact 进行中 / 待核对"
-                  : "手动 compact"}
+              {operation.pending ? "核对原请求" : "手动 compact"}
             </button>
             {!usage?.compact_supported && <p>当前运行时尚未确认原生 compact 能力。</p>}
             {error && <p role="status">{error}</p>}
             {operation.storageError && <p role="alert">{operation.storageError}</p>}
             {operation.pending && (
               <p>请求回执待核对。未找到回执时仅重试原请求，不另建 compact 操作。</p>
-            )}
-            <h4>Compact 历史</h4>
-            {history?.items?.length ? (
-              <ul>
-                {history.items.map((h) => (
-                  <li key={h.operation_id}>
-                    {h.source === "manual" ? "手动" : "自动"} ·{" "}
-                    {compactLabels[h.status] ?? h.status} ·{" "}
-                    {new Date(h.created_at).toLocaleTimeString()}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>暂无记录</p>
             )}
             <button onClick={close}>关闭</button>
           </div>,
@@ -265,11 +235,3 @@ export function ContextUsage({ connection }: { connection: Connection }) {
     </div>
   );
 }
-const compactLabels: Record<string, string> = {
-  queued: "排队中",
-  starting: "启动中",
-  running: "执行中",
-  completed: "已完成",
-  failed: "失败",
-  unknown: "结果待核对",
-};

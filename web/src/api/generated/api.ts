@@ -4910,6 +4910,7 @@ export interface IssueConversationQueuePage {
   interruptible_message_id?: string;
   items: IssueConversationQueueEntry[] | null;
   next?: number;
+  processing_owner_input?: boolean;
   processing_started_at?: number;
   total: number;
 }
@@ -6041,6 +6042,7 @@ export interface IssueTranscriptPage {
  * via the `definition` "LedgerEvent".
  */
 export interface LedgerEvent {
+  chat_removed?: boolean;
   conversation_id?: string;
   created_at: string;
   event_seq: number;

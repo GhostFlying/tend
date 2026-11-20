@@ -9504,6 +9504,9 @@
         "next": {
           "type": "integer"
         },
+        "processing_owner_input": {
+          "type": "boolean"
+        },
         "processing_started_at": {
           "type": "integer"
         },
@@ -12361,6 +12364,9 @@
     "LedgerEvent": {
       "additionalProperties": false,
       "properties": {
+        "chat_removed": {
+          "type": "boolean"
+        },
         "conversation_id": {
           "type": "string"
         },
