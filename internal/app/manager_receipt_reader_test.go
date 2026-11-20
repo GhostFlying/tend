@@ -209,10 +209,39 @@ func TestManagerReceiptReaderRetainsAllFences(t *testing.T) {
 
 // Repeated reads keep the original business pending set and never acquire a Run.
 func TestManagerHistoryReadsUseOriginalRunAcrossLostReplies(t *testing.T) {
+	t.Run("runner history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, false) })
+	t.Run("local history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, true) })
+}
+
+func testManagerHistoryReadsUseOriginalRun(t *testing.T, local bool) {
+	t.Helper()
 	h, original, pending := stoppedRetainedManager(t)
 	p := receiptReaderPayload(t, h, original)
 	if op := h.exec(owner, h.env(protocol.OpReconcileManagerRun, taskTarget(original.TaskID), p, rev(h.task(original.TaskID).ControlRevision)), ReconcileManagerRun{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
+	}
+	if local {
+		// Preserve the snapshot and original request while exercising the legacy
+		// storage arm of the hosted execution read model.
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO hosted_configuration_versions
+				VALUES(1,'local','hash','{}','{}','planner','local-config',1)`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO local_hosted_executions
+				SELECT execution_id,conversation_id,issue_id,assignment_epoch,role,1,agent_ref,private_snapshot,created_at
+				FROM runner_coordination_executions WHERE execution_id=?`, pending); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `DELETE FROM runner_coordination_executions WHERE execution_id=?`, pending)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selection, named, err := h.app.NamedHostedSelection(t.Context(), original.Manager.ConversationID)
+	if err != nil || !named || selection.RunnerRunID != original.RunID || !selection.ReceiptOnly || !selection.RequireReceiptReader {
+		t.Fatal("runner selection lost the original receipt reader", selection, err)
 	}
 	runs := h.count("runs")
 	var turn store.MainTurn
