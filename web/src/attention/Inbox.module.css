@@ -231,6 +231,25 @@
   color: var(--bg);
   background: var(--label);
 }
+.receipt {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-inline-start: 3px solid var(--ok);
+  border-radius: var(--radius-m);
+  background: var(--ok-soft);
+}
+.submitting {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--bg-l2);
+}
+.receipt p,
+.submitting p {
+  margin: var(--space-2) 0 0;
+}
 .warning {
   padding: var(--space-3) 14px;
   border: 1px solid var(--warn-line);

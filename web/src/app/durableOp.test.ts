@@ -496,3 +496,70 @@ test("merely reading current delivery facts retains the unknown refresh without 
   expect(sender.submitted).toEqual([original]);
   expect(await journal.pending()).toEqual(original);
 });
+
+test("decision reconciliation requires the recorded answer to the original version", async () => {
+  const original: Envelope = {
+    ...envelope,
+    operation: "attentions.respond",
+    target: { type: "attention", id: "attn-original" },
+    payload: { version: 3, option: "approve" },
+  };
+  const sender = new Sender();
+  sender.offline = false;
+  const open = {
+    attention_id: "attn-original",
+    kind: "decision",
+    revision: original.expected_control_revision,
+    status: "open",
+    decision: { version: 3, status: "open" },
+  };
+  sender.current = open;
+  const journal = new DurableOp("decision-receipt", new IDBFactory());
+  expect((await journal.submit(sender, original)).kind).toBe("unknown");
+  expect(await journal.pending()).toEqual(original);
+  const answer = {
+    ...open,
+    status: "resolved",
+    decision: { version: 4, status: "answered", answer: { option: "defer", text: "Next week" } },
+  };
+  sender.current = { ...answer, attention_id: "attn-another" };
+  expect((await journal.reconcile(sender)).kind).toBe("unknown");
+  sender.current = { ...answer, decision: { version: 4, status: "answered" } };
+  expect((await journal.reconcile(sender)).kind).toBe("unknown");
+  sender.current = answer;
+  expect(await journal.reconcile(sender)).toEqual({ kind: "done", result: answer });
+  expect(await journal.pending()).toBeUndefined();
+  expect(sender.submitted).toEqual([original]);
+});
+
+test("newer open decision version fences the original submission without proving success", async () => {
+  const original: Envelope = {
+    ...envelope,
+    operation: "attentions.respond",
+    target: { type: "attention", id: "attn-original" },
+    payload: { version: 3, option: "approve" },
+  };
+  const sender = new Sender();
+  sender.offline = false;
+  sender.current = {
+    attention_id: "attn-original",
+    kind: "decision",
+    status: "open",
+    revision: original.expected_control_revision,
+    decision: { version: 3, status: "open" },
+  };
+  const journal = new DurableOp("revised-decision", new IDBFactory());
+  expect((await journal.submit(sender, original)).kind).toBe("unknown");
+  sender.current = {
+    attention_id: "attn-original",
+    kind: "decision",
+    status: "open",
+    revision: 9,
+    decision: { version: 4, status: "open" },
+  };
+  expect(await journal.reconcile(sender)).toMatchObject({
+    kind: "stale",
+    currentAttention: sender.current,
+  });
+  expect(sender.submitted).toEqual([original]);
+});

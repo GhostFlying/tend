@@ -11,6 +11,7 @@ import type {
   IssueFollowupHistory,
   WorkItemChoice,
 } from "../api/generated/api.ts";
+import { decisionReceipt, questionVersion } from "../attention/decisionReceipt.ts";
 import { newObjectId } from "../api/ids.ts";
 import type { OpOutcome, OpSender } from "./ops.ts";
 
@@ -206,12 +207,32 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
         ? { kind: "stale", message: stale, currentIssue }
         : unknown();
     }
+    if (e.operation === "attentions.respond" && id) {
+      const currentAttention = await sender.get<AttentionView>(`/api/v1/attentions/${encoded}`);
+      if (currentAttention?.attention_id !== id || typeof payload.version !== "number")
+        return unknown();
+      if (decisionReceipt(currentAttention, payload.version)) {
+        return { kind: "done", result: currentAttention };
+      }
+      const question = currentAttention.decision ?? currentAttention.choice;
+      // A known newer open version, terminal question, or newer Attention CAS
+      // with this question still open fences the original write.
+      if (
+        question &&
+        (questionVersion(currentAttention) > payload.version ||
+          ["withdrawn", "superseded", "cancelled"].includes(question.status) ||
+          (question.status === "open" &&
+            newerRevision(currentAttention.revision, e.expected_control_revision)))
+      ) {
+        return { kind: "stale", message: stale, currentAttention };
+      }
+      return unknown();
+    }
     if (
       [
         "attentions.update",
         "attentions.withdraw",
         "attentions.present",
-        "attentions.respond",
         "attentions.confirm",
       ].includes(e.operation) &&
       id
