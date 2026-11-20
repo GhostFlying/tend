@@ -26,9 +26,15 @@ func TestRetiredJournalFlushesOtherRunsAfterUploadTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a-blocked", "b-healthy"} {
-		as := protocol.Assignment{RunID: id, EventSync: true}
+		as := protocol.Assignment{RunID: id, EventSync: true, Protocol: protocol.CurrentRunnerProtocol}
 		if err := old.AcceptAssignment(t.Context(), as, ""); err != nil {
 			t.Fatal(err)
+		}
+		if id == "b-healthy" {
+			start := protocol.Envelope{RequestID: "original-startup", Operation: protocol.OpRunsReportStarted, Target: runTarget(as)}
+			if err := old.BeginDelegatedRun(t.Context(), id, []protocol.Envelope{start}); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := old.AppendEvent(t.Context(), id, protocol.RunEvent{Kind: "output", Body: json.RawMessage(`{}`)}); err != nil {
 			t.Fatal(err)
@@ -51,6 +57,10 @@ func TestRetiredJournalFlushesOtherRunsAfterUploadTimeout(t *testing.T) {
 			blocked.Add(1)
 			<-req.Context().Done()
 			return nil, req.Context().Err()
+		}
+		var batch protocol.EventsPayload
+		if env.Operation != protocol.OpRunnerSyncEvents || json.Unmarshal(env.Payload, &batch) != nil || len(batch.Events) != 2 || batch.Events[1].NativeID != "original-startup" {
+			t.Error("retired startup facts did not follow the historical transfer", env)
 		}
 		healthy.Add(1)
 		return finalEventsResponse(env, false), nil

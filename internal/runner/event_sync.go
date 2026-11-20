@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -96,6 +97,11 @@ func (r *Runner) syncJournalEvents(ctx context.Context) {
 				delete(retryAt, as.RunID)
 			}
 			sent, err := r.flushEventBatch(ctx, as)
+			// Ordinary event delivery has its own receipt. A rejected startup
+			// command cannot prevent these already captured observations.
+			if protocol.RunnerOwnsExecution(as.Protocol) {
+				err = errors.Join(err, r.flushStartReports(ctx, as))
+			}
 			progress = progress || sent
 			if err != nil && ctx.Err() == nil {
 				retryAt[as.RunID] = time.Now().Add(r.cfg.RetryDelay)

@@ -131,6 +131,12 @@ func (r *Runner) serviceRetiredJournal(parent context.Context, id string, c reti
 			}
 			as := runs[(start+i)%len(runs)]
 			c.lastEventRun = as.RunID
+			if protocol.RunnerOwnsExecution(as.Protocol) {
+				if e := j.ArchiveRetiredStartReports(eventCtx, as.RunID); e != nil {
+					err = errors.Join(err, e)
+					continue
+				}
+			}
 			if e := retained.flushEvents(eventCtx, as); e != nil {
 				err = errors.Join(err, e)
 			}

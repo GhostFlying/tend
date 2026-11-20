@@ -29,6 +29,9 @@ func TestFault_StartupReportRecoverySettlesOriginalResult(t *testing.T) {
 		defer n.net.mu.Unlock()
 		return n.net.drop[protocol.OpRunsReportWorkspace] < 9999
 	})
+	eventually(t, "server received physical exit while startup delivery was unavailable", func() bool {
+		return srv.count(`SELECT COUNT(*) FROM run_logs WHERE run_id=? AND kind=?`, original, protocol.EventWorkerStopped) == 1
+	})
 	n.net.allow(protocol.OpRunsReportWorkspace)
 	eventually(t, "startup fact sender has recovered", func() bool {
 		reports, err := n.runningJournal().StartReports(t.Context(), original)
