@@ -2245,6 +2245,9 @@
         "issue_title": {
           "type": "string"
         },
+        "issue_transition": {
+          "$ref": "#/definitions/IssueInboxTransition"
+        },
         "kind": {
           "type": "string"
         },
@@ -10802,6 +10805,37 @@
         "title"
       ],
       "title": "IssueIdentity",
+      "type": "object"
+    },
+    "IssueInboxTransition": {
+      "additionalProperties": false,
+      "properties": {
+        "closure_kind": {
+          "type": "string"
+        },
+        "delivery": {
+          "$ref": "#/definitions/IssueDelivery"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "issue_revision": {
+          "type": "integer"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "wait_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "IssueInboxTransition",
       "type": "object"
     },
     "IssueManagerAssignment": {

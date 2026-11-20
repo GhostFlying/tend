@@ -3627,7 +3627,7 @@ try {
         });
       assert.equal(await routeSmoke.getByRole("heading", { level: 1 }).count(), 1);
       if (name === "inbox") {
-        const description = routeSmoke.getByText("需要你决定或亲自推进的事项。", { exact: true });
+        const description = routeSmoke.getByText("待处理事项和 Issue 流转通知。", { exact: true });
         const padding = await description.evaluate(
           (element) => getComputedStyle(element).paddingLeft,
         );

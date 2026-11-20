@@ -121,7 +121,7 @@ export function Inbox({
           {...(selected ? { onBack: () => back({ page: "inbox" }) } : {})}
         />
       </div>
-      <p className={`${styles.muted} ${styles.context}`}>需要你决定或亲自推进的事项。</p>
+      <p className={`${styles.muted} ${styles.context}`}>待处理事项和 Issue 流转通知。</p>
       <Tabs
         className={styles.tabs ?? ""}
         label="记录范围"
@@ -173,6 +173,8 @@ export function Inbox({
             </EmptyState>
           )}
           {items.map((item) => {
+            const transition = item.issue_transition;
+            const unread = !transition && !item.read_at;
             return (
               <article
                 className={styles.row}
@@ -188,8 +190,8 @@ export function Inbox({
                     setSelected(item.attention_id);
                   }}
                 >
-                  <span className={styles.rowTitle} data-unread={!item.read_at}>
-                    {!item.read_at && <span className={styles.unread} aria-label="未读" />}
+                  <span className={styles.rowTitle} data-unread={transition ? undefined : unread}>
+                    {unread && <span className={styles.unread} aria-label="未读" />}
                     <span>{attentionContextTitle(item)}</span>
                   </span>
                   <span className={styles.questionSummary}>{attentionHeading(item)}</span>
@@ -207,7 +209,9 @@ export function Inbox({
                 </Button>
                 <div className={styles.rowMeta}>
                   <Badge>{kindLabel(item.kind)}</Badge>
-                  <span>{item.historical ? "历史提示" : statusLabel(item.status)}</span>
+                  {!transition && (
+                    <span>{item.historical ? "历史提示" : statusLabel(item.status)}</span>
+                  )}
                   <time
                     dateTime={new Date(item.created_at).toISOString()}
                     title={new Date(item.created_at).toLocaleString("zh-CN")}
@@ -294,7 +298,9 @@ export function AttentionDetails({
           ← 待处理
         </Button>
       )}
-      {a ? (
+      {a?.issue_transition ? (
+        <IssueTransitionDetails item={a} onBack={onBack} />
+      ) : a ? (
         <AttentionForm
           key={`${a.attention_id}:${a.kind === "decision" ? questionVersion(a) : a.revision}`}
           item={a}
@@ -307,6 +313,34 @@ export function AttentionDetails({
           <Button onClick={() => live.attention.refresh()}>重新读取</Button>
         </p>
       )}
+    </>
+  );
+}
+
+function IssueTransitionDetails({ item, onBack }: { item: AttentionView; onBack(): void }) {
+  const delivery = item.issue_transition?.delivery;
+  const created = new Date(item.created_at);
+  return (
+    <>
+      <header className={styles.issueContext}>
+        <h2>{attentionContextTitle(item)}</h2>
+      </header>
+      <h3>{attentionHeading(item)}</h3>
+      <p>
+        <time dateTime={created.toISOString()}>{created.toLocaleString("zh-CN")}</time>
+        {delivery && (
+          <span>
+            {" "}
+            · {delivery.repository} #{delivery.number}
+          </span>
+        )}
+      </p>
+      <div className={styles.actions}>
+        {item.issue_id && <Link to={{ page: "issue", id: item.issue_id }}>查看 Issue →</Link>}
+        <Button variant="secondary" onClick={onBack}>
+          返回列表
+        </Button>
+      </div>
     </>
   );
 }
@@ -875,6 +909,16 @@ export function attentionOptionHelp(item: AttentionView, option: string): string
 }
 
 export function attentionHeading(item: AttentionView): string {
+  if (item.issue_transition) {
+    switch (item.issue_transition.state) {
+      case "waiting_ci":
+        return "等待 CI";
+      case "cancelled":
+        return "已取消";
+      case "closed":
+        return item.issue_transition.closure_kind === "completed" ? "已完成" : "已结束";
+    }
+  }
   const text = item.decision ? question(item.decision).text : item.title;
   if (
     item.status === "open" &&

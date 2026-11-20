@@ -550,6 +550,11 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 			}
 		}
 		if !ready {
+			created, err := recordChecksWaitInInbox(ctx, x, tx, v)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || created
 			if err := tx.PutExternalWait(ctx, *v, now+5000); err != nil {
 				return false, err
 			}
