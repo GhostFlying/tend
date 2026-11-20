@@ -163,7 +163,7 @@ func boardPlacementForIssue(ctx context.Context, q store.Querier, issue protocol
 type boardCheckWait struct {
 	RunID     string `json:"run_id"`
 	StoppedAt int64  `json:"stopped_at"`
-	EndedAt   int64  `json:"ended_at"`
+	EndedAt   *int64 `json:"ended_at"`
 	Current   bool   `json:"current"`
 }
 
@@ -185,38 +185,34 @@ func boardRunFacts(ctx context.Context, q store.Querier, issueID string) (issueB
 
 func boardCheckWaits(ctx context.Context, q store.Querier, runs issueBoardRuns) (pending, previouslyWaited bool, err error) {
 	for _, check := range runs.checks {
+		if check.EndedAt != nil {
+			// A head change or terminal observation closes this exact wait's
+			// interval even if the provider later starts another cycle.
+			quietAt := max(check.StoppedAt, runs.lastStart, runs.lastSettled)
+			// Equal timestamps leave the order of unrelated wall-clock receipts unknown.
+			previouslyWaited = previouslyWaited || quietAt < *check.EndedAt
+			continue
+		}
+		if !check.Current {
+			continue
+		}
 		wait, err := store.GetExternalWait(ctx, q, check.RunID)
 		if err != nil {
 			return false, false, err
 		}
-		if wait == nil {
+		if wait == nil || wait.ResumeReason != "" {
 			continue
 		}
-		end := check.EndedAt
 		row, err := store.GetDeliveryObservation(ctx, q, wait.IssueID, wait.TargetID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
 			return false, false, err
 		}
-		if err == nil {
-			ready, reason := store.ApplyChecksWaitObservation(wait, row)
-			observed := row.ChecksWaitEndedAt(reason)
-			if observed > 0 && (end == 0 || observed < end) {
-				end = observed
-			}
-			pending = pending || check.Current && !ready && observed == 0 && wait.ResumeReason == ""
-			// No time is available for an older observation. In that case only
-			// a recorded continuation or cancellation bounds historical use.
-			if ready && end == 0 {
-				continue
-			}
-		} else if end == 0 {
-			continue
-		}
-		// A parallel Run can take precedence and then stop while this wait
-		// is still effective. Use the overlap with settled execution, not the
-		// order in which the processes were allocated.
-		quietAt := max(check.StoppedAt, runs.lastStart, runs.lastSettled)
-		previouslyWaited = previouslyWaited || end == 0 || quietAt <= end
+		ready, _ := store.ApplyChecksWaitObservation(wait, row)
+		pending = pending || !ready
+		previouslyWaited = previouslyWaited || !ready
 	}
 	return pending, previouslyWaited, nil
 }
@@ -282,6 +278,8 @@ waits AS (
      (r.role<>'accept' OR a.target_artifact_id=t.current_artifact_id) AS current_wait,
    CASE w.status WHEN 'continued' THEN continuation.created_at WHEN 'cancelled' THEN w.next_check_at END AS wait_ended_at,
    CASE WHEN d.status='open' THEN NULL ELSE d.updated_at END AS question_ended_at,
+   json_type(w.body_json,'$.board_checks')='object' AS checks_tracked,
+   json_extract(w.body_json,'$.board_checks.invalidated_at') AS checks_invalidated_at,
    json_extract(w.body_json,'$.kind') AS wait_kind
  FROM run_times r
  LEFT JOIN run_external_waits w USING(run_id) LEFT JOIN run_question_handoffs h USING(run_id)
@@ -293,7 +291,8 @@ waits AS (
  WHERE r.current_owner AND r.created_at>=r.todo_at AND r.stopped_at>0
 ),
 effective_waits AS (
- SELECT w.*,MAX(w.stopped_at, a.last_start, a.last_settled) AS quiet_at
+ SELECT w.*,MAX(w.stopped_at, a.last_start, a.last_settled) AS quiet_at,
+   CASE WHEN w.checks_tracked THEN COALESCE(w.checks_invalidated_at,w.wait_ended_at) END AS checks_ended_at
  FROM waits w CROSS JOIN activity a
 )
 SELECT
@@ -307,8 +306,8 @@ SELECT
    (stopped_wait AND wait_kind<>'checks' AND (current_wait OR quiet_at<=wait_ended_at))),
  EXISTS(SELECT 1 FROM effective_waits WHERE stopped_wait AND current_wait AND wait_kind<>'checks'),
  (SELECT json_group_array(json_object('run_id', run_id, 'stopped_at', stopped_at,
-    'ended_at', COALESCE(wait_ended_at,0), 'current', json(CASE WHEN current_wait THEN 'true' ELSE 'false' END)))
-   FROM effective_waits WHERE stopped_wait AND wait_kind='checks' AND (current_wait OR quiet_at<=wait_ended_at))
+    'ended_at', checks_ended_at, 'current', json(CASE WHEN current_wait THEN 'true' ELSE 'false' END)))
+   FROM effective_waits WHERE stopped_wait AND wait_kind='checks' AND (current_wait OR quiet_at<=checks_ended_at))
 FROM activity
 `
 

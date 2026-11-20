@@ -218,7 +218,7 @@ func TestIssueBoardKeepsOwnerExecutionUntilTerminalStop(t *testing.T) {
 }
 
 func TestIssueExecutionBoardWaitsForCISlotReleaseAndOwnerRestart(t *testing.T) {
-	for _, order := range []string{"owner only", "parallel run stops before CI", "CI ends before parallel run stops"} {
+	for _, order := range []string{"owner only", "parallel run stops before CI", "CI ends before parallel run stops", "head changes before parallel run stops"} {
 		t.Run(order, func(t *testing.T) { testIssueExecutionBoardCI(t, order) })
 	}
 }
@@ -260,15 +260,16 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 	startBoardManager(t, h, assignment)
 	check("owner running", protocol.IssueColumnWIP, "")
 
+	providerHead := "candidate"
 	snapshot := func(state string) {
 		t.Helper()
 		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 			observation := protocol.DeliveryObservation{
-				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: "candidate", BaseSHA: "base", TargetSHA: "target"},
+				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: providerHead, BaseSHA: "base", TargetSHA: "target"},
 				CheckedAt:        h.clock.Now().UnixMilli(),
 			}
 			if state != "" {
-				observation.CI = &protocol.DeliveryCI{HeadSHA: "candidate", State: state}
+				observation.CI = &protocol.DeliveryCI{HeadSHA: providerHead, State: state}
 			}
 			_, err := tx.PutDeliveryObservationFact(t.Context(), delivery, observation)
 			return err
@@ -315,12 +316,21 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 			t.Fatal(op)
 		}
 		check("parallel worker running", protocol.IssueColumnWIP, "")
-		if order == "CI ends before parallel run stops" {
+		switch order {
+		case "CI ends before parallel run stops":
 			h.clock.Advance(time.Millisecond)
 			snapshot("success")
 			check("CI finished while parallel worker is live", protocol.IssueColumnWIP, "")
+		case "head changes before parallel run stops":
+			h.clock.Advance(time.Millisecond)
+			providerHead = "replacement-one"
+			snapshot("pending")
+			check("first head replacement while parallel worker is live", protocol.IssueColumnWIP, "")
 		}
-		h.clock.Advance(time.Millisecond)
+		// The CI-first case settles the worker at the same clock tick.
+		if order != "CI ends before parallel run stops" {
+			h.clock.Advance(time.Millisecond)
+		}
 		if op := h.runAs(other, protocol.OpRunsSubmitArtifact, testArtifact(h.task(other.TaskID).WorkspaceName), SubmitArtifact{}); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
@@ -335,6 +345,26 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 			h.clock.Advance(time.Millisecond)
 			snapshot("")
 			check("partial provider read preserves the confirmed end of the CI wait", protocol.IssueColumnWIP, "")
+			h.clock.Advance(time.Millisecond)
+			snapshot("pending")
+			check("another CI cycle does not reopen the original wait", protocol.IssueColumnWIP, "")
+			return
+		}
+		if order == "head changes before parallel run stops" {
+			check("parallel worker stops after the original head was replaced", protocol.IssueColumnWIP, "")
+			h.clock.Advance(time.Millisecond)
+			providerHead = "replacement-two"
+			snapshot("pending")
+			check("second head replacement after parallel stop", protocol.IssueColumnWIP, "")
+			h.clock.Advance(time.Millisecond)
+			providerHead = "candidate"
+			snapshot("pending")
+			check("returning to the original head does not reopen its wait", protocol.IssueColumnWIP, "")
+			h.clock.Advance(6 * time.Second)
+			if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			check("refreshing the original watch preserves its first invalidation", protocol.IssueColumnWIP, "")
 			return
 		}
 		check("parallel worker stops while CI is pending", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)

@@ -142,36 +142,6 @@ func TestDeliveryObservationFactRevisionsCaptureSameClockChanges(t *testing.T) {
 	}
 }
 
-func TestDeliveryObservationRetainsChecksWaitTransitionTimes(t *testing.T) {
-	s, issue, _, ref := currentDeliveryFixture(t)
-	for _, step := range []struct {
-		head, ci             string
-		at, headAt, terminal int64
-	}{
-		{"one", "pending", 10, 10, 0},
-		{"one", "success", 20, 10, 20},
-		{"one", "success", 30, 10, 20},
-		{"one", "", 40, 10, 20}, // Partial read does not prove a new check cycle.
-		{"one", "success", 50, 10, 20},
-		{"one", "pending", 60, 10, 0},
-		{"one", "failure", 70, 10, 70},
-		{"two", "pending", 80, 80, 0},
-		{"two", "pending", 90, 80, 0},
-		{"two", "success", 100, 80, 100},
-	} {
-		o := protocol.DeliveryObservation{CheckedAt: step.at, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: step.head}}
-		if step.ci != "" {
-			o.CI = &protocol.DeliveryCI{HeadSHA: step.head, State: step.ci}
-		}
-		currentFact(t, s, ref, o)
-		got := readCurrentObservation(t, s, issue.IssueID, ref.DeliveryID)
-		if got.Observation.CheckedAt != step.at || got.ChecksWaitEndedAt("candidate_changed") != step.headAt ||
-			got.ChecksWaitEndedAt("checks_"+step.ci) != step.terminal {
-			t.Fatalf("at %d: refresh or wait evidence changed: %+v, step %+v", step.at, got, step)
-		}
-	}
-}
-
 func TestSharedReviewUsesOnlyNormalizedProviderCandidate(t *testing.T) {
 	s, current, closed, ref := currentDeliveryFixture(t)
 	o := protocol.DeliveryObservation{Observer: "runner", CheckedAt: 20, AttemptedAt: 20, DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: strings.Repeat("c", 40), BaseSHA: strings.Repeat("d", 40), CI: &protocol.DeliveryCI{HeadSHA: strings.Repeat("c", 40), State: "success", Checks: []protocol.DeliveryCheck{{Name: "check", Conclusion: "success"}}}}}

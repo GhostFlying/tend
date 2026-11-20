@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -24,13 +25,71 @@ func GetExternalWait(ctx context.Context, q Querier, run string) (*protocol.Exte
 	return &out, nil
 }
 
+// The board evidence is private to an original checks wait. Rereading or
+// updating an ExternalWait must preserve the already recorded provider fact.
+type checksWaitBoardEvidence struct {
+	Head          string `json:"head,omitempty"`
+	InvalidatedAt *int64 `json:"invalidated_at,omitempty"`
+	FactRevision  int64  `json:"fact_revision,omitempty"`
+}
+
 func (t *Tx) PutExternalWait(ctx context.Context, v protocol.ExternalWait, next int64) error {
-	raw, err := json.Marshal(v)
+	stored := struct {
+		protocol.ExternalWait
+		BoardChecks *checksWaitBoardEvidence `json:"board_checks,omitempty"`
+	}{ExternalWait: v}
+	if v.Kind == "checks" && v.Status == "stopping" {
+		stored.BoardChecks = &checksWaitBoardEvidence{Head: v.ObservedHead}
+		if v.ObservedState == "closed" || v.ObservedState == "merged" || checksTerminal(v.ObservedState) {
+			// An already ended condition could not become a physically stopped wait.
+			stored.BoardChecks.InvalidatedAt = new(int64)
+			stored.BoardChecks.FactRevision = v.ObservedRevision
+		}
+	}
+	raw, err := json.Marshal(stored)
 	if err != nil {
 		return err
 	}
-	_, err = t.Exec(ctx, `INSERT INTO run_external_waits(run_id,wait_id,wait_key,task_id,status,body_json,next_check_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET status=excluded.status,body_json=excluded.body_json,next_check_at=excluded.next_check_at`, v.RunID, v.WaitID, v.WaitKey, v.TaskID, v.Status, string(raw), next)
+	_, err = t.Exec(ctx, `INSERT INTO run_external_waits(run_id,wait_id,wait_key,task_id,status,body_json,next_check_at)
+ VALUES(?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET status=excluded.status,next_check_at=excluded.next_check_at,
+ body_json=CASE WHEN json_type(run_external_waits.body_json,'$.board_checks')='object'
+  THEN json_set(excluded.body_json,'$.board_checks',json_extract(run_external_waits.body_json,'$.board_checks'))
+  ELSE json_remove(excluded.body_json,'$.board_checks') END`, v.RunID, v.WaitID, v.WaitKey, v.TaskID, v.Status, string(raw), next)
 	return err
+}
+
+// Capture only the first observation invalidating each open wait. A different
+// wait on the same delivery keeps its own original head and first evidence.
+func (t *Tx) recordChecksWaitBoardEvidence(ctx context.Context, ref protocol.IssueDelivery, observation protocol.DeliveryObservation, revision int64) error {
+	reason, _ := checksWaitTerminal(observation)
+	if observation.HeadSHA == "" && reason == "" {
+		return nil
+	}
+	_, err := t.Exec(ctx, `
+WITH relevant AS (
+ SELECT w.run_id,COALESCE(json_extract(w.body_json,'$.board_checks.head'),'') AS head
+ FROM run_external_waits w JOIN server_delivery_references r
+ ON r.issue_id=json_extract(w.body_json,'$.issue_id') AND r.delivery_id=json_extract(w.body_json,'$.target_id')
+ WHERE w.status IN ('stopping','waiting') AND r.provider=:provider AND r.repository=:repository AND r.number=:number
+ AND json_type(w.body_json,'$.board_checks')='object'
+ AND json_extract(w.body_json,'$.board_checks.invalidated_at') IS NULL
+),
+updates AS (
+ SELECT run_id,COALESCE(NULLIF(head,''),:head) AS head,
+   :terminal OR (head<>'' AND :head<>'' AND head<>:head) AS invalidated
+ FROM relevant WHERE :terminal OR (:head<>'' AND head<>:head)
+)
+UPDATE run_external_waits AS w SET body_json=json_set(w.body_json,'$.board_checks',
+ json_object('head',u.head,'invalidated_at',CASE WHEN u.invalidated THEN :observed_at END,
+  'fact_revision',CASE WHEN u.invalidated THEN :fact_revision END))
+FROM updates u WHERE w.run_id=u.run_id`,
+		sql.Named("provider", ref.Provider), sql.Named("repository", ref.Repository), sql.Named("number", ref.Number),
+		sql.Named("head", observation.HeadSHA), sql.Named("terminal", reason != ""), sql.Named("observed_at", observation.CheckedAt),
+		sql.Named("fact_revision", revision))
+	if err != nil {
+		return fmt.Errorf("store: record checks wait board evidence: %w", err)
+	}
+	return nil
 }
 
 func TaskExternalWaits(ctx context.Context, q Querier, task, runID, status string) ([]protocol.ExternalWait, error) {
@@ -189,17 +248,17 @@ func checksWaitTerminal(o protocol.DeliveryObservation) (reason, state string) {
 	if o.State == "closed" || o.State == "merged" {
 		return "pull_request_" + o.State, o.State
 	}
-	if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && (o.CI.State == "success" || o.CI.State == "failure" || o.CI.State == "cancelled" || o.CI.State == "skipped") {
+	if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && checksTerminal(o.CI.State) {
 		return "checks_" + o.CI.State, o.CI.State
 	}
 	return "", o.State
 }
 
-// ChecksWaitEndedAt returns the first observation of the current head or
-// terminal condition. A legacy observation can lack that time.
-func (r DeliveryObservationRow) ChecksWaitEndedAt(reason string) int64 {
-	if reason == "candidate_changed" {
-		return r.checksWaitTimes.HeadAt
+func checksTerminal(state string) bool {
+	switch state {
+	case "success", "failure", "cancelled", "skipped":
+		return true
+	default:
+		return false
 	}
-	return r.checksWaitTimes.TerminalAt
 }
