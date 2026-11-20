@@ -123,7 +123,7 @@ func TestReportFollowOnDecision(t *testing.T) {
 			if tc.readmit {
 				finishHostedReview(t, h, turn)
 				stopOwnerClaim(t, h, run)
-				checkReportFollowOnReadmission(t, h, runtime, issue, run, item, p)
+				checkReportFollowOnReadmission(t, h, runtime, issue, run, item, p, "withdrawn")
 				return
 			}
 			answer := func() {
@@ -200,17 +200,23 @@ func TestReportFollowOnDecision(t *testing.T) {
 			if h.count("artifacts") != 1 || h.count("attentions") != 1 {
 				t.Fatal("the choice replaced the original report or decision")
 			}
+			if tc.option == protocol.ReportMoveToBacklog {
+				checkReportFollowOnReadmission(t, h, runtime, issue, run, item, p, "resolved")
+			}
 		})
 	}
 }
 
-// An explicit return to backlog supersedes a pending choice. New owner input
-// can re-admit the same Issue to revise the investigation with a new report.
-func checkReportFollowOnReadmission(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issue protocol.Issue, original protocol.Assignment, old protocol.AttentionView, p protocol.UpdateIssueDeliveryPayload) {
+// Readmission starts a new investigation after either a direct move to
+// Backlog or the owner's Backlog answer to the first report.
+func checkReportFollowOnReadmission(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issue protocol.Issue, original protocol.Assignment, old protocol.AttentionView, p protocol.UpdateIssueDeliveryPayload, oldStatus string) {
 	t.Helper()
 	target := protocol.Target{Type: "issue", ID: issue.IssueID}
 	for _, status := range []protocol.IssueWorkStatus{protocol.IssueBacklog, protocol.IssueTodo} {
 		issue = canonicalTaskIssue(t, h, issue.IssueID)
+		if issue.BoardStatus() == status {
+			continue
+		}
 		payload := protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: status}
 		if op := h.exec(owner, h.env("issues.set_status", target, payload, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "set_status"}); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
@@ -231,6 +237,22 @@ func checkReportFollowOnReadmission(t *testing.T, h *harness, runtime *protocol.
 	}
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	p.Action, p.Result = "report", nil
+	if oldStatus == "resolved" {
+		if op := h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		issue = canonicalTaskIssue(t, h, issue.IssueID)
+		revisedArtifact := h.task(next.TaskID).CurrentArtifactID
+		close := protocol.IssueEndpointPayload{IssueControlPayload: p.IssueControlPayload, Closure: &protocol.IssueClosure{
+			Kind: protocol.WorkItemClosureCompleted, Reason: "Complete the revised investigation",
+			Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceResult, Reference: revisedArtifact, Summary: "Revised report"}},
+		}}
+		op := h.exec(owner, h.env("issues.close", target, close, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "close"})
+		expectWorkCode(t, op, protocol.CodeInvalidTransition)
+		if closed := canonicalTaskIssue(t, h, issue.IssueID); closed.State != protocol.IssueActive || closed.Closure != nil {
+			t.Fatalf("the old Backlog answer closed a different report: %+v", closed)
+		}
+	}
 	p.ProposedImplementationScope = "Implement the revised recommendation."
 	if op := h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
@@ -244,7 +266,7 @@ func checkReportFollowOnReadmission(t *testing.T, h *harness, runtime *protocol.
 		if err != nil {
 			return err
 		}
-		if previous.Status != "withdrawn" || previous.ReportFollowOn.ArtifactID != old.ReportFollowOn.ArtifactID ||
+		if previous.Status != oldStatus || previous.ReportFollowOn.ArtifactID != old.ReportFollowOn.ArtifactID ||
 			len(page.Items) != 1 || page.Items[0].AttentionID == old.AttentionID ||
 			page.Items[0].ReportFollowOn.ImplementationScope != p.ProposedImplementationScope {
 			t.Fatalf("original approval was overwritten or reused: previous %+v current %+v", previous, page)

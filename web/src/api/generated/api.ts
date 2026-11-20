@@ -926,6 +926,7 @@ export interface Principal {
  * via the `definition` "ReportFollowOn".
  */
 export interface ReportFollowOn {
+  admission_revision?: number;
   artifact_id: string;
   assignment_epoch: number;
   implementation_scope: string;
