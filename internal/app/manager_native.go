@@ -883,55 +883,6 @@ func (a *App) ManagerAppliedCursor(ctx context.Context, run string) (int64, erro
 	return cursor, err
 }
 
-// AcknowledgeManagerEvent is invoked only after the server applied the event.
-// Completing an item/transport flush also covers its previously buffered deltas.
-func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
-	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, run, seq), "manager.event.ack")
-	changed, scheduling := false, false
-	err := a.write(ctx, func(tx *store.Tx) error {
-		result, err := tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq=? AND applied=0`, run, seq)
-		if err != nil {
-			return err
-		}
-		n, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		changed = n > 0
-		if flush {
-			result, err = tx.Exec(ctx, `UPDATE manager_native_events SET applied=1 WHERE run_id=? AND seq<? AND applied=0 AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND (?='' OR json_extract(body_json,'$.thread_id')=?) AND (?='' OR json_extract(body_json,'$.native.TurnID')=?) AND (?='' OR json_extract(body_json,'$.native.ItemID')=?)`, run, seq, thread, thread, turn, turn, item, item)
-			if err != nil {
-				return err
-			}
-			n, err = result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			changed = changed || n > 0
-		}
-		if !changed {
-			return nil
-		}
-		closing, err := managerRunClosing(ctx, tx.Q(), run)
-		if err != nil {
-			return err
-		}
-		var terminal bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE run_id=? AND observed_state IN ('finished','failed'))`, run).Scan(&terminal); err != nil {
-			return err
-		}
-		scheduling = closing || terminal
-		return nil
-	})
-	if err == nil && changed {
-		a.changes.Notify()
-		if scheduling {
-			a.scheduling.Notify()
-		}
-	}
-	return err
-}
-
 // finishStoppedManager releases physical capacity while retaining uncertain
 // business receipts for history reads against the original execution.
 func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reason string, lastSequence int64) (Outcome, error) {
