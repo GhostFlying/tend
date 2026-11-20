@@ -45,7 +45,7 @@ func (r *Runner) finishExternalWait(ctx context.Context, as protocol.Assignment)
 }
 
 func (r *Runner) reportExternalWait(ctx context.Context, as protocol.Assignment) error {
-	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunsYieldExternalWait)
+	requests, err := r.cfg.Journal.ManagerControlRequests(ctx, as.RunID)
 	if err != nil {
 		return err
 	}
