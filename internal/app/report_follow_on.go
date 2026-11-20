@@ -23,22 +23,6 @@ func reportAttentionID(issue string) string {
 	return protocol.NativeObjectID(protocol.Prefix("attn"), issue, "report-follow-on")
 }
 
-func reportFollowOnAlreadySettled(ctx context.Context, q store.Querier, issue protocol.Issue, taskID, scope string) (bool, error) {
-	a, err := store.GetAttention(ctx, q, reportAttentionID(issue.IssueID))
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil || a.ReportFollowOn == nil {
-		return false, err
-	}
-	task, err := store.GetTask(ctx, q, taskID)
-	if err != nil {
-		return false, err
-	}
-	scope = strings.TrimSpace(scope)
-	return a.ReportFollowOn.ArtifactID == task.CurrentArtifactID && (scope == "" || scope == a.ReportFollowOn.ImplementationScope), nil
-}
-
 // Report settlement creates the question and parks the original owner in the
 // same transaction. A stale transport retry can recover all three facts.
 func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue, duty protocol.IssueDeliveryDuty, p protocol.UpdateIssueDeliveryPayload) ([]Event, bool, error) {
@@ -55,12 +39,7 @@ func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		if a.ReportFollowOn == nil {
 			return nil, false, protocol.Errorf(protocol.CodeConflictPayload, "report decision identity is already used")
 		}
-		if scope == "" && a.Status == "resolved" && a.ReportFollowOn.ArtifactID != task.CurrentArtifactID {
-			// The initial decision remains immutable when later work delivers a
-			// different result under the same Issue.
-			return nil, false, nil
-		}
-		if a.ReportFollowOn.ArtifactID == task.CurrentArtifactID && (scope == "" || scope == a.ReportFollowOn.ImplementationScope) {
+		if a.ReportFollowOn.ArtifactID == task.CurrentArtifactID && scope == a.ReportFollowOn.ImplementationScope {
 			return nil, true, nil
 		}
 		return nil, false, protocol.Errorf(protocol.CodeConflictPayload, "the original report already has its own implementation decision")
@@ -155,8 +134,7 @@ func validateReportFollowOnAnswer(ctx context.Context, x *Exec, q store.Querier,
 	if err != nil {
 		return err
 	}
-	if issue.AssignmentEpoch != a.ReportFollowOn.AssignmentEpoch || !issue.Plan.ReportFollowOnDecision || issue.AssignmentState != "active" ||
-		(issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused) || issue.BoardStatus() == protocol.IssueBacklog {
+	if !reportDecisionCurrent(issue, a) {
 		return protocol.Errorf(protocol.CodeStaleRevision, "the report decision belongs to a superseded Issue responsibility")
 	}
 	return validateAttentionOwnerRelay(ctx, q, x, a.IssueID, p.SourceMessageID)
@@ -181,8 +159,7 @@ func applyReportFollowOnAnswer(ctx context.Context, x *Exec, tx *store.Tx, a pro
 	if err != nil {
 		return nil, err
 	}
-	if issue.AssignmentEpoch != a.ReportFollowOn.AssignmentEpoch || !issue.Plan.ReportFollowOnDecision || issue.AssignmentState != "active" ||
-		(issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused) || issue.BoardStatus() == protocol.IssueBacklog {
+	if !reportDecisionCurrent(issue, a) {
 		return nil, nil
 	}
 	if option == protocol.ReportContinueImplementation {
@@ -296,8 +273,35 @@ func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue prot
 	if err != nil {
 		return err
 	}
-	if !v.Stopped {
+	if v == nil || !v.Stopped {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "wait for the original report execution to confirm physical stop")
 	}
 	return nil
+}
+
+func reportDecisionCurrent(issue protocol.Issue, a protocol.Attention) bool {
+	return a.ReportFollowOn != nil && issue.AssignmentEpoch == a.ReportFollowOn.AssignmentEpoch &&
+		issue.Plan.ReportFollowOnDecision && issue.AssignmentState == "active" &&
+		(issue.State == protocol.IssueActive || issue.State == protocol.IssuePaused) &&
+		issue.BoardStatus() != protocol.IssueBacklog
+}
+
+// Changes to admission or scope retire the open question without answering it.
+// The stopped Run and its published report remain durable.
+func retireObsoleteReportDecision(ctx context.Context, x *Exec, tx *store.Tx, issue protocol.Issue) ([]Event, error) {
+	a, err := store.GetAttention(ctx, tx.Q(), reportAttentionID(issue.IssueID))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil || a.ReportFollowOn == nil || a.Status != "open" || reportDecisionCurrent(issue, a) {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE decisions SET status='cancelled',version=version+1,updated_at=? WHERE decision_id=? AND status='open'`, x.Now.UnixMilli(), a.DecisionID); err != nil {
+		return nil, err
+	}
+	a.Status, a.Resolution = "withdrawn", "The Issue's scope, admission or responsibility changed"
+	if err := saveAttention(ctx, x, tx, &a, a.Revision); err != nil {
+		return nil, err
+	}
+	return []Event{attentionEvent(a)}, nil
 }

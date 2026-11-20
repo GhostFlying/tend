@@ -47,24 +47,35 @@ func TestReportFollowOnDecision(t *testing.T) {
 				Result:              &protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: report}, Files: []protocol.ArtifactFile{file}},
 				IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Deliver the actual investigation"},
 			}
-			op = h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{})
+			delivery, _, ok, err := h.app.NextDelivery(t.Context(), "background_thread:"+run.Manager.ConversationID)
+			if err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			turn := startHostedReview(t, h, run.Manager.ConversationID, delivery)
+			producer := runPrincipal(run.RunID, run.Role)
+			producer.Thread, producer.ConversationID = turn.ThreadID, run.Manager.ConversationID
+			p.RunID = "" // The hosted callback derives the producing Run.
+			op = hostedEffect(t, h, producer, turn, 1, target, rev(issue.Revision), p, UpdateIssueDelivery{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			artifactID := h.task(run.TaskID).CurrentArtifactID
 			issue = canonicalTaskIssue(t, h, issue.IssueID)
+			if repeat := hostedEffect(t, h, producer, turn, 2, target, rev(issue.Revision), p, UpdateIssueDelivery{}); repeat.Status != protocol.OpSucceeded {
+				t.Fatal("the original report could not be recovered", repeat)
+			}
 			p.Action = "report"
 			p.Result = nil
 			p.ProposedImplementationScope = "Fix the layout of the original results panel."
-			req := h.env("issues.update_delivery", target, p, rev(issue.Revision))
-			op = h.exec(owner, req, UpdateIssueDelivery{})
+			op = hostedEffect(t, h, producer, turn, 3, target, rev(issue.Revision), p, UpdateIssueDelivery{})
 			if op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
 			// Reconstruct the settlement after the original response might have
 			// been lost. Both the original stale retry and a current read preserve
 			// the same report and choice.
-			_ = h.exec(owner, req, UpdateIssueDelivery{})
+			// Recover via the existing owner CLI request surface as well.
+			p.RunID = run.RunID
 			issue = canonicalTaskIssue(t, h, issue.IssueID)
 			if op := h.exec(owner, h.env("issues.update_delivery", target, p, rev(issue.Revision)), UpdateIssueDelivery{}); op.Status != protocol.OpSucceeded {
 				t.Fatal("settled report could not be recovered", op)
@@ -83,6 +94,13 @@ func TestReportFollowOnDecision(t *testing.T) {
 					t.Fatalf("Inbox did not contain the actual owner decision: %+v", page.Items)
 				}
 				item = page.Items[0]
+				board, err := views.CanonicalIssues(t.Context(), tx.Q(), views.CanonicalIssueFilter{Board: true, WaitingOnOwner: owner.Subject})
+				if err != nil {
+					return err
+				}
+				if len(board.Items) != 1 || board.Items[0].IssueID != issue.IssueID {
+					t.Fatalf("waiting-on-me filter did not include the original Issue: %+v", board.Items)
+				}
 				if item.ReportFollowOn == nil || item.ReportFollowOn.ArtifactID != artifactID ||
 					item.ReportFollowOn.ImplementationScope != p.ProposedImplementationScope || !item.BlocksClose ||
 					!slices.Contains(item.QuestionOptions, tc.option) {
@@ -115,6 +133,7 @@ func TestReportFollowOnDecision(t *testing.T) {
 
 			if tc.beforeStop {
 				answer()
+				expectWorkCode(t, h.exec(owner, h.env("issues.close", target, close, rev(issue.Revision)), CanonicalOwnerIssueCommand{Action: "close"}), protocol.CodeInvalidTransition)
 			}
 			if err := h.app.SweepExternalWaits(t.Context()); err != nil {
 				t.Fatal(err)
@@ -123,12 +142,17 @@ func TestReportFollowOnDecision(t *testing.T) {
 				canonicalTaskIssue(t, h, issue.IssueID).BoardStatus() != issue.BoardStatus() {
 				t.Fatal("decision advanced before the runner's original stop")
 			}
+			// The runner also reconciles the original hosted turn's receipt.
+			finishHostedReview(t, h, turn)
 			stopOwnerClaim(t, h, run)
 			if h.lease(run.RunID).Status != store.LeaseReleased {
 				t.Fatal("the original stop did not release the physical slot")
 			}
 			if !tc.beforeStop {
 				h.clock.Advance(21 * time.Minute)
+				if _, err := h.heartbeat(t.Context(), runner("linux-1"), nil); err != nil {
+					t.Fatal(err)
+				}
 				if err := h.app.SweepExternalWaits(t.Context()); err != nil {
 					t.Fatal(err)
 				}

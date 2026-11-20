@@ -425,7 +425,15 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 			return Outcome{}, err
 		}
 	}
-	return Outcome{Result: next, Notify: previous.BoardStatus() != next.BoardStatus(), Events: []Event{{ObjectType: "issue", ObjectID: next.IssueID, ObjectVersion: next.Revision, Kind: kind, Body: map[string]any{"revision": next.Revision, "state": next.State}}}}, nil
+	events := []Event{{ObjectType: "issue", ObjectID: next.IssueID, ObjectVersion: next.Revision, Kind: kind, Body: map[string]any{"revision": next.Revision, "state": next.State}}}
+	if previous.Plan.ReportFollowOnDecision {
+		retired, err := retireObsoleteReportDecision(ctx, x, tx, next)
+		if err != nil {
+			return Outcome{}, err
+		}
+		events = append(events, retired...)
+	}
+	return Outcome{Result: next, Notify: previous.BoardStatus() != next.BoardStatus(), Events: events}, nil
 }
 
 // validateCanonicalSourceReference reads material explicitly cited by an already

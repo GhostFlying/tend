@@ -431,6 +431,17 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 		if err != nil {
 			return false, err
 		}
+		if current && v.WaitKey == reportFollowOnWaitKey {
+			attention, _, err := attentionForDecision(ctx, tx.Q(), v.TargetID)
+			if err != nil {
+				return false, err
+			}
+			issue, err := store.GetCanonicalIssue(ctx, tx.Q(), v.IssueID)
+			if err != nil {
+				return false, err
+			}
+			current = reportDecisionCurrent(issue, attention)
+		}
 		if !current || t.Lifecycle.Terminal() || a.TargetSpecVersion != t.SpecVersion || a.Status != protocol.ActionDispatched || a.Kind == protocol.ActionImplement && a.Generation != t.ImplementGeneration || a.Kind == protocol.ActionAccept && a.TargetArtifactID != t.CurrentArtifactID {
 			v.Status = "cancelled"
 			changed = true
