@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // RefreshKind identifies notices whose payload is rebuilt from current SoT.
@@ -38,6 +39,27 @@ func RefreshCursorExpired(ctx context.Context, q Querier, after int64) (bool, er
 	return expired, err
 }
 
+// ChatRefreshCursorExpired checks the retained refresh positions relevant to
+// the Chat stream, which includes invalidation for Issue activity.
+func ChatRefreshCursorExpired(ctx context.Context, q Querier, after int64) (bool, error) {
+	var expired bool
+	err := q.QueryRowContext(ctx, `SELECT ?<chat_expired_through OR ?>cursor FROM refresh_stream_state WHERE singleton=1`, after, after).Scan(&expired)
+	return expired, err
+}
+
+// ChatProcessChangeConversation returns the Issue activity scope for a process
+// notice. Main and consultation process notices have no Chat consumer.
+func ChatProcessChangeConversation(ctx context.Context, q Querier, messageID string) (string, error) {
+	conversation, err := MessageConversation(ctx, q, messageID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	if strings.HasPrefix(conversation, "issue:") {
+		return conversation, nil
+	}
+	return "", nil
+}
+
 func (t *Tx) advanceRefresh(ctx context.Context, e EventRow) (int64, error) {
 	var previous int64
 	err := t.Q().QueryRowContext(ctx, `SELECT event_seq FROM refresh_notifications WHERE kind=? AND object_type=? AND object_id=?`, e.Kind, e.ObjectType, e.ObjectID).Scan(&previous)
@@ -48,8 +70,20 @@ func (t *Tx) advanceRefresh(ctx context.Context, e EventRow) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if _, err := t.Exec(ctx, `UPDATE refresh_stream_state SET expired_through=MAX(expired_through,?) WHERE singleton=1`, previous); err != nil {
-		return 0, err
+	if previous > 0 {
+		chatPrevious := previous
+		if e.Kind == "conversation.process_changed" && e.ObjectType == "message" {
+			conversation, err := ChatProcessChangeConversation(ctx, t.Q(), e.ObjectID)
+			if err != nil {
+				return 0, err
+			}
+			if conversation == "" {
+				chatPrevious = 0
+			}
+		}
+		if _, err := t.Exec(ctx, `UPDATE refresh_stream_state SET expired_through=MAX(expired_through,?),chat_expired_through=MAX(chat_expired_through,?) WHERE singleton=1`, previous, chatPrevious); err != nil {
+			return 0, err
+		}
 	}
 	_, err = t.Exec(ctx, `INSERT INTO refresh_notifications(kind,object_type,object_id,revision,event_seq,pending,changed_at) VALUES(?,?,?,1,?,1,?)
  ON CONFLICT(kind,object_type,object_id) DO UPDATE SET revision=revision+1,event_seq=excluded.event_seq,pending=1,changed_at=excluded.changed_at`, e.Kind, e.ObjectType, e.ObjectID, seq, e.CreatedAt)
