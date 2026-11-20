@@ -307,6 +307,7 @@ func (w *workspaces) Finish(context.Context, protocol.Assignment) error { return
 // network can be cut between the runner and tend, or drop requests of
 // chosen operations.
 type network struct {
+	protocolSix bool // Emulate a protocol-six server during hello.
 	mu          sync.Mutex
 	down        bool
 	inflightRPC int
@@ -373,6 +374,28 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 		Operation string `json:"operation"`
 	}
 	_ = json.Unmarshal(body, &env)
+	if n.protocolSix && env.Operation == protocol.OpRunnerHello {
+		var envelope protocol.Envelope
+		var hello protocol.HelloPayload
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(envelope.Payload, &hello); err != nil {
+			return nil, err
+		}
+		hello.Runtime.ProtocolMax = 6
+		var err error
+		envelope.Payload, err = json.Marshal(hello)
+		if err != nil {
+			return nil, err
+		}
+		body, err = json.Marshal(envelope)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+	}
 	if n.request != nil {
 		n.request(env.Operation)
 	}
@@ -404,6 +427,31 @@ func (n *network) RoundTrip(req *http.Request) (*http.Response, error) {
 		res.Body.Close()
 		return nil, errors.New("connection reset")
 	}
+	if err == nil && n.protocolSix && env.Operation == protocol.OpRunnerHello && res.StatusCode == http.StatusOK {
+		var reply struct {
+			Operation protocol.Operation `json:"operation"`
+		}
+		err = json.NewDecoder(res.Body).Decode(&reply)
+		res.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		var hello protocol.HelloResult
+		if err = json.Unmarshal(reply.Operation.Result, &hello); err != nil {
+			return nil, err
+		}
+		hello.ProtocolMax = 6
+		reply.Operation.Result, err = json.Marshal(hello)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := json.Marshal(reply)
+		if err != nil {
+			return nil, err
+		}
+		res.Body = io.NopCloser(bytes.NewReader(raw))
+		res.ContentLength = int64(len(raw))
+	}
 	if err == nil && n.response != nil {
 		if err := n.response(env.Operation, res); err != nil {
 			res.Body.Close()
@@ -420,6 +468,8 @@ type node struct {
 	srv     *server
 	path    string
 	workers *testkit.Workers
+	backend harness.Workers
+	kind    protocol.WorkerKind
 	ws      *workspaces
 	net     *network
 	// flush is how often the runner uploads run events.
@@ -433,18 +483,23 @@ type node struct {
 }
 
 func newNode(t *testing.T, srv *server, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
+	return newNodeForKind(t, srv, protocol.WorkerOrca, script)
+}
+
+func newNodeForKind(t *testing.T, srv *server, kind protocol.WorkerKind, script func(harness.WorkerSpec) testkit.WorkerScript) *node {
 	t.Helper()
 	// The fake keeps agent threads after Wait and supports owner handback,
 	// matching an external terminal worker rather than a closed app-server.
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{
 		Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}},
 		Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 2,
-			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}, Worker: protocol.WorkerOrca}},
+			TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}, Worker: kind}},
 	}, app.SyncConfig{})
 	n := &node{
-		t: t, srv: srv, path: filepath.Join(t.TempDir(), "journal.db"),
+		kind: kind, t: t, srv: srv, path: filepath.Join(t.TempDir(), "journal.db"),
 		workers: &testkit.Workers{Script: script}, ws: &workspaces{dir: t.TempDir()}, net: &network{}, flush: 20 * time.Millisecond,
 	}
+	n.backend = n.workers
 	t.Cleanup(n.stop)
 	return n
 }
@@ -479,7 +534,7 @@ func (n *node) start() {
 	}
 	r := runner.New(runner.Config{
 		ServerURL: n.srv.url, HostID: "linux-1", HostToken: hostToken, Version: "test",
-		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: protocol.WorkerOrca, Workers: n.workers, Workspaces: n.ws,
+		HTTPClient: &http.Client{Transport: n.net}, Journal: j, Worker: n.kind, Workers: n.backend, Workspaces: n.ws,
 		Now: n.srv.now, IDs: protocol.NewULIDGen(n.srv.now, nil), Log: log,
 		RetryDelay: 20 * time.Millisecond, EventFlush: n.flush, RepositoryBindings: n.repositories, HeartbeatInterval: n.heartbeat,
 	})
@@ -695,6 +750,7 @@ func TestFault_HeartbeatLostRunnerAlive_Runner(t *testing.T) {
 					return nil
 				}
 			}
+			n.net.protocolSix = true
 			n.start()
 			task := srv.createTask()
 			n.diagnoseFailure(task)
@@ -755,6 +811,7 @@ func TestFault_RunnerRestartContinuesWorkerThread(t *testing.T) {
 		}
 		return passing(spec)
 	})
+	n.net.protocolSix = true
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })

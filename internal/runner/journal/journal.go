@@ -548,6 +548,15 @@ func (j *Journal) WorkerDone(ctx context.Context, runID string, result json.RawM
 		if err != nil {
 			return err
 		}
+		var delegated bool
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(json_extract(assignment_json,'$.protocol'),0)>=7 AND phase<>'worker_done' FROM runs WHERE run_id=?`, runID).Scan(&delegated); err != nil {
+			return err
+		}
+		if delegated {
+			if err := j.appendEvent(ctx, tx, runID, protocol.RunEvent{Kind: protocol.EventWorkerOutcome, Body: result}); err != nil {
+				return err
+			}
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE runs SET phase='worker_done',result_acknowledged=0,worker_result_json=?,worker_done_at=COALESCE(worker_done_at,?),updated_at=? WHERE run_id=?`, body, now, now, runID)
 		return err
 	})
@@ -653,29 +662,31 @@ func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) er
 // AppendEvent assigns the run's next sequence number to a worker event and
 // keeps it until tend acknowledges it.
 func (j *Journal) AppendEvent(ctx context.Context, runID string, e protocol.RunEvent) error {
-	return j.tx(ctx, func(tx *sql.Tx) error {
-		var seq int64
-		if err := tx.QueryRowContext(ctx, `SELECT next_seq FROM runs WHERE run_id = ?`, runID).Scan(&seq); err != nil {
-			return fmt.Errorf("journal: next seq: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET next_seq = ? WHERE run_id = ?`, seq+1, runID); err != nil {
-			return fmt.Errorf("journal: advance seq: %w", err)
-		}
-		body, err := j.retainBody(ctx, string(e.Body))
-		if err != nil {
-			return err
-		}
-		var identity struct {
-			ThreadID string `json:"thread_id"`
-		}
-		_ = json.Unmarshal(e.Body, &identity)
-		_, err = tx.ExecContext(ctx, `INSERT INTO events (run_id, seq, native_id, kind, body_json,thread_id) VALUES (?, ?, ?, ?, ?,?)`,
-			runID, seq, nullString(e.NativeID), e.Kind, nullString(body), identity.ThreadID)
-		if err != nil {
-			return fmt.Errorf("journal: append event: %w", err)
-		}
-		return dirtyArchive(ctx, tx, runID)
-	})
+	return j.tx(ctx, func(tx *sql.Tx) error { return j.appendEvent(ctx, tx, runID, e) })
+}
+
+func (j *Journal) appendEvent(ctx context.Context, tx *sql.Tx, runID string, e protocol.RunEvent) error {
+	var seq int64
+	if err := tx.QueryRowContext(ctx, `SELECT next_seq FROM runs WHERE run_id = ?`, runID).Scan(&seq); err != nil {
+		return fmt.Errorf("journal: next seq: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET next_seq = ? WHERE run_id = ?`, seq+1, runID); err != nil {
+		return fmt.Errorf("journal: advance seq: %w", err)
+	}
+	body, err := j.retainBody(ctx, string(e.Body))
+	if err != nil {
+		return err
+	}
+	var identity struct {
+		ThreadID string `json:"thread_id"`
+	}
+	_ = json.Unmarshal(e.Body, &identity)
+	_, err = tx.ExecContext(ctx, `INSERT INTO events (run_id, seq, native_id, kind, body_json,thread_id) VALUES (?, ?, ?, ?, ?,?)`,
+		runID, seq, nullString(e.NativeID), e.Kind, nullString(body), identity.ThreadID)
+	if err != nil {
+		return fmt.Errorf("journal: append event: %w", err)
+	}
+	return dirtyArchive(ctx, tx, runID)
 }
 
 // PendingEvents returns up to limit unacknowledged events of a run in order.

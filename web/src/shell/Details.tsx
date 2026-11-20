@@ -1,3 +1,4 @@
+import { RunSyncStatus } from "../rollout/RunSyncStatus.tsx";
 import { runLabel } from "../tasks/runLabel.ts";
 import { CommitHash, CopyIdentifier } from "../i18n/identifiers.tsx";
 import { RunConversation } from "../tasks/RunConversation.tsx";
@@ -112,6 +113,7 @@ function ManagerTaskContent({ task }: { task: TaskDetail }) {
             <b>{runLabel(task.runs ?? [], run)}</b>
             <span>{statusLabels[run.observed] ?? run.observed}</span>
             <small>{run.host}</small>
+            <RunSyncStatus run={run} />
           </div>
         ))}
       </Section>
@@ -274,6 +276,7 @@ function ExecutionTaskContent({ task: t }: { task: TaskDetail }) {
                 <b>{runLabel(t.runs ?? [], r)}</b>
                 <span>{statusLabels[r.observed] ?? r.observed}</span>
                 <small>{r.host}</small>
+                <RunSyncStatus run={r} />
               </div>
             ))}
         </Section>

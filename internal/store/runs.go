@@ -258,11 +258,18 @@ const (
 
 // LeaseRow is a run lease.
 type LeaseRow struct {
+	Protocol  int64
 	LeaseID   string
 	RunID     string
 	HostID    string
 	ExpiresAt int64
 	Status    string
+}
+
+// Current checks the execution contract of the original Run. A delegated
+// writer remains exclusive until release or an explicit fence.
+func (l LeaseRow) Current(now int64) bool {
+	return l.Status == LeaseActive && (protocol.RunnerOwnsExecution(l.Protocol) || l.ExpiresAt > now)
 }
 
 // InsertLease stores a new active lease.
@@ -278,8 +285,8 @@ func (t *Tx) InsertLease(ctx context.Context, l LeaseRow, now int64) error {
 // GetLeaseByRun returns the lease of a run, or ErrNotFound.
 func GetLeaseByRun(ctx context.Context, q Querier, runID string) (LeaseRow, error) {
 	l := LeaseRow{RunID: runID}
-	err := q.QueryRowContext(ctx, `SELECT lease_id, host_id, expires_at, status FROM leases WHERE run_id = ?`, runID).
-		Scan(&l.LeaseID, &l.HostID, &l.ExpiresAt, &l.Status)
+	err := q.QueryRowContext(ctx, `SELECT l.lease_id, l.host_id, l.expires_at, l.status,r.protocol FROM leases l JOIN runs r USING(run_id) WHERE l.run_id = ?`, runID).
+		Scan(&l.LeaseID, &l.HostID, &l.ExpiresAt, &l.Status, &l.Protocol)
 	if err != nil {
 		return LeaseRow{}, notFound(err, "lease of run "+runID)
 	}

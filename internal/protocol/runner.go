@@ -216,8 +216,9 @@ type HeartbeatPayload struct {
 
 // LeaseRef names a run and the lease the runner holds for it.
 type LeaseRef struct {
-	RunID   string `json:"run_id"`
-	LeaseID string `json:"lease_id"`
+	EventSequence int64  `json:"event_sequence,omitempty"`
+	RunID         string `json:"run_id"`
+	LeaseID       string `json:"lease_id"`
 }
 
 // HeartbeatResult reports, per run, whether the lease was renewed and what

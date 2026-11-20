@@ -36,7 +36,7 @@ func (c ManagerNativeCommand) Authorize(ctx context.Context, x *Exec, q store.Qu
 	}
 	// Receipt-only writes remain admissible after expiry; they cannot queue
 	// new work or acquire responsibility under a stale epoch.
-	if c.OperationName == protocol.OpManagerNativeClaim && (l.Status != store.LeaseActive || l.ExpiresAt <= x.Now.UnixMilli()) {
+	if c.OperationName == protocol.OpManagerNativeClaim && (!l.Current(x.Now.UnixMilli())) {
 		var payload protocol.ManagerNativeClaimPayload
 		if err := decodePayload(x.Env, &payload); err != nil {
 			return err
@@ -160,7 +160,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if claim.AcknowledgeOnly || lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() {
+		if claim.AcknowledgeOnly || !lease.Current(x.Now.UnixMilli()) {
 			return Outcome{NoEffect: !changed, Result: map[string]any{"request": nil}}, nil
 		}
 		r, err := store.GetRun(ctx, tx.Q(), run)
@@ -510,7 +510,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES(?,?,?)`, run, p.Sequence, body)
+		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json,received_at) VALUES(?,?,?,?)`, run, p.Sequence, body, x.Now.UnixMilli())
 		return Outcome{ProjectionOnly: projectionOnly, Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")
@@ -778,7 +778,7 @@ func authorizeRunnerCoordination(ctx context.Context, q store.Querier, p protoco
 	if err != nil {
 		return err
 	}
-	if l.Status != store.LeaseActive || l.ExpiresAt <= now || t.ControlMode != protocol.ControlManaged || t.Lifecycle.Terminal() {
+	if !l.Current(now) || t.ControlMode != protocol.ControlManaged || t.Lifecycle.Terminal() {
 		return protocol.Errorf(protocol.CodeForbidden, "manager execution is fenced")
 	}
 	allowed, err := managerNativeBusinessAllowed(ctx, q, r)

@@ -40,7 +40,7 @@ func (a *App) NativeExecutionControl(ctx context.Context, p protocol.Principal) 
 			return protocol.Errorf(protocol.CodeForbidden, "run is not bound to a central runtime")
 		}
 		desired = desiredFor(rc.run, rc.action, rc.task)
-		if lease.Status != store.LeaseActive || lease.ExpiresAt <= a.now().UnixMilli() || p.Role != rc.run.Role || desired == protocol.DesiredStopped {
+		if !lease.Current(a.now().UnixMilli()) || p.Role != rc.run.Role || desired == protocol.DesiredStopped {
 			return protocol.Errorf(protocol.CodeForbidden, "native worker lease is not active")
 		}
 		return nil

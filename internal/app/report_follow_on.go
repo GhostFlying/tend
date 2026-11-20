@@ -115,7 +115,7 @@ func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 	if err != nil {
 		return nil, false, err
 	}
-	if !allowed || run.Protocol < 3 || lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() {
+	if !allowed || run.Protocol < 3 || !lease.Current(x.Now.UnixMilli()) {
 		return nil, false, protocol.Errorf(protocol.CodeInvalidTransition, "report decision requires a live Issue owner Run with external wait support")
 	}
 

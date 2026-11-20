@@ -5,3 +5,8 @@ package protocol
 // RunnerOwnsExecution identifies the execution contract frozen into the Run.
 // Older persisted records keep their original lease and recovery behavior.
 func RunnerOwnsExecution(version int64) bool { return version >= 7 }
+
+const (
+	EventWorkerOutcome = "worker.outcome"
+	EventWorkerStopped = "worker.physical_exit"
+)

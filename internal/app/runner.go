@@ -345,7 +345,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() || prior.ObservedState == protocol.RunFinished || prior.ObservedState == protocol.RunFailed {
+		if !lease.Current(x.Now.UnixMilli()) || prior.ObservedState == protocol.RunFinished || prior.ObservedState == protocol.RunFailed {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "original execution lease has ended; reconcile that Run")
 		}
 		as, err := buildAssignment(ctx, q, prior, lease, time.Duration(lease.ExpiresAt-x.Now.UnixMilli())*time.Millisecond, x.Now.UnixMilli())
@@ -1319,6 +1319,11 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 				}
 			}
 			if err == nil && rc.run.HostID == host.HostID && lease.LeaseID == ref.LeaseID && lease.Status == store.LeaseActive {
+				if protocol.RunnerOwnsExecution(rc.run.Protocol) && ref.EventSequence > 0 {
+					if _, err := tx.Exec(ctx, `UPDATE runs SET announced_event_sequence=? WHERE run_id=? AND announced_event_sequence<?`, ref.EventSequence, ref.RunID, ref.EventSequence); err != nil {
+						return err
+					}
+				}
 				if runtimeSupportsRetainedReconciliation(payload.Runtime) {
 					protected, err := activeMaintenanceRunProtection(ctx, q, rc.run)
 					if err != nil {
@@ -1443,6 +1448,15 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				continue
 			}
 			res.Accepted++
+			if protocol.RunnerOwnsExecution(run.Protocol) && (e.Kind == protocol.EventWorkerStopped || e.Kind == protocol.EventRunRunning) {
+				var stoppedAt int64
+				if e.Kind == protocol.EventWorkerStopped {
+					stoppedAt = now
+				}
+				if _, err := tx.Exec(ctx, `UPDATE runs SET runner_stopped_at=?,writer_state_sequence=? WHERE run_id=? AND writer_state_sequence<?`, stoppedAt, e.Seq, runID, e.Seq); err != nil {
+					return err
+				}
+			}
 			if e.Kind == "usage.source" {
 				if err := registerUsageSource(ctx, tx, run, e.Body, now); err != nil {
 					return err

@@ -12326,6 +12326,9 @@
     "LeaseRef": {
       "additionalProperties": false,
       "properties": {
+        "event_sequence": {
+          "type": "integer"
+        },
         "lease_id": {
           "type": "string"
         },
@@ -17482,6 +17485,34 @@
       "title": "RunRolloutPage",
       "type": "object"
     },
+    "RunSyncObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "announced_sequence": {
+          "type": "integer"
+        },
+        "last_contact_at": {
+          "type": "integer"
+        },
+        "last_progress": {
+          "type": "string"
+        },
+        "last_progress_at": {
+          "type": "integer"
+        },
+        "received_sequence": {
+          "type": "integer"
+        },
+        "stop_requested_at": {
+          "type": "integer"
+        },
+        "stopped_at": {
+          "type": "integer"
+        }
+      },
+      "title": "RunSyncObservation",
+      "type": "object"
+    },
     "RunView": {
       "additionalProperties": false,
       "properties": {
@@ -17493,6 +17524,9 @@
         },
         "host": {
           "type": "string"
+        },
+        "observation": {
+          "$ref": "#/definitions/RunSyncObservation"
         },
         "observed": {
           "$ref": "#/definitions/RunObserved"
