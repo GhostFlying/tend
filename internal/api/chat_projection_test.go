@@ -102,8 +102,8 @@ func TestChatProjectionToolDenseHistoryAndStop(t *testing.T) {
 
 	var latest, before, after protocol.IssueConversationPage
 	var queue, withdrawn protocol.IssueConversationQueuePage
-	chatBytes := read("/api/v1/conversation?projection=chat&limit=50", &latest) +
-		read("/api/v1/conversation/queue?category=owner&projection=chat", &queue) +
+	chatLatest := read("/api/v1/conversation?projection=chat&limit=50", &latest)
+	chatBytes := chatLatest + read("/api/v1/conversation/queue?category=owner&projection=chat", &queue) +
 		read("/api/v1/conversation/queue?category=withdrawn&projection=chat", &withdrawn)
 	if len(latest.Items) != 50 || latest.Items[0].MessageID != "reply-10" || latest.Items[49].MessageID != "reply-59" || !latest.More || latest.EventSeq == 0 {
 		t.Fatal("latest 50 visible replies were not returned")
@@ -136,7 +136,7 @@ func TestChatProjectionToolDenseHistoryAndStop(t *testing.T) {
 	var legacyTranscript protocol.IssueTranscriptPage
 	legacyHistory += read("/api/v1/conversation/transcript", &legacyTranscript)
 	t.Logf("compact JSON before compression: legacy first history %d B, visible first history %d B; legacy Chat reads %d requests / %d B / %d serial rounds; visible Chat reads 3 requests / %d B / 1 parallel round (after initial SSE start)",
-		legacyFirst, len(mustChatJSON(t, latest)), legacyPages+4, legacyHistory, max(4, legacyPages), chatBytes)
+		legacyFirst, chatLatest, legacyPages+4, legacyHistory, max(4, legacyPages), chatBytes)
 	if legacyPages <= 1 || legacyFirst <= chatBytes*5 {
 		t.Fatal("fixture did not exercise a tool-dense history scan")
 	}
@@ -215,11 +215,74 @@ func TestChatProjectionToolDenseHistoryAndStop(t *testing.T) {
 	}
 }
 
-func mustChatJSON(t *testing.T, value any) []byte {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
+func TestChatProjectionOpenChoicesAndScopedIssueInvalidation(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	ctx := t.Context()
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	conversation := issueDetailHTTP(t, e, token, issue.IssueID).Conversation.ConversationID
+	choice := protocol.WorkItemChoice{
+		ChoiceID: "choice", MessageID: "choice-notice", WorkItemID: issue.IssueID,
+		Status: "open", Version: 1, Question: "Original question?", Options: []string{"Yes", "No"},
+	}
+	var cursor int64
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: choice.MessageID, Author: "system", Body: choice.Question}); err != nil {
+			return err
+		}
+		if err := tx.SaveWorkItemChoice(ctx, choice, "source", 0); err != nil {
+			return err
+		}
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: "issue-tool", ConversationID: conversation, Author: "main_agent", Kind: store.KindToolUse}); err != nil {
+			return err
+		}
+		if err := tx.PutToolUse(ctx, store.ToolUseRow{
+			MessageID: "issue-tool", ThreadID: "issue-thread", TurnID: "issue-turn", ItemID: "issue-item",
+			Tool: "example", Input: "original Issue input", Output: "original Issue output", Status: "completed",
+		}); err != nil {
+			return err
+		}
+		var err error
+		cursor, err = store.LatestEventSeq(ctx, tx.Q())
+		if err != nil {
+			return err
+		}
+		_, err = tx.InsertEvent(ctx, store.EventRow{EventID: e.ids.New(protocol.PrefixEvent),
+			ObjectType: "message", ObjectID: "issue-tool", Kind: "conversation.tool_use", BodyJSON: "{}"})
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	return raw
+	path := "/api/v1/conversation?projection=chat"
+	var page protocol.IssueConversationPage
+	if status := e.do("GET", path, token, nil, &page); status != http.StatusOK || len(page.Items) != 1 ||
+		len(page.Items[0].Choices) != 1 || page.Items[0].Choices[0].ChoiceID != choice.ChoiceID {
+		t.Fatalf("original open choice was not shown: status=%d page=%+v", status, page)
+	}
+
+	stream := openStream(t, e.url, token, fmt.Sprintf("?projection=chat&after=%d", cursor))
+	if ev := stream.next(); ev.name != "start" {
+		t.Fatal(ev)
+	}
+	frame := stream.next()
+	var activity protocol.LedgerEvent
+	if frame.name != "ledger" || json.Unmarshal([]byte(frame.data), &activity) != nil ||
+		activity.ConversationID != conversation || activity.ObjectID != "issue-tool" || activity.Item != nil {
+		t.Fatalf("Issue activity needs a scoped invalidation without any tool content: %+v", frame)
+	}
+	stream.cancel()
+	var original protocol.IssueConversationItem
+	if status := e.do("GET", "/api/v1/messages/issue-tool", token, nil, &original); status != http.StatusOK ||
+		original.Tool == nil || original.Tool.Output != "original Issue output" {
+		t.Fatalf("authorized original missing: status=%d item=%+v", status, original)
+	}
+
+	choice.Status, choice.Version = "answered", 2
+	if err := e.store.Write(ctx, func(tx *store.Tx) error { return tx.SaveWorkItemChoice(ctx, choice, "", 1) }); err != nil {
+		t.Fatal(err)
+	}
+	if status := e.do("GET", path, token, nil, &page); status != http.StatusOK || len(page.Items) != 0 {
+		t.Fatalf("answered notice stayed in Chat: status=%d page=%+v", status, page)
+	}
 }

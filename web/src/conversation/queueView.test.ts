@@ -52,3 +52,30 @@ test("queued inputs keep their loaded pages and the latest server stop identity"
   expect(paths.every((path) => path.startsWith("/api/v1/conversation/queue?"))).toBe(true);
   queue.stop();
 });
+
+test("the current stop target is available while withdrawn history is still loading", async () => {
+  let releaseHistory: () => void = () => {};
+  const waitForHistory = new Promise<void>((resolve) => {
+    releaseHistory = resolve;
+  });
+  const page: IssueConversationQueuePage = { items: [], enabled: true, total: 0, event_seq: 1 };
+  const queue = new ConversationQueue({
+    async get<T>(path: string): Promise<T> {
+      if (path.includes("category=withdrawn")) {
+        await waitForHistory;
+        return page as T;
+      }
+      return { ...page, interruptible_message_id: "active-original" } as T;
+    },
+  });
+  queue.start();
+  try {
+    await vi.waitFor(() =>
+      expect(queue.state.get().pages.owner?.interruptible_message_id).toBe("active-original"),
+    );
+    expect(queue.state.get().pages.withdrawn).toBeUndefined();
+  } finally {
+    releaseHistory();
+    queue.stop();
+  }
+});

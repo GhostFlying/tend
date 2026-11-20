@@ -227,6 +227,9 @@ const server = createServer(async (req, res) => {
         assignee: { kind: "owner" },
       });
   }
+  if (p === "/api/v1/diagnostics/schedules")
+    return json(res, { items: [], more: false, data_at: 1 });
+  if (p === "/api/v1/maintenance") return json(res, { items: [], more: false });
   if (p === "/api/v1/conversation")
     return json(res, {
       items:
