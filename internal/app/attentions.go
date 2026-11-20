@@ -34,6 +34,9 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 	if err != nil {
 		return Outcome{}, errNotFound(err, "attention does not exist")
 	}
+	if a.IssueTransition != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "Issue transition notices are immutable")
+	}
 	expected, err := requireRevision(x.Env)
 	if err != nil {
 		return Outcome{}, err

@@ -88,6 +88,11 @@ export type DecisionContinuationMode = "continue_now" | "wait" | "dependency";
 export type DecisionEffect = "implement" | "accept" | "cancel" | "start_over";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDeliveryProvider".
+ */
+export type IssueDeliveryProvider = "github" | "codebase";
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "AgentKind".
  */
 export type AgentKind = "claude" | "codex" | "traex";
@@ -128,11 +133,6 @@ export type WorkerKind = "appserver" | "orca";
  */
 export type SharedFactKind =
   "goal" | "observation" | "user_constraint" | "decision" | "input" | "fact";
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDeliveryProvider".
- */
-export type IssueDeliveryProvider = "github" | "codebase";
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
  * via the `definition` "IssueFollowOnKind".
@@ -761,6 +761,7 @@ export interface AttentionView {
   issue_id?: string;
   issue_intent?: string;
   issue_title?: string;
+  issue_transition?: IssueInboxTransition;
   kind: string;
   latest_action_at?: number;
   latest_action_due_rule_id?: string;
@@ -908,6 +909,31 @@ export interface WorkerQuestionSource {
   role: RunRole;
   run_id: string;
   spec_version: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueInboxTransition".
+ */
+export interface IssueInboxTransition {
+  closure_kind?: string;
+  delivery?: IssueDelivery;
+  head_sha?: string;
+  issue_revision?: number;
+  run_id?: string;
+  state: string;
+  wait_id?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "IssueDelivery".
+ */
+export interface IssueDelivery {
+  delivery_id: string;
+  host_id?: string;
+  number: number;
+  provider: IssueDeliveryProvider;
+  repository: string;
+  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1524,18 +1550,6 @@ export interface SharedFact {
   kind: SharedFactKind;
   source: string;
   text: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "IssueDelivery".
- */
-export interface IssueDelivery {
-  delivery_id: string;
-  host_id?: string;
-  number: number;
-  provider: IssueDeliveryProvider;
-  repository: string;
-  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

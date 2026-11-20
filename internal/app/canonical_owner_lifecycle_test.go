@@ -62,6 +62,9 @@ func TestCanonicalLifecycleCancellationRequiresEachActualFollowOnDisposition(t *
 	issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, p, nil), CanonicalOwnerIssueCommand{Action: "create"}))
 	issue = admitExistingIssueFixture(t, h, issue)
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "cancel", canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch}))
+	if items := readIssueInbox(t, h, issue.IssueID, false); len(items) != 0 {
+		t.Fatal("cancellation intent published a terminal notification", items)
+	}
 	payload := canonicalOwnerEndpoint{canonicalOwnerControl: canonicalOwnerControl{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Owner ends the scope"}}
 	before := canonicalGuardBusinessSnapshot(t, h)
 	expectWorkCode(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", payload), protocol.CodeInvalidTransition)
@@ -70,6 +73,9 @@ func TestCanonicalLifecycleCancellationRequiresEachActualFollowOnDisposition(t *
 	}
 	payload.FollowOnDispositions = []canonicalOwnerFollowOnDisposition{{FollowOnID: "report", Reason: "Owner no longer needs report", Evidence: []protocol.IssueEvidence{{Kind: protocol.WorkItemEvidenceOwnerDecision, Reference: "current_request", Summary: "Explicitly end report promise"}}}}
 	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "finish_cancel", payload))
+	if items := readIssueInbox(t, h, issue.IssueID, false); len(items) != 1 || items[0].IssueTransition == nil || items[0].IssueTransition.State != "cancelled" {
+		t.Fatal("settled cancellation did not publish one terminal notification", items)
+	}
 	if issue.State != protocol.IssueCancelled || issue.Plan.FollowOns[0].Status != protocol.WorkItemFollowOnResolved || issue.Plan.FollowOns[0].Evidence[0].Reference == "current_request" {
 		t.Fatal(issue)
 	}

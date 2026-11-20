@@ -227,6 +227,9 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 					help = "public process.next arrival cursor; reads original tools without publishing deferred replies"
 				}
 			}
+			if cmd.Name == "inbox list" && param == "kind" {
+				help = "decision, action or information (including Issue transition notices)"
+			}
 			qstrings[param] = fs.String(flag, "", help)
 		}
 	}
