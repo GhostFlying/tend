@@ -54,7 +54,11 @@ func TestWriterWaitTimelineSQLite(t *testing.T) {
 			if _, err := db.ExecContext(guard, "CREATE TABLE writes (value TEXT)"); err != nil {
 				t.Fatal(err)
 			}
-			WithWriteObserver(now, time.Second, func(o WriteObservation) { observed <- o })(s)
+			WithWriteObserver(now, time.Second, func(o WriteObservation) {
+				if o.Source.RequestID == "ack-request" {
+					observed <- o
+				}
+			})(s)
 			startHolder := func(operation string, seq int64) (entered <-chan error, release chan<- struct{}, done <-chan error) {
 				started, released, finished := make(chan error, 1), make(chan struct{}), make(chan error, 1)
 				writes.Go(func() {
