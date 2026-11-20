@@ -180,12 +180,26 @@ func ApplyChecksWaitObservation(v *protocol.ExternalWait, row DeliveryObservatio
 	if oldHead != "" && o.HeadSHA != "" && oldHead != o.HeadSHA {
 		return true, "candidate_changed"
 	}
+	reason, state := checksWaitTerminal(o)
+	v.ObservedState = state
+	return reason != "", reason
+}
+
+func checksWaitTerminal(o protocol.DeliveryObservation) (reason, state string) {
 	if o.State == "closed" || o.State == "merged" {
-		return true, "pull_request_" + o.State
+		return "pull_request_" + o.State, o.State
 	}
 	if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && (o.CI.State == "success" || o.CI.State == "failure" || o.CI.State == "cancelled" || o.CI.State == "skipped") {
-		v.ObservedState = o.CI.State
-		return true, "checks_" + o.CI.State
+		return "checks_" + o.CI.State, o.CI.State
 	}
-	return false, ""
+	return "", o.State
+}
+
+// ChecksWaitEndedAt returns the first observation of the current head or
+// terminal condition. A legacy observation can lack that time.
+func (r DeliveryObservationRow) ChecksWaitEndedAt(reason string) int64 {
+	if reason == "candidate_changed" {
+		return r.checksWaitTimes.HeadAt
+	}
+	return r.checksWaitTimes.TerminalAt
 }

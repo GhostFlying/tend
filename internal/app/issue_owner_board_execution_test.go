@@ -325,6 +325,9 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 		}
 		if order == "CI ends before parallel run stops" {
 			check("parallel worker stops after CI finished", protocol.IssueColumnWIP, "")
+			h.clock.Advance(time.Millisecond)
+			snapshot("success")
+			check("repeated terminal observation after the parallel stop", protocol.IssueColumnWIP, "")
 			return
 		}
 		check("parallel worker stops while CI is pending", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)

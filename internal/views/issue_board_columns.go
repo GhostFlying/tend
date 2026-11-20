@@ -198,9 +198,9 @@ func boardCheckWaits(ctx context.Context, q store.Querier, runs issueBoardRuns) 
 			return false, false, err
 		}
 		if err == nil {
-			ready, _ := store.ApplyChecksWaitObservation(wait, row)
-			if ready && row.Observation.CheckedAt > 0 && (end == 0 || row.Observation.CheckedAt < end) {
-				end = row.Observation.CheckedAt
+			ready, reason := store.ApplyChecksWaitObservation(wait, row)
+			if observed := row.ChecksWaitEndedAt(reason); ready && observed > 0 && (end == 0 || observed < end) {
+				end = observed
 			}
 			pending = pending || check.Current && !ready && wait.ResumeReason == ""
 			// No time is available for an older observation. In that case only

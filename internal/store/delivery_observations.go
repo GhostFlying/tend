@@ -24,6 +24,7 @@ type DeliveryObservationRow struct {
 	ObservedRevision              int64
 	NotificationPending           bool
 	FactRevision, ChangedRevision int64
+	checksWaitTimes               deliveryChecksWaitTimes
 }
 
 // DeliveryObservationFactRow is the single current provider result for a PR.
@@ -36,6 +37,7 @@ type DeliveryObservationFactRow struct {
 	ConflictEnded                 bool
 	RetiredCandidate              *protocol.DeliveryObservation
 	reviewCandidate               reviewCandidateIdentity
+	checksWaitTimes               deliveryChecksWaitTimes
 }
 
 // Preserve the last known head/base across partial or failed observations.
@@ -43,6 +45,13 @@ type reviewCandidateIdentity struct {
 	HeadSHA  string `json:"head_sha"`
 	BaseSHA  string `json:"base_sha"`
 	Revision int64  `json:"revision"`
+}
+
+// Times are carried with the current provider fact, so repeated reads cannot
+// make the same head change or terminal check happen later in board history.
+type deliveryChecksWaitTimes struct {
+	HeadAt     int64 `json:"head_at,omitempty"`
+	TerminalAt int64 `json:"terminal_at,omitempty"`
 }
 
 // The transition belongs to ChangedRevision and survives later checked-only
@@ -53,6 +62,7 @@ type deliveryObservationFactJSON struct {
 	PreviousErrorKind string                   `json:"previous_error_kind,omitempty"`
 	ConflictEnded     bool                     `json:"conflict_ended,omitempty"`
 	ReviewCandidate   *reviewCandidateIdentity `json:"review_candidate,omitempty"`
+	ChecksWaitTimes   deliveryChecksWaitTimes  `json:"checks_wait_times,omitzero"`
 }
 
 type deliveryObservationQuery struct {
@@ -98,6 +108,7 @@ func GetDeliveryObservation(ctx context.Context, q Querier, issue, id string) (D
 	}
 	row.Observation = fact.Observation
 	row.FactRevision, row.ChangedRevision = fact.FactRevision, fact.ChangedRevision
+	row.checksWaitTimes = fact.checksWaitTimes
 	row.Observation.WorkItemID, row.Observation.DeliveryID, row.Observation.Generation = issue, id, generation
 	return row, nil
 }
@@ -136,6 +147,7 @@ func GetDeliveryObservationFact(ctx context.Context, q Querier, ref protocol.Iss
 	fact.Observation = stored.DeliveryObservation
 	fact.PreviousState, fact.PreviousErrorKind = stored.PreviousState, stored.PreviousErrorKind
 	fact.ConflictEnded = stored.ConflictEnded
+	fact.checksWaitTimes = stored.ChecksWaitTimes
 	if stored.ReviewCandidate != nil {
 		fact.reviewCandidate = *stored.ReviewCandidate
 	} else if fact.Observation.HeadSHA != "" || fact.Observation.BaseSHA != "" {
@@ -189,7 +201,9 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		ConflictEnded: prior.ConflictEnded,
 	}
 	fact.reviewCandidate = prior.reviewCandidate
-	if observation.HeadSHA != "" && observation.HeadSHA != fact.reviewCandidate.HeadSHA {
+	headChanged := observation.HeadSHA != "" && observation.HeadSHA != fact.reviewCandidate.HeadSHA
+	fact.checksWaitTimes = prior.checksWaitTimes.after(previous, observation, headChanged)
+	if headChanged {
 		fact.reviewCandidate.HeadSHA = observation.HeadSHA
 		fact.reviewCandidate.Revision = fact.FactRevision
 	}
@@ -227,7 +241,7 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 		fact.PreviousState, fact.PreviousErrorKind = previous.State, previous.ErrorKind
 	}
 	fact.Observation = observation
-	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, ConflictEnded: fact.ConflictEnded, ReviewCandidate: &fact.reviewCandidate})
+	raw, err := json.Marshal(deliveryObservationFactJSON{DeliveryObservation: observation, PreviousState: fact.PreviousState, PreviousErrorKind: fact.PreviousErrorKind, ConflictEnded: fact.ConflictEnded, ReviewCandidate: &fact.reviewCandidate, ChecksWaitTimes: fact.checksWaitTimes})
 	if err != nil {
 		return fact, err
 	}
@@ -280,4 +294,29 @@ func ListDeliveryObservations(ctx context.Context, q Querier, item string) ([]pr
 		out = append(out, row.Observation)
 	}
 	return out, nil
+}
+
+// Use admitted provider facts. RefreshPending is a current query fence and
+// cannot turn an unchanged terminal observation into a new transition.
+func (t deliveryChecksWaitTimes) after(previous, current protocol.DeliveryObservation, headChanged bool) deliveryChecksWaitTimes {
+	if headChanged {
+		t = deliveryChecksWaitTimes{HeadAt: current.CheckedAt}
+	}
+	ready, _ := checksWaitTerminal(current)
+	if ready == "" {
+		pending := current.CI != nil && current.CI.ErrorKind == "" &&
+			current.CI.HeadSHA == current.HeadSHA &&
+			(current.CI.State == "pending" || current.CI.State == "expected")
+		reopened := previous.State == "closed" || previous.State == "merged"
+		if current.ErrorKind == "" && current.State == "open" && (pending || reopened) {
+			t.TerminalAt = 0
+		}
+		return t
+	}
+	previous.RefreshPending = false
+	previousReady, _ := checksWaitTerminal(previous)
+	if t.TerminalAt == 0 && (headChanged || previousReady == "") {
+		t.TerminalAt = current.CheckedAt
+	}
+	return t
 }
