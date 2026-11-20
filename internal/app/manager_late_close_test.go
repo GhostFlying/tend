@@ -7,6 +7,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testing.T) {
@@ -61,7 +62,8 @@ func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testin
 				}
 			}
 			beforeRuns := h.countWhere(`SELECT COUNT(*) FROM runs WHERE task_id=?`, as.TaskID)
-			env := h.env(protocol.OpManagerNativeReply, runTarget(as.RunID), protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`), LastSequence: 0}, nil)
+			fragment := protocol.WorkerProcessText{ThreadID: "original-native", TurnID: "original-turn", ItemID: "partial", Text: "observed native fragment"}
+			env := h.env(protocol.OpManagerNativeReply, runTarget(as.RunID), protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`), ProcessText: []protocol.WorkerProcessText{fragment}}, nil)
 			op, err := h.app.Execute(ctx, runPrincipal(as.RunID, as.Role), env, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 			if err != nil || op.Status != protocol.OpSucceeded {
 				t.Fatalf("late close on physically stopped run: operation=%+v err=%v", op, err)
@@ -75,6 +77,26 @@ func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testin
 			again, err := h.app.Execute(ctx, runPrincipal(as.RunID, as.Role), env, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 			if err != nil || !reflect.DeepEqual(op, again) {
 				t.Fatal("retry changed original close receipt", again, err)
+			}
+			if _, ready, err := h.app.ManagerNativeResult(ctx, as.RunID, closeID); err != nil || !ready {
+				t.Fatal("coordinator could not consume the close", ready, err)
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				compact, err := views.RunRollout(ctx, tx.Q(), as.RunID, 0, 0, false)
+				if err != nil {
+					return err
+				}
+				full, err := views.RunRollout(ctx, tx.Q(), as.RunID, 0, 0, true)
+				if err != nil {
+					return err
+				}
+				if len(compact.CloseProcessText) != 0 || full.Watermark != 0 || len(full.Logs) != 0 ||
+					!reflect.DeepEqual(full.CloseProcessText, []protocol.WorkerProcessText{fragment}) {
+					t.Fatalf("close text changed the original Run cursor or process scope: compact=%+v full=%+v", compact, full)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

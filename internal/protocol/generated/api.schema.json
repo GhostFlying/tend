@@ -992,6 +992,12 @@
         "coverage": {
           "type": "string"
         },
+        "live_text": {
+          "items": {
+            "$ref": "#/definitions/WorkerProcessText"
+          },
+          "type": "array"
+        },
         "more": {
           "type": "boolean"
         },
@@ -17451,6 +17457,12 @@
         },
         "before": {
           "type": "integer"
+        },
+        "close_process_text": {
+          "items": {
+            "$ref": "#/definitions/WorkerProcessText"
+          },
+          "type": "array"
         },
         "logs": {
           "anyOf": [

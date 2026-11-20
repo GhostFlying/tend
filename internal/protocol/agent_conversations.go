@@ -144,6 +144,7 @@ type AgentRolloutPage struct {
 	Records        []AgentRolloutRecord `json:"records"`
 	Next           int64                `json:"next"`
 	More           bool                 `json:"more"`
+	LiveText       []WorkerProcessText  `json:"live_text,omitempty"`
 }
 type AgentRolloutRecord struct {
 	Seq        int64  `json:"seq"`

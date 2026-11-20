@@ -388,6 +388,22 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.refreshUsage(ctx, th)
 	}
 	streamText := m.streamAssistantText()
+	localProcessText := !streamText && !remote
+	var processText harness.WorkerProcessTextBuffer
+	if localProcessText {
+		stop := m.app.TrackAgentProcessText(m.cfg.ConversationID, &processText)
+		defer stop()
+	}
+	saveProcessText := func(ctx context.Context, parts []protocol.WorkerProcessText) {
+		if len(parts) == 0 {
+			return
+		}
+		processCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		if err := m.app.RecordAgentProcessText(processCtx, m.cfg.ConversationID, parts); err != nil {
+			diagnostics.cleanup(ctx, slog.LevelWarn, "retain_process_text", err)
+		}
+	}
 	drafts := replyDrafts{}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -396,6 +412,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.mu.Lock()
 		m.archiveTeardown = true
 		m.mu.Unlock()
+		if localProcessText {
+			saveProcessText(ctx, processText.Drain(th.ID(), ""))
+		}
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		if err := m.app.AwaitNativeReceipts(cleanup, th.ID()); err != nil {
@@ -422,9 +441,6 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	}()
 	lastConcurrencyActivity := int64(0)
 	processEvent := func(ctx context.Context, ev harness.Event) (eventErr error) {
-		if !streamText && ev.Kind == harness.EventAgentMessageDelta {
-			return nil // Legacy fragments are available to the process reader.
-		}
 		ev.AttachmentRunID = diagnostics.runID
 		ctx = diagnostics.eventContext(ctx, ev)
 		defer func() {
@@ -461,6 +477,12 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		m.mu.Lock()
 		m.lastActivity = m.cfg.Now()
 		m.mu.Unlock()
+		if !streamText && ev.Kind == harness.EventAgentMessageDelta {
+			if localProcessText {
+				processText.Observe(th.ID(), ev)
+			}
+			return nil
+		}
 		if ev.RequestUsage != nil {
 			if err := m.app.RecordTokenUsage(ctx, m.cfg.ConversationID, *ev.RequestUsage); err != nil {
 				return err
@@ -484,6 +506,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), ev.TurnID, ev.ItemID, string(ev.Kind), ev.Raw); err != nil {
 				return err
 			}
+		}
+		if localProcessText {
+			saveProcessText(ctx, processText.Observe(th.ID(), ev))
 		}
 		if ev.Kind == harness.EventItemCompleted && ev.ItemType == harness.ItemUserMessage {
 			m.mu.Lock()

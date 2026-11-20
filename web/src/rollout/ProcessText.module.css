@@ -1,0 +1,10 @@
+.text {
+  padding: 0.5rem 0.75rem;
+}
+
+.text p {
+  max-height: 10rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

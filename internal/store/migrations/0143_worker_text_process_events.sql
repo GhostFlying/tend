@@ -1,3 +1,5 @@
+ALTER TABLE runs ADD COLUMN native_close_process_text_json TEXT NOT NULL DEFAULT '[]';
+
 -- Worker reply fragments are process records. Their contents and the original
 -- sequence stay available, including for a close frozen before this migration.
 UPDATE manager_native_events AS e SET applied=1
@@ -9,11 +11,29 @@ WHERE applied=0
  AND COALESCE(json_extract(body_json,'$.thread_id'),'')<>''
  AND COALESCE(json_extract(body_json,'$.native.TurnID'),'')<>''
  AND COALESCE(json_extract(body_json,'$.native.ItemID'),'')<>''
- AND json_type(body_json,'$.native.Text')='text'
+ AND (
+   json_type(body_json,'$.native.Text')='text'
+   OR (
+     -- RetainEventJSON marks the explicit empty Text default with bit 2.
+     json_type(body_json,'$.native.Text') IS NULL
+     AND EXISTS(SELECT 1 FROM json_each(body_json,'$."tend:derived-json:v1".d') d
+       WHERE json_extract(d.value,'$.p')='["native"]' AND json_extract(d.value,'$.m') & 4)
+   )
+   OR (
+     -- An externalized text value leaves null at its original path.
+     json_type(body_json,'$.native.Text')='null'
+     AND EXISTS(SELECT 1 FROM json_each(body_json,'$."tend:derived-json:v1".r') r
+       WHERE json_extract(r.value,'$.p')='["native","Text"]' AND json_extract(r.value,'$.t')=1)
+   )
+ )
  AND COALESCE(json_extract(body_json,'$.disconnected'),0)=0
  AND json_extract(body_json,'$.call') IS NULL
  AND json_extract(body_json,'$.native.Tool') IS NULL
  AND json_extract(body_json,'$.native.RequestUsage') IS NULL
  AND json_extract(body_json,'$.native.ContextUsage') IS NULL
  AND COALESCE(json_extract(body_json,'$.native.TurnStatus'),'')=''
- AND json_extract(body_json,'$.native.Failure') IS NULL;
+ AND json_extract(body_json,'$.native.Failure') IS NULL
+ AND NOT EXISTS(SELECT 1 FROM json_each(body_json,'$."tend:derived-json:v1".r') r
+   WHERE json_extract(r.value,'$.p[0]') IN ('call','disconnected')
+      OR (json_extract(r.value,'$.p[0]')='native'
+          AND COALESCE(json_extract(r.value,'$.p[1]'),'') NOT IN ('Raw','Text')));

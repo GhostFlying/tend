@@ -268,6 +268,8 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if method == "close" {
 			observeNativeClose(tx, p.ID)
 		}
+		processText := p.ProcessText
+		p.ProcessText = nil
 		var raw []byte
 		var err error
 		if status == "completed" {
@@ -337,6 +339,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		if err := tx.CompleteManagerNative(ctx, run, p.ID, method, payload, p, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
+		}
+		if method == "close" && p.Error == "" && !p.Rejected && len(processText) != 0 {
+			if err := retainManagerCloseProcessText(ctx, tx, run, p.LastSequence, processText); err != nil {
+				return Outcome{}, err
+			}
 		}
 		result, err := tx.RetainJSON(ctx, string(raw))
 		if err != nil {

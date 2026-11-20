@@ -54,7 +54,12 @@ func (s *Server) agentRollout(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid cursor")
 		}
-		return store.AgentRollout(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("turn_id"), after, r.URL.Query().Get("thread_id"))
+		id, turn, thread := r.PathValue("id"), r.URL.Query().Get("turn_id"), r.URL.Query().Get("thread_id")
+		page, err := store.AgentRollout(r.Context(), q, id, turn, after, thread)
+		if err == nil {
+			page.LiveText = s.app.AgentProcessText(id, thread, turn)
+		}
+		return page, err
 	})
 }
 func (s *Server) agentUsage(w http.ResponseWriter, r *http.Request) {

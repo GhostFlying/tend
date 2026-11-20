@@ -192,8 +192,8 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	urgent := archiveMode == "urgent"
 	workerText := strings.HasPrefix(archiveMode, "worker_text_")
 	textInterrupted := archiveMode == "worker_text_interrupted"
-	const processFragment = "worker fragment 🙂"
-	const completeText = "完整 Worker 回复。"
+	const processFragment = "worker fragment 🙂!"
+	completeText := strings.Repeat("正文", 33)
 	fragmentSent := make(chan struct{})
 	finishText := make(chan struct{})
 	var recoveryPausedAt atomic.Int64
@@ -496,7 +496,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return "failed"
 		}
 		if workerText && attempts.Load() == 1 {
-			for _, part := range []string{"worker ", "fragment ", "🙂"} {
+			for _, part := range []string{"worker ", "fragment ", "🙂!"} {
 				th.Emit(harness.Event{Kind: harness.EventAgentMessageDelta, ItemType: harness.ItemAgentMessage, TurnID: turn, ItemID: "worker-text", Text: part})
 			}
 			// The real callback must still reach the Issue while the item is open.
@@ -1126,6 +1126,24 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}); err != nil {
 			t.Fatal("large native image evidence", err)
 		}
+	}
+	if workerText {
+		next := execute("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{
+			Title: "Use the released runner slot", Project: "default", Intent: "Prove the next responsibility can be carried",
+		}}, nil, app.CanonicalOwnerIssueCommand{Action: "create"})
+		var successor protocol.Issue
+		if err := json.Unmarshal(next.Result, &successor); err != nil {
+			t.Fatal(err)
+		}
+		selected := execute(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: successor.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: successor.AssignmentEpoch, Reason: "Claim the released slot"}, &successor.Revision, app.RequestIssueManager{})
+		if err := json.Unmarshal(selected.Result, &successor); err != nil {
+			t.Fatal(err)
+		}
+		execute("issues.set_status", protocol.Target{Type: "issue", ID: successor.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: successor.AssignmentEpoch, Status: protocol.IssueTodo}, &successor.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
+		waitBusinessContinuity(t, "the next responsibility is claimed and the original stays released", func() bool {
+			return s.count(`SELECT COUNT(*) FROM runs r JOIN issue_manager_tasks m USING(task_id) WHERE m.issue_id=? AND r.run_id<>?`, successor.IssueID, textRun) == 1 &&
+				s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='released'`, textRun) == 1
+		})
 	}
 }
 

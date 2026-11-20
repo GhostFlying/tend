@@ -141,6 +141,7 @@ type App struct {
 	forwardRecoveryID          string
 	committedMaintenanceID     string
 	preview                    rolloutPreviewBroker
+	agentProcessText           sync.Map
 	localRolloutPreview        func(context.Context, string, []protocol.RolloutPreviewSource, protocol.RolloutPreviewQuery) protocol.RolloutPreview
 	webhookKeys                WebhookKeys
 	archiveAdmission           sync.Mutex
