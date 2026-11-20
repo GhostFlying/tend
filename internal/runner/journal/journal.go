@@ -307,12 +307,32 @@ func (j *Journal) deleteRequest(ctx context.Context, tx *sql.Tx, requestID strin
 	return err
 }
 
+// PendingRequestCounts reads upgrade blockers without expanding event originals.
+func (j *Journal) PendingRequestCounts(ctx context.Context) (total, claims int64, err error) {
+	err = j.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(*) FILTER (WHERE operation=?) FROM requests`, protocol.OpRunnerClaim).Scan(&total, &claims)
+	return
+}
+
 // Requests returns the journaled requests, oldest first.
 func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
+	return j.listRequests(ctx, "ORDER BY created_at, request_id")
+}
+
+// NextManagerEvent loads one original at a time. Event sequence allocation and
+// insertion of the request row share one transaction, including across restart.
+func (j *Journal) NextManagerEvent(ctx context.Context, run string) ([]Request, error) {
+	return j.listRequests(ctx, "WHERE run_id=? AND operation=? ORDER BY rowid LIMIT 1", run, protocol.OpManagerNativeEvent)
+}
+
+func (j *Journal) ManagerControlRequests(ctx context.Context, run string) ([]Request, error) {
+	return j.listRequests(ctx, "WHERE run_id=? AND operation<>? ORDER BY created_at,request_id", run, protocol.OpManagerNativeEvent)
+}
+
+func (j *Journal) listRequests(ctx context.Context, selection string, args ...any) ([]Request, error) {
 	j.spoolMu.RLock()
 	defer j.spoolMu.RUnlock()
 	rows, err := j.db.QueryContext(ctx, `SELECT request_id, operation, run_id, target_json, payload_json, created_at, expected_control_revision
-		FROM requests ORDER BY created_at, request_id`)
+		FROM requests `+selection, args...)
 	if err != nil {
 		return nil, fmt.Errorf("journal: list requests: %w", err)
 	}
@@ -543,7 +563,7 @@ func (j *Journal) Replace(ctx context.Context, runID, phase, oldRequestID string
 	})
 }
 
-// Done marks a run done and forgets its request and events.
+// Done settles execution. Negotiated event uploads retain their own receipts.
 func (j *Journal) Done(ctx context.Context, runID string) error {
 	return j.done(ctx, runID, nil)
 }
@@ -579,7 +599,7 @@ func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) er
 		if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE run_id = ?`, runID); err != nil {
 			return fmt.Errorf("journal: forget requests: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE run_id = ?`, runID); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE run_id = ? AND NOT EXISTS (SELECT 1 FROM runs WHERE run_id=? AND json_extract(assignment_json,'$.event_sync')=1)`, runID, runID); err != nil {
 			return fmt.Errorf("journal: forget events: %w", err)
 		}
 		return nil
@@ -616,6 +636,12 @@ func (j *Journal) AppendEvent(ctx context.Context, runID string, e protocol.RunE
 
 // PendingEvents returns up to limit unacknowledged events of a run in order.
 func (j *Journal) PendingEvents(ctx context.Context, runID string, limit int) ([]protocol.RunEvent, error) {
+	return j.PendingEventBatch(ctx, runID, limit, 0)
+}
+
+// PendingEventBatch expands at most one oversized original per batch. Load
+// only the selected records from the spool even after an extended outage.
+func (j *Journal) PendingEventBatch(ctx context.Context, runID string, limit, budget int) ([]protocol.RunEvent, error) {
 	j.spoolMu.RLock()
 	defer j.spoolMu.RUnlock()
 	rows, err := j.db.QueryContext(ctx, `SELECT seq, native_id, kind, body_json FROM events WHERE run_id = ? ORDER BY seq LIMIT ?`, runID, limit)
@@ -624,6 +650,7 @@ func (j *Journal) PendingEvents(ctx context.Context, runID string, limit int) ([
 	}
 	defer rows.Close()
 	var out []protocol.RunEvent
+	size := 0
 	for rows.Next() {
 		var (
 			e            protocol.RunEvent
@@ -640,7 +667,20 @@ func (j *Journal) PendingEvents(ctx context.Context, runID string, limit int) ([
 			}
 			e.Body = json.RawMessage(raw)
 		}
+		if budget > 0 {
+			encoded, err := json.Marshal(e)
+			if err != nil {
+				return nil, err
+			}
+			size += len(encoded)
+			if size > budget && len(out) > 0 {
+				break
+			}
+		}
 		out = append(out, e)
+		if budget > 0 && size >= budget {
+			break
+		}
 	}
 	return out, rows.Err()
 }

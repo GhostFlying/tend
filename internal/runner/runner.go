@@ -328,6 +328,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	factLoopsStarted := !r.boundedRecoveryPending()
 	if factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
+		r.wg.Go(func() { r.settledEvents(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 		if err := r.resendClaims(ctx); err != nil {
 			return err
@@ -353,6 +354,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	if !factLoopsStarted {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
+		r.wg.Go(func() { r.settledEvents(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
 	}
 	if r.cfg.JournalID != "" && r.cfg.JournalRoot != "" && r.cfg.UpdaterControlSocket != "" {

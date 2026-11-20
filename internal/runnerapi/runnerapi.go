@@ -169,6 +169,7 @@ func (s *Server) authenticate(r *http.Request) (protocol.Principal, error) {
 type runReceiptCredential struct {
 	delivery           *protocol.RunMessageDelivery
 	manager            bool
+	events             bool
 	questionReplay     *protocol.Envelope
 	pauseReplay        *protocol.Envelope
 	externalWaitReplay *protocol.Envelope
@@ -192,6 +193,9 @@ func (s *Server) authenticateCredential(r *http.Request, receipt *runReceiptCred
 	switch runID, hostHeader := r.Header.Get(HeaderRun), r.Header.Get(HeaderHost); {
 	case runID != "" && hostHeader == "":
 		leaseID, host, role, err := s.app.RunCredential(ctx, runID)
+		if receipt != nil && receipt.events {
+			leaseID, host, role, err = s.app.RunEventCredential(ctx, runID)
+		}
 		if receipt != nil && receipt.manager {
 			leaseID, host, role, err = s.app.ManagerReceiptCredential(ctx, runID)
 		}
@@ -295,6 +299,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 				p, authErr = s.authenticateCredential(r, &runReceiptCredential{manager: true})
 			}
 		}
+		if authErr != nil && (env.Operation == protocol.OpRunnerSyncEvents || env.Operation == protocol.OpRunnerEventPart) && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
+			p, authErr = s.authenticateCredential(r, &runReceiptCredential{events: true})
+		}
 		if authErr != nil && env.Operation == protocol.OpRunsYieldQuestion && env.Target.Type == "run" && env.Target.ID == r.Header.Get(HeaderRun) {
 			p, authErr = s.authenticateCredential(r, &runReceiptCredential{questionReplay: &env})
 		}
@@ -350,7 +357,7 @@ var runCommands = map[string]app.Command{
 func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protocol.Envelope) (protocol.Operation, error) {
 	if p.Kind == protocol.PrincipalRun && p.Role == protocol.RoleIssueManager {
 		switch env.Operation {
-		case protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpRunsYieldPause, protocol.OpRunsWaitExternal, protocol.OpRunsYieldExternalWait, protocol.OpRunsRecordSessionStop:
+		case protocol.OpRunnerEventPart, protocol.OpManagerNativeClaim, protocol.OpManagerNativeReply, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpRunsYieldPause, protocol.OpRunsWaitExternal, protocol.OpRunsYieldExternalWait, protocol.OpRunsRecordSessionStop:
 		default:
 			return protocol.Operation{}, protocol.Errorf(protocol.CodeForbidden, "manager cannot act as an implementation or acceptance run")
 		}
@@ -477,7 +484,9 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			return protocol.Operation{}, err
 		}
 		return withResult(protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}, res)
-	case protocol.OpRunnerEvents:
+	case protocol.OpRunnerEventPart:
+		return s.receiveEventPart(ctx, p, env)
+	case protocol.OpRunnerEvents, protocol.OpRunnerSyncEvents:
 		var pl protocol.EventsPayload
 		if err := decodeStrict(env.Payload, &pl); err != nil {
 			return protocol.Operation{}, err

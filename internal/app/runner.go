@@ -1421,6 +1421,11 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 		if err != nil {
 			return errNotFound(err, "run %s does not exist", runID)
 		}
+		lease, err := store.GetLeaseByRun(ctx, tx.Q(), runID)
+		if err != nil {
+			return err
+		}
+		historical := lease.Status == store.LeaseReleased || run.ObservedState == protocol.RunFinished || run.ObservedState == protocol.RunFailed
 		res.Accepted = 0
 		for _, e := range events {
 			previous, seen, err := store.RunLogAt(ctx, tx.Q(), runID, e.Seq)
@@ -1438,21 +1443,6 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				continue
 			}
 			res.Accepted++
-			if err := concurrencyRunFeedback(ctx, tx, run, e, now, observedAt); err != nil {
-				return err
-			}
-			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
-				return err
-			}
-			if e.Kind == "worker.turn_failed" || e.Kind == "worker.root_observation_unknown" ||
-				e.Kind == "worker.root_background_pending" {
-				queued, err := a.recordRootAttention(ctx, tx, run, e)
-				if err != nil {
-					return err
-				}
-				changed = changed || queued
-				wakeQueued = wakeQueued || queued
-			}
 			if e.Kind == "usage.source" {
 				if err := registerUsageSource(ctx, tx, run, e.Body, now); err != nil {
 					return err
@@ -1470,6 +1460,27 @@ func (a *App) RecordRunEvents(ctx context.Context, p protocol.Principal, runID s
 				if err := recordTokenUsage(ctx, tx, usage, "run:"+runID, role, now); err != nil {
 					return err
 				}
+			}
+			if historical {
+				if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := concurrencyRunFeedback(ctx, tx, run, e, now, observedAt); err != nil {
+				return err
+			}
+			if err := tx.InsertRunLog(ctx, runID, e, now); err != nil {
+				return err
+			}
+			if e.Kind == "worker.turn_failed" || e.Kind == "worker.root_observation_unknown" ||
+				e.Kind == "worker.root_background_pending" {
+				queued, err := a.recordRootAttention(ctx, tx, run, e)
+				if err != nil {
+					return err
+				}
+				changed = changed || queued
+				wakeQueued = wakeQueued || queued
 			}
 			switch e.Kind {
 			case "worker.root_background_pending", "worker.root_observation_resolved", "worker.root_observation_unknown", "worker.turn_failed", "worker.recovery_pending", "worker.recovery_started", "worker.recovery_completed", "worker.recovery_failed", "worker.recovery_handed_back", "worker.startup_failed", "worker.startup_retry_pending", "worker.startup_started":
@@ -1585,17 +1596,22 @@ func (a *App) ExpireLeases(ctx context.Context) (int, error) {
 // active or lapsed lease authenticates the run: a lapsed run may still
 // report its result.
 func (a *App) RunCredential(ctx context.Context, runID string) (leaseID, hostID string, role protocol.RunRole, err error) {
-	return a.runCredential(ctx, runID, nil)
+	return a.runCredential(ctx, runID, nil, false)
 }
 
 // RunMessageReceiptCredential permits only a fact about an already claimed
 // delivery to authenticate with its original lease after the run ends. The HTTP
 // caller must confine this credential to ReportRunMessage, never other run APIs.
 func (a *App) RunMessageReceiptCredential(ctx context.Context, runID string, delivery protocol.RunMessageDelivery) (leaseID, hostID string, role protocol.RunRole, err error) {
-	return a.runCredential(ctx, runID, &delivery)
+	return a.runCredential(ctx, runID, &delivery, false)
 }
 
-func (a *App) runCredential(ctx context.Context, runID string, delivery *protocol.RunMessageDelivery) (leaseID, hostID string, role protocol.RunRole, err error) {
+// RunEventCredential authenticates only delivery of facts from the original Run.
+func (a *App) RunEventCredential(ctx context.Context, runID string) (leaseID, hostID string, role protocol.RunRole, err error) {
+	return a.runCredential(ctx, runID, nil, true)
+}
+
+func (a *App) runCredential(ctx context.Context, runID string, delivery *protocol.RunMessageDelivery, historical bool) (leaseID, hostID string, role protocol.RunRole, err error) {
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
 		run, err := store.GetRun(ctx, tx.Q(), runID)
 		if err != nil {
@@ -1613,7 +1629,7 @@ func (a *App) runCredential(ctx context.Context, runID string, delivery *protoco
 			if m.RunID != runID || m.Receiver == "" || m.RunMessageDelivery != *delivery {
 				return store.ErrNotFound
 			}
-		} else if lease.Status == store.LeaseReleased {
+		} else if !historical && lease.Status == store.LeaseReleased {
 			return store.ErrNotFound
 		}
 		leaseID, hostID, role = lease.LeaseID, run.HostID, run.Role

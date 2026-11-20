@@ -508,12 +508,14 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		p.Guide += fmt.Sprintf("\nYou are executing work for Issue %s at its publishing owner's assignment epoch %d, role %s. Your execution identity remains the selected Agent. Fulfill the frozen task agreement and submit its result through the existing role-specific tools. Choose short investigation or collaboration within the existing goal using this device's configured tools. An ordinary same-Issue collaboration need not create a child Issue; independent continuing responsibility may use one. Preserve independent acceptance isolation and submit actual results with their original execution identity.\n", as.Responsibility.IssueID, as.Responsibility.AssignmentEpoch, as.Role)
 	}
 	persistEvent := func(eventCtx context.Context, ev harness.WorkerEvent) error {
-
 		if err := r.recordRolloutEvent(eventCtx, as.RunID, ev); err != nil {
 			return err
 		}
-		if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)}); err != nil {
+		if err := r.cfg.Journal.AppendEvent(eventCtx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: ev.Body}); err != nil {
 			return err
+		}
+		if as.EventSync {
+			return nil
 		}
 		flushCtx, cancel := context.WithTimeout(eventCtx, stopFlush)
 		defer cancel()
@@ -692,7 +694,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if appendErr == nil {
 			appendErr = r.recordRolloutEvent(ctx, as.RunID, ev)
 			if appendErr == nil {
-				appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: boundedBody(ev.Body)})
+				appendErr = r.cfg.Journal.AppendEvent(ctx, as.RunID, protocol.RunEvent{NativeID: ev.NativeID, Kind: ev.Kind, Body: ev.Body})
 			}
 		}
 	}
@@ -1112,15 +1114,15 @@ func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	}
 	// execute has confirmed the process stopped before entering reporting.
 	if ok {
-		// Facts go out before the result that ends the run's credential.
+		// Legacy peers only accept events before the final report.
 		flush := func() error { return r.flushEvents(ctx, as) }
 		var eventErr error
-		if strictResume != nil {
+		if !as.EventSync && strictResume != nil {
 			// A durable Stop may arrive while the credential still works.
 			// Yield uncertain uploads to Hello instead of retrying forever
 			// inside a report that cannot reread that independent control.
 			eventErr = flush()
-		} else {
+		} else if !as.EventSync {
 			eventErr = r.retry(ctx, flush)
 		}
 		if err := eventErr; err != nil {
@@ -1328,6 +1330,9 @@ const stopFlush = 5 * time.Second
 // closure. A shutdown may cancel execution, but cannot erase received facts;
 // failed uploads retain the original event identities for the next recovery.
 func (r *Runner) flushFinalEvents(ctx context.Context, as protocol.Assignment) {
+	if as.EventSync {
+		return
+	}
 	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopFlush)
 	defer cancel()
 	if err := r.flushEvents(flushCtx, as); err != nil {
@@ -1358,77 +1363,29 @@ func (r *Runner) uploadEvents(ctx context.Context, as protocol.Assignment) {
 	}
 }
 
-// Size limits keep every upload well inside the server's request limit.
-const (
-	maxEventBody = 256 << 10
-	maxBatchBody = 1 << 20
-)
-
-// boundedBody replaces oversized content while retaining small lifecycle
-// identities and statuses. A clipped result must still settle its start.
-func boundedBody(body json.RawMessage) json.RawMessage {
-	encoded, err := json.Marshal(body)
-	if err == nil && len(encoded) <= maxEventBody {
-		return body
-	}
-	note, _ := json.Marshal(map[string]any{"truncated": true, "bytes": len(body)})
-	var envelope map[string]json.RawMessage
-	if json.Unmarshal(body, &envelope) == nil && envelope != nil {
-		kept := boundedEventMetadata(envelope)
-		kept["truncated"] = json.RawMessage(`true`)
-		kept["bytes"], _ = json.Marshal(len(body))
-		var data map[string]json.RawMessage
-		if json.Unmarshal(envelope["data"], &data) == nil && data != nil {
-			inner := boundedEventMetadata(data)
-			inner["truncated"] = json.RawMessage(`true`)
-			kept["data"], _ = json.Marshal(inner)
-		}
-		if raw, err := json.Marshal(kept); err == nil && len(raw) <= maxEventBody {
-			return raw
-		}
-	}
-	return note
-}
-
-func boundedEventMetadata(body map[string]json.RawMessage) map[string]json.RawMessage {
-	kept := make(map[string]json.RawMessage)
-	for _, key := range []string{"thread_id", "turn_id", "item_id", "id", "kind", "type", "status", "exitCode", "success"} {
-		if raw, ok := body[key]; ok {
-			kept[key] = raw
-		}
-	}
-	return kept
-}
+const maxBatchBody = 1 << 20
 
 // flushEvents uploads every pending event of a run in batches bounded by
 // count and size.
 func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error {
 	r.wakeRolloutArchive()
 	for {
-		pending, err := r.cfg.Journal.PendingEvents(ctx, as.RunID, 200)
+		pending, err := r.cfg.Journal.PendingEventBatch(ctx, as.RunID, 200, maxBatchBody)
 		if err != nil || len(pending) == 0 {
 			return err
 		}
-		events, size := pending[:0:0], 0
-		for _, e := range pending {
-			encoded, err := json.Marshal(e)
-			if err != nil {
-				return fmt.Errorf("runner: encode event: %w", err)
-			}
-			size += len(encoded)
-			if len(events) > 0 && size > maxBatchBody {
-				break
-			}
-			events = append(events, e)
+		operation := protocol.OpRunnerEvents
+		if as.EventSync {
+			operation = protocol.OpRunnerSyncEvents
 		}
-		env, err := r.newEnvelope(protocol.OpRunnerEvents, runTarget(as), protocol.EventsPayload{Events: events})
+		env, err := r.newEnvelope(operation, runTarget(as), protocol.EventsPayload{Events: pending})
 		if err != nil {
 			return err
 		}
-		if _, err := r.c.do(ctx, runCredential(as), env); err != nil {
+		if err := r.sendEvent(ctx, as, env); err != nil {
 			return err
 		}
-		if err := r.cfg.Journal.AckEvents(ctx, as.RunID, events[len(events)-1].Seq); err != nil {
+		if err := r.cfg.Journal.AckEvents(ctx, as.RunID, pending[len(pending)-1].Seq); err != nil {
 			return err
 		}
 	}

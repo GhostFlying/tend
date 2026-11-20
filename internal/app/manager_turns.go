@@ -147,6 +147,29 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 			return err
 		}
 		if receipt {
+			// A connection can end before any thread exists to receive its
+			// marker. Reconcile the exact, physically stopped predecessor.
+			stopped, err := store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM runs r WHERE task_id=? AND observed_state='failed' AND native_thread_id='' AND native_closed_at>0 AND native_close_activity=native_activity AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.seq=r.native_close_sequence AND e.applied=0) AND NOT EXISTS(SELECT 1 FROM manager_native_requests n WHERE n.run_id=r.run_id AND n.status IN ('started','unknown') AND n.method NOT IN ('models','find','usage'))`, id)
+			if err != nil {
+				return err
+			}
+			for _, runID := range stopped {
+				run, err := store.GetRun(ctx, tx.Q(), runID)
+				if err != nil {
+					return err
+				}
+				if err := consumeStoppedManagerDisconnect(ctx, x, tx, run, m, "run.manager_disconnect_applied"); err != nil {
+					return err
+				}
+			}
+			if len(stopped) > 0 {
+				receipt, err = views.ManagerReceiptPending(ctx, tx.Q(), m)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if receipt {
 			// Pending history is observational. A terminal Run with a proven
 			// close is read through heartbeats; without that proof it remains
 			// unknown. Neither case creates a new coordinate action or lease.

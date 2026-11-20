@@ -188,6 +188,10 @@ func buildManagerAssignment(ctx context.Context, q store.Querier, r store.RunRow
 		return protocol.Assignment{}, err
 	}
 	as := protocol.Assignment{Manager: &protocol.IssueManagerAssignment{NativeOwnerTools: receipt.NativeOwnerTools && nativeTools && !receipt.ReceiptOnly && receipt.ReaderRequestID == "", ReceiptOnly: receipt.ReceiptOnly, RequireReceiptReader: receipt.ReaderRequestID != "", IssueID: m.IssueID, CategoryID: m.CategoryID, ConversationID: m.ConversationID, AssignmentEpoch: m.AssignmentEpoch}, Protocol: r.Protocol, Execution: pin, RunID: r.RunID, LeaseID: l.LeaseID, LeaseTTLMillis: ttl.Milliseconds(), TaskID: r.TaskID, ActionID: r.ActionID, Role: r.Role, Desired: desiredFor(r, a, t), Generation: r.Generation, SpecVersion: 1, Spec: json.RawMessage(spec)}
+	as.EventSync, err = runnerSupportsCapability(ctx, q, r.HostID, protocol.CapabilityEventSync)
+	if err != nil {
+		return protocol.Assignment{}, err
+	}
 	as.ExternalWaits = r.Protocol >= 3
 	as.SessionStopReports = r.Protocol >= 3
 	if err := store.AssignmentExternalWait(ctx, q, &as); err != nil {

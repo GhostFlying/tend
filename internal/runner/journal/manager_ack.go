@@ -39,7 +39,16 @@ func (j *Journal) ConfirmManagerAcknowledgements(ctx context.Context, run string
 // ManagerAcknowledgementRuns includes finished Runs: delivery metadata never
 // keeps an execution slot occupied and remains retryable after a restart.
 func (j *Journal) ManagerAcknowledgementRuns(ctx context.Context) ([]protocol.Assignment, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT run_id FROM manager_receipt_ack_ids) ORDER BY run_id`)
+	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT run_id FROM manager_receipt_ack_ids) ORDER BY run_id`)
+}
+
+// SettledEventRuns finds only outstanding tails, including after restart.
+func (j *Journal) SettledEventRuns(ctx context.Context) ([]protocol.Assignment, error) {
+	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT DISTINCT run_id FROM events) AND phase='done' AND json_extract(assignment_json,'$.event_sync')=1 ORDER BY run_id`)
+}
+
+func (j *Journal) assignmentsFor(ctx context.Context, query string) ([]protocol.Assignment, error) {
+	rows, err := j.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

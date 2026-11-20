@@ -70,6 +70,9 @@ func (s *Server) readEnvelope(r *http.Request, admitLarge func() error) (protoco
 	}
 	release := func() { cleanup(); <-s.originals }
 	err = json.NewDecoder(requestOriginalReader{r.Context(), file}).Decode(&env)
+	if err == nil && env.Operation == protocol.OpRunnerEventPart {
+		return env, release, protocol.Errorf(protocol.CodeInvalidRequest, "event part exceeds its inline transport budget")
+	}
 	return env, release, envelopeDecodeError(r.Context(), err)
 }
 

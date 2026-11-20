@@ -233,7 +233,7 @@ func refreshPauseContinuations(ctx context.Context, x *Exec, tx *store.Tx, end f
 			if nativeUnknown {
 				continue
 			}
-			if err := consumePausedManagerDisconnect(ctx, x, tx, r, m); err != nil {
+			if err := consumeStoppedManagerDisconnect(ctx, x, tx, r, m, "run.manager_pause_disconnect_applied"); err != nil {
 				return err
 			}
 			pending, err := views.ManagerReceiptPending(ctx, tx.Q(), m)
@@ -327,11 +327,11 @@ func (a *App) nativePausePredecessor(ctx context.Context, run string) (string, e
 	return parent, err
 }
 
-// consumePausedManagerDisconnect applies only the connection end of a proved
-// stopped pause predecessor. There is no native thread to deliver this marker
+// consumeStoppedManagerDisconnect applies only the connection end of a proved
+// stopped original process. There is no native thread to deliver this marker
 // to, and there is no business event or receipt to reconstruct.
-func consumePausedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, m store.IssueManagerTask) error {
-	if r.ObservedState != protocol.RunFinished || m.Pin == nil || m.HostID != r.HostID {
+func consumeStoppedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, m store.IssueManagerTask, auditKind string) error {
+	if (r.ObservedState != protocol.RunFinished && r.ObservedState != protocol.RunFailed) || m.Pin == nil || m.HostID != r.HostID {
 		return nil
 	}
 	closeID, sequence, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), r.RunID)
@@ -389,6 +389,6 @@ func consumePausedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx, 
 	if err != nil {
 		return err
 	}
-	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "run", ObjectID: r.RunID, Kind: "run.manager_pause_disconnect_applied", BodyJSON: string(audit), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
+	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: x.IDs.New(protocol.PrefixEvent), Source: "app", ObjectType: "run", ObjectID: r.RunID, Kind: auditKind, BodyJSON: string(audit), RequestID: x.Env.RequestID, CreatedAt: x.Now.UnixMilli()})
 	return err
 }

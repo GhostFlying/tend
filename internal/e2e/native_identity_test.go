@@ -180,7 +180,7 @@ func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	ws := &nativeIdentityWorkspaces{workspaces{dir: t.TempDir()}}
 	workers := orca.NewWorkers(orca.WorkerOptions{Client: &orca.Client{Exec: native.exec}, Agent: protocol.AgentCodex, BridgeCommand: "tend-runner", SocketDir: sockets, IDs: protocol.NewULIDGen(srv.now, nil), Now: srv.now, Poll: time.Millisecond, WaitChunk: time.Millisecond, Settle: time.Second})
 	// Lose an accepted event response. The original journal sequence is retried.
-	n.net.loseNext(protocol.OpRunnerEvents, 1)
+	n.net.loseNext(protocol.OpRunnerSyncEvents, 1)
 	var activeJournal *journal.Journal
 	var cancel context.CancelFunc
 	var stopped chan error

@@ -22,8 +22,9 @@ type Object struct {
 
 // Store is a content-addressed directory. Publication never overwrites a file.
 type Store struct {
-	root      string
-	archiveMu sync.Mutex
+	root       string
+	archiveMu  sync.Mutex
+	incomingMu sync.Mutex
 }
 
 // New creates a private store at root.
