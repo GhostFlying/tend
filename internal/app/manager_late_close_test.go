@@ -44,6 +44,11 @@ func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testin
 					t.Fatal(err)
 				}
 			}
+			idle := h.runAs(as, protocol.OpManagerNativeClaim, map[string]any{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
+			var options protocol.ManagerNativeClaimResult
+			if err := json.Unmarshal(idle.Result, &options); err != nil || options.ID != "" || !options.AcceptsDisconnectProcessText || options.AcceptsCloseProcessText {
+				t.Fatal("idle claim must advertise disconnect diagnostics without introducing a native command", idle, err)
+			}
 			closeID, err := h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`))
 			if err != nil {
 				t.Fatal(err)
@@ -52,7 +57,7 @@ func TestFault_ManagerLateClosePreservesStoppedRunAfterBusinessSettles(t *testin
 				claim := h.runAs(as, protocol.OpManagerNativeClaim, map[string]any{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
 				var negotiated protocol.ManagerNativeClaimResult
 				var legacyCommand protocol.ManagerNativeRequest
-				if err := json.Unmarshal(claim.Result, &negotiated); err != nil || !negotiated.AcceptsCloseProcessText || negotiated.ID != closeID {
+				if err := json.Unmarshal(claim.Result, &negotiated); err != nil || !negotiated.AcceptsCloseProcessText || !negotiated.AcceptsDisconnectProcessText || negotiated.ID != closeID {
 					t.Fatal("current claim did not offer close diagnostics", claim, err)
 				}
 				if err := json.Unmarshal(claim.Result, &legacyCommand); err != nil || !reflect.DeepEqual(legacyCommand, negotiated.ManagerNativeRequest) || string(legacyCommand.Payload) != "{}" {

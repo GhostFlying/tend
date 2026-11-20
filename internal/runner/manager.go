@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/harness"
@@ -240,6 +241,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	opened = true
 	nativeClosed := false
 	var emitMu sync.Mutex
+	var acceptsDisconnectProcessText atomic.Bool
 	streamText := as.Manager.ConversationID == "" || as.Manager.ConversationID == "main"
 	processText := &harness.WorkerProcessTextBuffer{}
 	if active := r.lookup(as.RunID); !streamText && active != nil {
@@ -316,7 +318,12 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		defer emitMu.Unlock()
 		if !streamText {
 			if event.Disconnected {
-				event.ProcessText = processText.Drain(event.ThreadID, "")
+				parts := processText.Drain(event.ThreadID, "")
+				// Legacy servers only settle an unapplied pause marker
+				// with the original connection-only shape.
+				if acceptsDisconnectProcessText.Load() {
+					event.ProcessText = parts
+				}
 			} else if event.Native != nil {
 				event.ProcessText = processText.Observe(event.ThreadID, *event.Native)
 				if event.Native.Kind == harness.EventAgentMessageDelta {
@@ -481,6 +488,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				return err
 			}
 		}
+		acceptsDisconnectProcessText.Store(claim.AcceptsDisconnectProcessText)
 		command := claim.ManagerNativeRequest
 		if command.ID == "" {
 			if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {
