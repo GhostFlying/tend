@@ -6,16 +6,22 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func TestFault_ManagerPauseConsumesOriginalDisconnectBeforeSingleContinuation(t *testing.T) {
+	const observedText = "observed fragment"
+	const diagnostic = `,"process_text":[{"thread_id":"original-thread","turn_id":"original-turn","item_id":"unfinished-item","text":"` + observedText + `"}]`
 	for _, tc := range []struct {
-		name, earlierEvent string
-		nativeUnknown      bool
+		name, earlierEvent, tailFields string
+		nativeUnknown, blocked         bool
 	}{
 		{name: "sole transport end"},
-		{name: "earlier business event", earlierEvent: `{"thread_id":"original-thread","native":{"Kind":"turn_completed","TurnID":"original-turn","TurnStatus":"completed"}}`},
-		{name: "unknown original native request", nativeUnknown: true},
+		{name: "transport end with worker fragment", tailFields: diagnostic},
+		{name: "earlier business event", tailFields: diagnostic, blocked: true, earlierEvent: `{"thread_id":"original-thread","native":{"Kind":"turn_completed","TurnID":"original-turn","TurnStatus":"completed"}}`},
+		{name: "unknown original native request", tailFields: diagnostic, blocked: true, nativeUnknown: true},
+		{name: "tool callback on the same event", tailFields: diagnostic + `,"call":{"ThreadID":"original-thread","TurnID":"original-turn","CallID":"original-call"}`, blocked: true},
+		{name: "malformed diagnostic payload", tailFields: `,"process_text":{"thread_id":"original-thread"}`, blocked: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, runtime := pendingIssueOwnerHarness(t)
@@ -48,7 +54,7 @@ func TestFault_ManagerPauseConsumesOriginalDisconnectBeforeSingleContinuation(t 
 				sendEvent(seq, tc.earlierEvent)
 				seq++
 			}
-			const end = `{"sequence":0,"disconnected":true,"thread_id":""}`
+			end := `{"sequence":0,"disconnected":true,"thread_id":""` + tc.tailFields + "}"
 			sendEvent(seq, end)
 			paused := h.run(as.RunID)
 			env := h.env(protocol.OpRunsYieldPause, runTarget(as.RunID), protocol.YieldPausePayload{PauseHandoff: *paused.PauseHandoff}, nil)
@@ -64,8 +70,7 @@ func TestFault_ManagerPauseConsumesOriginalDisconnectBeforeSingleContinuation(t 
 			}
 			issue = issueAdmissionStatus(t, h, admissionCurrent(t, h, issue.IssueID), protocol.IssueTodo, nil)
 			next := admissionClaim(t, h, runtime)
-			wantContinuation := tc.earlierEvent == "" && !tc.nativeUnknown
-			if !wantContinuation {
+			if tc.blocked {
 				if next != nil {
 					t.Fatal("unreconciled business facts admitted a follow-up Run", next)
 				}
@@ -89,6 +94,30 @@ func TestFault_ManagerPauseConsumesOriginalDisconnectBeforeSingleContinuation(t 
 			rows, err := h.app.ManagerNativeEvents(t.Context(), as.RunID, 0)
 			if err != nil || len(rows) != int(seq) || rows[seq-1].Sequence != seq || !store.SemanticJSONEqual(string(rows[seq-1].Body), end) {
 				t.Fatal("lost original transport event", rows, err)
+			}
+			if !tc.blocked && tc.tailFields == diagnostic {
+				if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+					compact, err := views.RunRollout(t.Context(), tx.Q(), as.RunID, 0, 0, false)
+					if err != nil {
+						return err
+					}
+					full, err := views.RunRollout(t.Context(), tx.Q(), as.RunID, 0, 0, true)
+					if err != nil {
+						return err
+					}
+					if compact.Watermark != 0 || full.Watermark != seq || len(compact.Logs) != 0 || len(full.Logs) != 1 ||
+						full.Logs[0].Seq != seq || full.Logs[0].Kind != "native.disconnected" {
+						t.Fatalf("process view changed the original disconnect: compact=%+v full=%+v", compact, full)
+					}
+					var body struct{ Data struct{ Type, Text string } }
+					if err := json.Unmarshal(full.Logs[0].Body, &body); err != nil ||
+						body.Data.Type != "agentMessageFragment" || body.Data.Text != observedText {
+						t.Fatal("full-screen process view lost the observed fragment", body, err)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if request != "" {
 				var status string
