@@ -119,6 +119,10 @@ func selectWaits(raw json.RawMessage, runID, status string) (json.RawMessage, er
 	return json.Marshal(selected)
 }
 
+const acceptanceEvidenceHelp = `
+Acceptance evidence: task and artifact views include each acceptance_id and its exact files manifest. A file_id identifies original immutable bytes, including a blocked or changes_required verdict; a path in evidence JSON is not a stored file. Use file metadata <file_id>, then file download <file_id> --out <path> [--json]. Downloads verify size/SHA-256 and replace the output only after success; retry the same read after interruption. Task inputs retain source_acceptance_id when explicitly selected. Read commands have no mutation request, revision or dry-run.
+`
+
 func auditReadHelp(name string) string {
 	const fieldsHelp = `--fields prints a JSON object with the selected top-level keys. Use a
 comma-separated list of exact keys from the full JSON. Absent keys are omitted.
@@ -191,8 +195,9 @@ server limit of 25 seconds.
 
 Read retained Issue context. The default legacy view pages source messages
 with --after-source, using next while more is true. --after is an alias and
-must agree when both are passed. Find omitted tool bodies using original_message_id
-with issue materials --kind messages --id <message-id>.
+must agree when both are passed. Tool entries with content_omitted carry an
+original_message_id. Read the original with issue materials --kind messages
+--id <message-id>.
 
 For a current snapshot and later event deltas use --view incremental. Pass
 next_cursor to --cursor until more is false, and keep it to read later deltas.
@@ -221,13 +226,13 @@ This read has no pagination.
 Read one immutable artifact, its report, file manifest and acceptance evidence.
 Use file download with a returned file_id for the verified original bytes.
 This read has no pagination.
-`
+` + acceptanceEvidenceHelp
 	case "file download":
 		return `Usage: tend file download <file-id> --out <path> [--json]
 
 Read and verify an original file by ID, then save its bytes to --out.
 --json prints the local path in a JSON object. This read has no pagination.
-`
+` + acceptanceEvidenceHelp
 
 	case "issue activity":
 		return `Usage: tend issue activity <issue-id> [--before <position>] [--json]
