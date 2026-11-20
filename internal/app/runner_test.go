@@ -515,6 +515,7 @@ func TestHelloKeepsResultDeliverable(t *testing.T) {
 	h := newHarness(t)
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
 	as, _, _ := h.claim("linux-1")
+	renewalBoundFixture(t, h, as)
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if _, err := h.app.ExpireLeases(context.Background()); err != nil {

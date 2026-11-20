@@ -78,6 +78,9 @@ func (r *Runner) recoverAppServerAttempt(ctx context.Context, as protocol.Assign
 		return true, err
 	}
 	if protocol.RunnerOwnsExecution(as.Protocol) {
+		if run.Held {
+			return false, nil
+		}
 		return true, fmt.Errorf("%w: original app-server transport is unavailable; the Run still owns its workspace", harness.ErrOwnedWorkerUnconfirmed)
 	}
 	supported, err := r.stopOwnedAppServer(ctx, as, run)

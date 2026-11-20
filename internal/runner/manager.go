@@ -202,7 +202,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
-	if protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && run.Attempts == r.recoveredAttempts[as.RunID] && !run.StoppedConfirmed {
+	if protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && !run.StoppedConfirmed {
 		// A new stdio process cannot prove what the predecessor dispatched.
 		// Keep the original credentials, process claim and tool identities for reconciliation.
 		return fmt.Errorf("%w: original manager process exit is unconfirmed", harness.ErrOwnedWorkerUnconfirmed)

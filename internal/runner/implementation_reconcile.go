@@ -62,6 +62,13 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if err != nil {
 		return true, fmt.Errorf("%w: original implementation workspace: %w", harness.ErrRetainedResumePending, err)
 	}
+	outcome, err := r.restoreWorkerOutcome(ctx, as, run, p)
+	if err != nil {
+		return true, err
+	}
+	if protocol.RunnerOwnsExecution(as.Protocol) && !run.StoppedConfirmed && (outcome == nil || outcome.Status == "unknown") {
+		return true, fmt.Errorf("%w: original delegated turn has no terminal observation", harness.ErrRetainedResumePending)
+	}
 	result, err := reconciler.ReconcileImplementationResult(ctx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, StateDir: p.StateDir,
 		Thread: run.Thread, Attempt: run.Attempts, Spec: as.Spec,
@@ -75,15 +82,16 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if result.Result == nil {
 		return true, errors.New("runner: original implementation result is unconfirmed")
 	}
-	outcome, err := r.restoreWorkerOutcome(ctx, as, run, p)
-	if err != nil {
-		return true, err
-	}
 	if outcome != nil && outcome.Status == "interrupted" {
-		// Keep the original stop proof authoritative. A previously confirmed
-		// pause can resume; an unconfirmed interruption must first pass the
-		// ordinary interrupted-attempt recovery, which cannot replay work.
-		return false, nil
+		if run.StoppedConfirmed || !protocol.RunnerOwnsExecution(as.Protocol) {
+			return false, nil
+		}
+		// The reconciler has verified the original process exit. Preserve an
+		// interrupted terminal as a failure under its original Run identity.
+		if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
+			return true, err
+		}
+		return true, failed("worker_interrupted_after_runner_restart", errors.New("the original worker turn was interrupted"))
 	}
 	if outcome == nil || outcome.Status == "unknown" {
 		return true, fmt.Errorf("%w: original implementation terminal outcome is unknown", harness.ErrRetainedResumePending)

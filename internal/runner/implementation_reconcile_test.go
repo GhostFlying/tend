@@ -525,7 +525,7 @@ func TestImplementationResultRecoveryPreservesUncertaintyAndMissingFallback(t *t
 				}
 				return
 			}
-			err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun, recoveryAttempt: before.Attempts})
+			err := r.work(t.Context(), t.Context(), as, &active{as: as, desired: protocol.DesiredRun})
 			after, afterRequests := retainedStrictSnapshot(t, r.cfg.Journal, as.RunID)
 			if !isCompletionPending(err) || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(requests, afterRequests) || len(workers.stops) != 0 {
 				t.Fatal("uncertain original submission was promoted or discarded", before, after, err)

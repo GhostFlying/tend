@@ -46,7 +46,7 @@ func (r *Runner) resumeDelegated(ctx context.Context) error {
 		if as.Role == protocol.RoleIssueManager && run.Attempts > 0 && !run.StoppedConfirmed {
 			continue
 		}
-		r.startExecution(ctx, as, r.cfg.Now(), false, run.Attempts)
+		r.start(ctx, as, r.cfg.Now())
 	}
 	return nil
 }
