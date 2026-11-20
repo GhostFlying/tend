@@ -117,7 +117,7 @@ func (r *Runner) syncNativeUsageWithRetries(ctx context.Context, retries nativeu
 			return err
 		}
 	}
-	requests, err := r.cfg.Journal.Requests(ctx)
+	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload, protocol.OpRunnerUsageCollection)
 	if err != nil {
 		return err
 	}

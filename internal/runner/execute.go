@@ -966,7 +966,7 @@ func (r *Runner) newTakeoverEnvelope(as protocol.Assignment, reason string) (*pr
 // settleTakeover resends a takeover report an earlier attempt or process
 // journaled but did not see answered.
 func (r *Runner) settleTakeover(ctx context.Context, as protocol.Assignment, a *active) error {
-	reqs, err := r.cfg.Journal.Requests(ctx)
+	reqs, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunsReportTakeover)
 	if err != nil {
 		return err
 	}

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -163,5 +165,59 @@ func TestWorkerDoneFinalEventsRetryAndAckWithoutNativeReplay(t *testing.T) {
 	saved, err := r.cfg.Journal.Run(t.Context(), as.RunID)
 	if err != nil || saved.Phase != journal.PhaseWorkerDone || saved.StoppedConfirmed || !saved.Fenced || saved.Attempts != 1 || !bytes.Equal(saved.WorkerResult, body) {
 		t.Fatal("event recovery changed physical closure or the original result", saved, err)
+	}
+}
+
+func TestSettledEventBacklogRemainsVisibleAndFailedRunBacksOff(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.Log = slog.New(slog.DiscardHandler)
+	r.cfg.IDs = protocol.NewULIDGen(r.cfg.Now, nil)
+	r.cfg.RetryDelay, r.cfg.EventFlush = time.Hour, time.Hour
+	ctx := t.Context()
+	for _, id := range []string{"a-offline", "b-healthy"} {
+		as := protocol.Assignment{RunID: id, EventSync: true, Role: protocol.RoleImplement}
+		if err := r.cfg.Journal.AcceptAssignment(ctx, as, ""); err != nil {
+			t.Fatal(err)
+		}
+		count := 1
+		if id == "b-healthy" {
+			count = 401
+		}
+		for range count {
+			if err := r.cfg.Journal.AppendEvent(ctx, id, protocol.RunEvent{Kind: "item.completed"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := r.cfg.Journal.Done(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	obs, err := r.runtimeObservation(ctx)
+	if err != nil || obs.PendingOperations != 402 || !slices.Contains(obs.Blockers, "pending_run_events") {
+		t.Fatal(obs, err)
+	}
+	requests := make(chan string, 10)
+	r.c.base = "http://runner.invalid"
+	r.c.http = &http.Client{Transport: uploadRoundTripper(func(req *http.Request) (*http.Response, error) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+			return nil, err
+		}
+		requests <- env.Target.ID
+		return finalEventsResponse(env, env.Target.ID == "a-offline"), nil
+	})}
+	lifetime, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); r.syncJournalEvents(lifetime) }()
+	defer func() { stop(); <-done }()
+	for _, want := range []string{"a-offline", "b-healthy", "b-healthy", "b-healthy"} {
+		select {
+		case got := <-requests:
+			if got != want {
+				t.Fatalf("request to %s, want %s", got, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("healthy run did not drain")
+		}
 	}
 }

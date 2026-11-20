@@ -45,7 +45,7 @@ func (r *Runner) finishExternalWait(ctx context.Context, as protocol.Assignment)
 }
 
 func (r *Runner) reportExternalWait(ctx context.Context, as protocol.Assignment) error {
-	requests, err := r.cfg.Journal.Requests(ctx)
+	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunsYieldExternalWait)
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (r *Runner) externalWaitReceiptReady(ctx context.Context, run journal.Run) 
 	if run.Phase != journal.PhaseReleasing || !run.StoppedConfirmed || run.Held {
 		return false, nil
 	}
-	requests, err := r.cfg.Journal.Requests(ctx)
+	requests, err := r.cfg.Journal.RequestsByOperation(ctx, protocol.OpRunsYieldExternalWait)
 	if err != nil {
 		return false, err
 	}

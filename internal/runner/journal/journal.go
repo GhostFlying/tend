@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -313,9 +314,52 @@ func (j *Journal) PendingRequestCounts(ctx context.Context) (total, claims int64
 	return
 }
 
+// PendingEventCount counts durable worker originals without opening their bodies.
+func (j *Journal) PendingEventCount(ctx context.Context) (int64, error) {
+	var n int64
+	err := j.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&n)
+	return n, err
+}
+
 // Requests returns the journaled requests, oldest first.
 func (j *Journal) Requests(ctx context.Context) ([]Request, error) {
 	return j.listRequests(ctx, "ORDER BY created_at, request_id")
+}
+
+// RequestsByOperation filters before loading immutable request bodies.
+func (j *Journal) RequestsByOperation(ctx context.Context, operations ...string) ([]Request, error) {
+	if len(operations) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(operations))
+	for i, operation := range operations {
+		args[i] = operation
+	}
+	slots := strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")
+	return j.listRequests(ctx, "WHERE operation IN ("+slots+") ORDER BY created_at,request_id", args...)
+}
+
+func (j *Journal) RequestByID(ctx context.Context, id string) ([]Request, error) {
+	return j.listRequests(ctx, "WHERE request_id=?", id)
+}
+
+// RecoveryRequestIDs retains the original per-run journal insertion order for
+// events. Physical stop precedes the business reply that can depend on it.
+func (j *Journal) RecoveryRequestIDs(ctx context.Context) ([]string, error) {
+	rows, err := j.db.QueryContext(ctx, `SELECT request_id FROM requests WHERE run_id IS NOT NULL AND operation IN (?,?,?,?,?) ORDER BY run_id,CASE operation WHEN ? THEN 0 WHEN ? THEN 1 WHEN ? THEN 2 ELSE 3 END,rowid`, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpManagerNativeReply, protocol.OpRunsSubmitArtifact, protocol.OpAcceptancesSubmit, protocol.OpManagerNativeEvent, protocol.OpManagerNativeStopped, protocol.OpManagerNativeReply)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // NextManagerEvent loads one original at a time. Event sequence allocation and
@@ -369,7 +413,7 @@ func (j *Journal) listRequests(ctx context.Context, selection string, args ...an
 
 // RequestForRun returns the journaled request of a run, if any.
 func (j *Journal) RequestForRun(ctx context.Context, runID string) (Request, bool, error) {
-	all, err := j.Requests(ctx)
+	all, err := j.listRequests(ctx, "WHERE run_id=? AND operation<>? ORDER BY created_at,request_id LIMIT 1", runID, protocol.OpRunsReportTakeover)
 	if err != nil {
 		return Request{}, false, err
 	}

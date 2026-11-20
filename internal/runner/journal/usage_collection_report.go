@@ -42,7 +42,7 @@ func (j *Journal) PendingCollectionReports(ctx context.Context) ([]protocol.Usag
 	if err != nil || len(out) == 0 {
 		return out, err
 	}
-	requests, err := j.Requests(ctx)
+	requests, err := j.RequestsByOperation(ctx, protocol.OpRunnerUsageRegister, protocol.OpRunnerUsageUpload)
 	if err != nil {
 		return nil, err
 	}
