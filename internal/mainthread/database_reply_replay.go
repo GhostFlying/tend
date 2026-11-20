@@ -113,6 +113,7 @@ func (m *Manager) consumeDatabaseReplies(ctx context.Context, replay *app.Manage
 		}
 		event := *original.Native
 		event.CoordinatorSequence = retained.Sequence
+		event.CoordinatorRootTurn = retained.DeliveryTurn
 		drafts.begin(event, m)
 		drafts.consume(event)
 	}

@@ -14,10 +14,11 @@ import (
 // ManagerReplayEvent preserves the original run/sequence while a later
 // attachment consumes unacknowledged facts of the same responsibility.
 type ManagerReplayEvent struct {
-	Cursor   int64
-	RunID    string
-	Sequence int64
-	Body     json.RawMessage
+	DeliveryTurn string // Logical owner of a continued native reply in database-only recovery.
+	Cursor       int64
+	RunID        string
+	Sequence     int64
+	Body         json.RawMessage
 }
 
 func (a *App) ManagerReplayEvents(ctx context.Context, run string, after int64) ([]ManagerReplayEvent, error) {

@@ -165,7 +165,7 @@ func TestBackgroundToolAndProsePublishSharedFullOriginals(t *testing.T) {
 		if !found {
 			t.Fatal("visible report could not restore original")
 		}
-		return durableManagerReplyPrefix(t.Context(), tx.Q(), mainAgent.Thread, turn.TurnID, "reply", prose)
+		return durableManagerReplyPrefix(t.Context(), tx.Q(), mainAgent.Thread, turn.TurnID, turn.TurnID, "reply", prose)
 	}); err != nil {
 		t.Fatal(err)
 	}

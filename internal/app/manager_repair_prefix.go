@@ -59,7 +59,11 @@ func (a *App) AcknowledgeManagerRepairPrefix(ctx context.Context, run string, se
 		if len(actual) != len(covered) || text.String() != body {
 			return protocol.Errorf(protocol.CodeUnknownOutcome, "repair prefix differs from its original raw events")
 		}
-		requests, err := store.FollowupIDs(ctx, tx.Q(), `SELECT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.thread_id=? AND t.turn_id=? AND e.repair=1 ORDER BY h.execution_id`, run, thread, turn)
+		root, err := managerPrefixDeliveryTurn(ctx, tx.Q(), run, sequence, thread, turn, item)
+		if err != nil {
+			return err
+		}
+		requests, err := store.FollowupIDs(ctx, tx.Q(), `SELECT h.execution_id FROM hosted_executions h JOIN main_turns t ON t.request_id=h.execution_id JOIN logical_turn_executions e ON e.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.thread_id=? AND t.turn_id=? AND e.repair=1 ORDER BY h.execution_id`, run, thread, root)
 		if err != nil {
 			return err
 		}

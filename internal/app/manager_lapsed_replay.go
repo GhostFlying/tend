@@ -96,14 +96,17 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "active closing repair has ambiguous original receipts")
 	}
 	replay := &ManagerReplyReplay{RunID: run, LeaseID: l.LeaseID}
-	turns := map[string]bool{}
+	roots := map[string]bool{}
+	boundTurns := map[string]string{}
 	for _, request := range requests {
 		e, err := store.GetHostedExecution(ctx, q, request)
 		if err != nil {
 			return nil, err
 		}
-		var thread, turn string
-		if err := q.QueryRowContext(ctx, `SELECT COALESCE(thread_id,''),COALESCE(turn_id,'') FROM main_turns WHERE request_id=?`, request).Scan(&thread, &turn); err != nil {
+		var thread, turn, child string
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(t.thread_id,''),COALESCE(t.turn_id,''),COALESCE(c.native_turn,'') FROM main_turns t
+ LEFT JOIN manager_continued_turns c ON c.run_id=? AND c.thread_id=t.thread_id AND c.root_turn=t.turn_id
+ WHERE t.request_id=?`, run, request).Scan(&thread, &turn, &child); err != nil {
 			return nil, err
 		}
 		if active {
@@ -123,7 +126,11 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "lapsed manager has ambiguous frozen execution metadata")
 		}
 		replay.ThreadID, replay.Selection = thread, s
-		turns[turn] = true
+		roots[turn] = true
+		boundTurns[turn] = turn
+		if child != "" {
+			boundTurns[child] = turn
+		}
 	}
 	if replay.ThreadID == "" {
 		return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "lapsed manager has no original business receipt")
@@ -155,6 +162,7 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 		event.RunID, event.Body = run, json.RawMessage(raw)
 		var original struct {
 			Disconnected bool
+			Root         string          `json:"root_turn_id"`
 			ThreadID     string          `json:"thread_id"`
 			Call         json.RawMessage `json:"call"`
 			Native       *struct{ Kind, TurnID, ItemID string }
@@ -162,8 +170,19 @@ func managerReplyReplay(ctx context.Context, q store.Querier, conversation, run 
 		if err := json.Unmarshal(event.Body, &original); err != nil {
 			return nil, err
 		}
-		if original.Disconnected || len(original.Call) != 0 && string(original.Call) != "null" || original.ThreadID != replay.ThreadID || original.Native == nil || original.Native.Kind != "agent_message_delta" || original.Native.ItemID == "" || !turns[original.Native.TurnID] {
+		if original.Disconnected || len(original.Call) != 0 && string(original.Call) != "null" || original.ThreadID != replay.ThreadID || original.Native == nil || original.Native.Kind != "agent_message_delta" || original.Native.ItemID == "" {
 			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "lapsed manager prefix requires another original receipt handler")
+		}
+		root := original.Root
+		bound := boundTurns[original.Native.TurnID]
+		if root == "" {
+			root = bound
+		}
+		if original.Native.TurnID == "" || !roots[root] || bound != "" && root != bound {
+			return nil, protocol.Errorf(protocol.CodeUnknownOutcome, "reply delta belongs to another original turn")
+		}
+		if root != original.Native.TurnID {
+			event.DeliveryTurn = root
 		}
 		replay.Events = append(replay.Events, event)
 	}

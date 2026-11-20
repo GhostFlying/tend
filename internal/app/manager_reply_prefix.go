@@ -25,14 +25,11 @@ func (a *App) AcknowledgeManagerReplyPrefix(ctx context.Context, run string, seq
 		if !covered[sequence] {
 			return protocol.Errorf(protocol.CodeUnknownOutcome, "reply prefix did not consume its last delta")
 		}
-		var original bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_native_events WHERE run_id=? AND seq=? AND json_extract(body_json,'$.thread_id')=? AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND json_extract(body_json,'$.native.TurnID')=? AND json_extract(body_json,'$.native.ItemID')=?)`, run, sequence, thread, turn, item).Scan(&original); err != nil {
+		root, err := managerPrefixDeliveryTurn(ctx, tx.Q(), run, sequence, thread, turn, item)
+		if err != nil {
 			return err
 		}
-		if !original {
-			return protocol.Errorf(protocol.CodeUnknownOutcome, "reply prefix has no matching original delta")
-		}
-		if err := durableManagerReplyPrefix(ctx, tx.Q(), thread, turn, item, body); err != nil {
+		if err := durableManagerReplyPrefix(ctx, tx.Q(), thread, turn, root, item, body); err != nil {
 			return err
 		}
 		rows, err := tx.Q().QueryContext(ctx, `SELECT seq,applied FROM manager_native_events WHERE run_id=? AND seq<=? AND json_extract(body_json,'$.thread_id')=? AND json_extract(body_json,'$.native.Kind')='agent_message_delta' AND json_extract(body_json,'$.native.TurnID')=? AND json_extract(body_json,'$.native.ItemID')=?`, run, sequence, thread, turn, item)
@@ -72,9 +69,39 @@ func (a *App) AcknowledgeManagerReplyPrefix(ctx context.Context, run string, seq
 	return err
 }
 
+// managerPrefixDeliveryTurn keeps native item identity while identifying the
+// admitted delivery which owns its reply or repair.
+func managerPrefixDeliveryTurn(ctx context.Context, q store.Querier, run string, sequence int64, thread, turn, item string) (string, error) {
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT body_json FROM manager_native_events WHERE run_id=? AND seq=?`, run, sequence).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", protocol.Errorf(protocol.CodeUnknownOutcome, "reply prefix has no matching original delta")
+	}
+	if err != nil {
+		return "", err
+	}
+	var e struct {
+		Root   string `json:"root_turn_id"`
+		Thread string `json:"thread_id"`
+		Native *struct{ Kind, TurnID, ItemID string }
+	}
+	if err := store.DecodeJSON(ctx, q, raw, &e); err != nil {
+		return "", err
+	}
+	if e.Thread != thread || e.Native == nil || e.Native.Kind != "agent_message_delta" || e.Native.TurnID != turn || e.Native.ItemID != item {
+		return "", protocol.Errorf(protocol.CodeUnknownOutcome, "reply prefix has no matching original delta")
+	}
+	if e.Root != "" {
+		return e.Root, nil
+	}
+	var root string
+	err = q.QueryRowContext(ctx, `SELECT COALESCE((SELECT root_turn FROM manager_continued_turns WHERE run_id=? AND thread_id=? AND native_turn=?),?)`, run, thread, turn, turn).Scan(&root)
+	return root, err
+}
+
 // A deferred background reply is durable without being published or settling
 // its batch. Its original turn/message binding must still match exactly.
-func durableManagerReplyPrefix(ctx context.Context, q store.Querier, thread, turn, item, body string) error {
+func durableManagerReplyPrefix(ctx context.Context, q store.Querier, thread, turn, root, item, body string) error {
 	row, err := store.GetAgentMessage(ctx, q, thread, turn, item)
 	if err == nil {
 		message, err := store.GetConversationItem(ctx, q, row.MessageID)
@@ -88,7 +115,7 @@ func durableManagerReplyPrefix(ctx context.Context, q store.Querier, thread, tur
 		return err
 	} else {
 		var stored string
-		err := q.QueryRowContext(ctx, `SELECT r.body FROM background_replies r JOIN background_batches b USING(batch_id) JOIN main_turns t ON t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=r.turn_id WHERE r.thread_id=? AND r.turn_id=? AND r.item_id=? AND r.kind='message' AND r.status IN ('interrupted','unknown','completed','failed')`, thread, turn, item).Scan(&stored)
+		err := q.QueryRowContext(ctx, `SELECT r.body FROM background_replies r JOIN background_batches b USING(batch_id) JOIN main_turns t ON t.message_id=b.message_id AND t.thread_id=r.thread_id AND t.turn_id=? WHERE r.thread_id=? AND r.turn_id=? AND r.item_id=? AND r.kind='message' AND r.status IN ('interrupted','unknown','completed','failed')`, root, thread, turn, item).Scan(&stored)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
