@@ -253,6 +253,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}
 	failureCtx, cancelFailureObserver := context.WithCancel(ctx)
 	failureDone := make(chan struct{})
+	liveSession, sessionEnded := context.WithCancelCause(ctx)
+	defer sessionEnded(nil)
 	failures := driver.Failures()
 	go func() {
 		defer close(failureDone)
@@ -260,6 +262,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		case err := <-failures:
 			r.cfg.Log.ErrorContext(lifetime, "manager native event transport failed", "run_id", as.RunID, "err", err)
 			cancelNative(err)
+		case <-session.Done():
+			sessionEnded(errors.New("manager native process exited"))
 		case <-failureCtx.Done():
 		}
 	}()
@@ -283,6 +287,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				err := r.flushManagerEvents(uploadCtx, as)
 				if err != nil && uploadCtx.Err() == nil {
 					r.cfg.Log.WarnContext(uploadCtx, "manager event sync pending", "run_id", as.RunID, "err", err)
+					select {
+					case <-uploadCtx.Done():
+						return
+					case <-time.After(r.cfg.RetryDelay):
+					}
 				}
 			}
 		}()
@@ -393,7 +402,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				request = &saved
 				continue
 			}
-			if err = r.deliverActiveManagerReceipt(ctx, as, &p.Envelope); err != nil {
+			if err = r.deliverActiveManagerReceipt(ctx, liveSession, as, &p.Envelope); err != nil {
 				return err
 			}
 			if err = r.cfg.Journal.DeleteRequest(ctx, p.Envelope.RequestID); err != nil {
@@ -426,7 +435,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				return err
 			}
 		}
-		op, err := r.send(ctx, runCredential(as), request)
+		op, err := r.send(liveSession, runCredential(as), request)
 		if err != nil {
 			return err
 		}
@@ -554,7 +563,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				return err
 			}
 		}
-		if err = r.deliverActiveManagerReceipt(ctx, as, env); err != nil {
+		if err = r.deliverActiveManagerReceipt(ctx, liveSession, as, env); err != nil {
 			return err
 		}
 		if err = r.cfg.Journal.DeleteRequest(ctx, env.RequestID); err != nil {
@@ -624,7 +633,7 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 
 // A completed native call retains its exact reply while the connection is
 // unavailable. Keep the original session alive for its already admitted turn.
-func (r *Runner) deliverActiveManagerReceipt(ctx context.Context, as protocol.Assignment, env *protocol.Envelope) error {
+func (r *Runner) deliverActiveManagerReceipt(ctx, liveSession context.Context, as protocol.Assignment, env *protocol.Envelope) error {
 	if !as.EventSync || env.Operation != protocol.OpManagerNativeReply {
 		return r.sendManagerReceipt(ctx, as, env)
 	}
@@ -643,14 +652,14 @@ func (r *Runner) deliverActiveManagerReceipt(ctx context.Context, as protocol.As
 	}
 
 	for {
-		err := r.sendManagerReceipt(ctx, as, env)
-		if ctx.Err() != nil || err == nil ||
+		err := r.sendManagerReceipt(liveSession, as, env)
+		if liveSession.Err() != nil || err == nil ||
 			(!errors.Is(err, context.DeadlineExceeded) && !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome) {
 			return err
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-liveSession.Done():
+			return context.Cause(liveSession)
 		case <-time.After(r.cfg.RetryDelay):
 		}
 	}
