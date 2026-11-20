@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -14,7 +15,7 @@ import (
 )
 
 type retiredCursor struct {
-	after                              string
+	after, lastEventRun                string
 	archiveDone, usageDone, eventsDone bool
 }
 
@@ -105,7 +106,16 @@ func (r *Runner) serviceRetiredJournal(parent context.Context, id string, c reti
 		eventCtx, cancelEvents := context.WithTimeout(parent, r.cfg.RequestTimeout)
 		defer cancelEvents()
 		runs, err := j.PendingEventRuns(eventCtx)
-		for _, as := range runs {
+		// A slow upload may consume this entire maintenance pass. Resume
+		// with the next Run on the next pass, including after a failed attempt.
+		start := sort.Search(len(runs), func(i int) bool { return runs[i].RunID > c.lastEventRun })
+		for i := range runs {
+			if eventCtx.Err() != nil {
+				err = errors.Join(err, eventCtx.Err())
+				break
+			}
+			as := runs[(start+i)%len(runs)]
+			c.lastEventRun = as.RunID
 			if e := retained.flushEvents(eventCtx, as); e != nil {
 				err = errors.Join(err, e)
 			}
