@@ -1,5 +1,6 @@
 /// <reference lib="dom" />
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { createServer, type ServerResponse } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
@@ -100,6 +101,7 @@ const server = createServer(async (req, res) => {
     for await (const chunk of req) chunks.push(chunk);
     const e = JSON.parse(Buffer.concat(chunks).toString()) as Envelope;
     submissions.push(e);
+    server.emit("decision-submitted");
     await gate;
     if (lose) {
       res.writeHead(503, { "Content-Type": "application/json" }).end("{}");
@@ -278,7 +280,10 @@ try {
       await radio.check();
       if (scenario.local === "批准") assert(await explanation.isDisabled());
       if (scenario.note) await explanation.fill(scenario.note);
-      await submit.click();
+      await Promise.all([
+        once(server, "decision-submitted", { signal: AbortSignal.timeout(10_000) }),
+        submit.click(),
+      ]);
       await page.getByText("正在提交决定…", { exact: true }).waitFor();
       assert(
         (await submit.isDisabled()) &&
