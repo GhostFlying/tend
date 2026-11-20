@@ -43,7 +43,7 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 	result := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
 	extend := policy.extendInterruptedPrefix && oldStatus == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old)
 	restore := policy.reconciled && status == protocol.AssistantCompleted &&
-		(oldStatus == string(protocol.AssistantInterrupted) || oldStatus == string(protocol.AssistantUnknown))
+		(oldStatus == string(protocol.AssistantStreaming) || oldStatus == string(protocol.AssistantInterrupted) || oldStatus == string(protocol.AssistantUnknown))
 	if restore {
 		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id NOT IN ('','main') FROM conversation_messages WHERE message_id=?`, b.MessageID).Scan(&restore); err != nil {
 			return true, Outcome{}, err
@@ -59,7 +59,8 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 	if err != nil {
 		return true, Outcome{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(status), x.Env.RequestID, x.Now.UnixMilli(), extend || restore)
+	republish := policy.extendInterruptedPrefix && status == protocol.AssistantInterrupted || restore
+	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(status), x.Env.RequestID, x.Now.UnixMilli(), republish)
 	if err != nil {
 		return true, Outcome{}, err
 	}

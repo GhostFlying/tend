@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -94,6 +95,75 @@ func TestReconnectRecoversFinalNativeMessagesBeforeMetadataRepair(t *testing.T) 
 	}
 	if e.count(`SELECT COUNT(*) FROM logical_turn_executions WHERE repair=1`) != 0 || len(e.h.Starts()) != 0 {
 		t.Fatal("reconciliation replayed a model execution")
+	}
+}
+
+func TestWorkerChatReconcilesOnlyCompleteNativeText(t *testing.T) {
+	for _, status := range []string{"completed", "interrupted"} {
+		t.Run(status, func(t *testing.T) {
+			e := newEnv(t, testkit.NewHarness())
+			e.stop()
+			ctx := t.Context()
+			const chat = "worker-chat"
+			e.m.cfg.ConversationID = chat
+			if err := e.store.Write(ctx, func(tx *store.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO agent_conversations(conversation_id,created_at) VALUES(?,0)`, chat)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var source struct {
+				ID string `json:"message_id"`
+			}
+			sent := e.exec(owner, "conversation.submit_message", protocol.Target{Type: "message"}, protocol.SubmitMessagePayload{ConversationID: chat, Body: "Original Worker input"}, app.SubmitMessage{})
+			if err := json.Unmarshal(sent, &source); err != nil || source.ID == "" {
+				t.Fatal(string(sent), err)
+			}
+			session, err := e.h.Open(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			base, err := session.StartThread(ctx, harness.ThreadConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.app.RegisterAgentThread(ctx, chat, base.ID()); err != nil {
+				t.Fatal(err)
+			}
+			rec := store.MainTurn{RequestID: e.ids.New(protocol.PrefixRequest), MessageID: source.ID, ThreadID: base.ID(), TurnID: "original-worker-turn", Status: store.TurnStarted}
+			if err := e.app.PutMainTurn(ctx, rec); err != nil {
+				t.Fatal(err)
+			}
+			body, want := strings.Repeat("证", 66), 1
+			if status == "interrupted" {
+				body, want = strings.Repeat("片", 18), 0
+			}
+			raw, err := json.Marshal(map[string]any{
+				"id": rec.TurnID, "status": status,
+				"items": []map[string]string{{"id": "same-item", "type": "agentMessage", "text": body}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := traex.DecodeRetainedTurnReceipt(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				// The provider lookup is substituted at the original native
+				// receipt boundary. Projection uses the actual ledger path.
+				if err := e.m.projectNativeReceipt(ctx, base, rec, receipt, false, ""); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if n := e.count(`SELECT COUNT(*) FROM conversation_messages WHERE conversation_id=? AND reply_to=? AND body=?`, chat, source.ID, body); n != want {
+				t.Fatalf("visible items = %d, want %d", n, want)
+			}
+			if n := e.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE conversation_id=? AND kind='native_receipt'`, chat); n != 1 || len(e.h.Starts()) != 0 {
+				t.Fatal("history was lost or reopened a native turn", n)
+			}
+		})
 	}
 }
 

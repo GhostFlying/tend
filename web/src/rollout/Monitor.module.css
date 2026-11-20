@@ -491,6 +491,17 @@
   font-size: var(--text-label);
   white-space: normal;
 }
+.liveText {
+  padding: 0.5rem 0.75rem;
+}
+
+.liveText p {
+  max-height: 10rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .warning {
   margin-top: 0;
   color: var(--warn-text);

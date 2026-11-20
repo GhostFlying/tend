@@ -241,7 +241,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	nativeClosed := false
 	var emitMu sync.Mutex
 	streamText := as.Manager.ConversationID == "" || as.Manager.ConversationID == "main"
-	var processText workerProcessText
+	processText := &workerProcessText{}
+	if active := r.lookup(as.RunID); !streamText && active != nil {
+		processText = &active.processText
+		defer processText.reset()
+	}
 	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, NativeOwnerTools: as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
 	}, BeforeUsageDispatch: func(sourceCtx context.Context, source nativeusage.Source) error {

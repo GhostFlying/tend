@@ -436,6 +436,12 @@ func TestDatabaseReplayExtendsPublishedInterruptedBackgroundPrefix(t *testing.T)
 	work := h.createWork(workPlan())
 	h.followup(work, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
 	_, turn := h.startBackground()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE conversation_messages SET conversation_id='main' WHERE message_id=?`, turn.MessageID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	command := RecordAgentMessage{PreservePrefix: true}
 	payload := map[string]any{"body": "original", "reply_to": turn.MessageID, "turn_id": turn.TurnID, "item_id": "original-item", "status": protocol.AssistantStreaming}
 	record := func() {
@@ -460,6 +466,43 @@ func TestDatabaseReplayExtendsPublishedInterruptedBackgroundPrefix(t *testing.T)
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, turn.RequestID) != 1 || h.countWhere(`SELECT COUNT(*) FROM background_batches WHERE message_id=? AND status='interrupted'`, turn.MessageID) != 1 {
 		t.Fatal("replaying original text changed its interrupted business outcome")
+	}
+}
+
+func TestWorkerBackgroundLegacyPrefixStaysOutOfConversation(t *testing.T) {
+	h := newHarness(t)
+	work := h.createWork(workPlan())
+	h.followup(work, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
+	_, turn := h.startBackground()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		const conversation = "worker-background"
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_conversations(conversation_id,created_at) VALUES(?,0)`, conversation); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE conversation_messages SET conversation_id=? WHERE message_id=?`, conversation, turn.MessageID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"body": "old partial", "reply_to": turn.MessageID, "turn_id": turn.TurnID, "item_id": "original-item", "status": protocol.AssistantStreaming}
+	record := func(command RecordAgentMessage) {
+		t.Helper()
+		if op := h.exec(mainAgent, h.env(command.Operation(), protocol.Target{Type: "message"}, payload, nil), command); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	record(RecordAgentMessage{})
+	if err := h.app.SettleOpenTurns(t.Context(), turn.ThreadID); err != nil {
+		t.Fatal(err)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=? AND body='old partial'`, turn.MessageID) != 0 ||
+		h.countWhere(`SELECT COUNT(*) FROM background_replies WHERE thread_id=? AND turn_id=? AND body='old partial'`, turn.ThreadID, turn.TurnID) != 1 {
+		t.Fatal("the historical partial entered ordinary output or disappeared")
+	}
+	payload["body"], payload["status"] = "native complete item", protocol.AssistantCompleted
+	record(RecordAgentMessage{Reconciled: true})
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_messages WHERE reply_to=? AND body='native complete item'`, turn.MessageID) != 1 {
+		t.Fatal("the formal item failed to replace its historical partial")
 	}
 }
 

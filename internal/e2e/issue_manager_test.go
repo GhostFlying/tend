@@ -253,6 +253,14 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	archivePending := make(chan struct{}, 1)
 	const originalBody = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"th_1\"}}\n"
 	var foreignPath string
+	if workerText {
+		root := t.TempDir()
+		archiveRoots = []string{root}
+		fake.RolloutPath = filepath.Join(root, "rollout-th_1.jsonl")
+		if err := os.WriteFile(fake.RolloutPath, []byte(originalBody), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if archiveMode == "event" || archiveMode == "completion" {
 		eventFailure = &managerEventFailure{rejected: make(chan protocol.Envelope, 1), replayed: make(chan bool, 1), completed: archiveMode == "completion"}
 		client = &http.Client{Transport: eventFailure}
@@ -673,6 +681,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		t.Fatal(err)
 	}
 	var textCLI *ownerCLI
+	var textRun string
 	if workerText {
 		select {
 		case <-fragmentSent:
@@ -683,10 +692,20 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 		textCLI = newOwnerCLI(t, filepath.Join(t.TempDir(), "tend"))
 		textCLI.run("", "login", "--server", s.startAPI())
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT run_id FROM runs WHERE role='issue_manager'`).Scan(&textRun)
+		}); err != nil {
+			t.Fatal(err)
+		}
 		visible := textCLI.run("", "conversation", "show", "issue:"+issue.IssueID)
 		if strings.Contains(visible, "worker fragment") || strings.Contains(visible, completeText) ||
 			s.count(`SELECT COUNT(*) FROM manager_native_events WHERE json_extract(body_json,'$.native.Kind')='agent_message_delta'`) != 0 {
 			t.Fatal("in-progress text entered the ordinary conversation or the Run sequence")
+		}
+		var preview protocol.RolloutPreview
+		if raw := textCLI.run("", "run", "preview", textRun, "--json"); json.Unmarshal([]byte(raw), &preview) != nil ||
+			preview.Origin != "runner" || len(preview.LiveText) != 1 || preview.LiveText[0].Text != processFragment {
+			t.Fatal("full-screen preview lost the current Run's original partial text", raw)
 		}
 		close(finishText)
 	}
@@ -1033,13 +1052,10 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		if strings.Contains(visible, "worker fragment") {
 			t.Fatal("partial worker reply leaked into the ordinary conversation")
 		}
-		var run string
-		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
-			return tx.Q().QueryRowContext(ctx, `SELECT run_id FROM runs WHERE role='issue_manager'`).Scan(&run)
-		}); err != nil {
-			t.Fatal(err)
+		logs := textCLI.run("", "run", "rollout", textRun, "--process-text", "true", "--json")
+		if compact := textCLI.run("", "run", "rollout", textRun, "--json"); strings.Contains(compact, processFragment) {
+			t.Fatal("the ordinary Run window exposed private process text", compact)
 		}
-		logs := textCLI.run("", "run", "rollout", run, "--json")
 		if textInterrupted {
 			if !strings.Contains(visible, "interrupted") || !strings.Contains(logs, processFragment) || strings.Contains(visible, completeText) {
 				t.Fatal("interruption state or the process-only fragment is missing", visible, logs)

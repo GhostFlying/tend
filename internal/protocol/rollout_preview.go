@@ -39,6 +39,7 @@ type RolloutPreview struct {
 	Generation string                 `json:"generation,omitempty"`
 	Page       *RunRolloutPage        `json:"page,omitempty"`
 	Content    *RolloutPreviewContent `json:"content,omitempty"`
+	LiveText   []WorkerProcessText    `json:"live_text,omitempty"`
 }
 
 // RolloutPreviewWork is scoped by the server to one authenticated runner instance.

@@ -6936,6 +6936,7 @@ export interface RevokeQuestionInputsPayload {
 export interface RolloutPreview {
   content?: RolloutPreviewContent;
   generation?: string;
+  live_text?: WorkerProcessText[];
   origin?: string;
   page?: RunRolloutPage;
   state: string;
@@ -6958,6 +6959,17 @@ export interface RolloutPreviewReference {
   id: number;
   missing?: boolean;
   name: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WorkerProcessText".
+ */
+export interface WorkerProcessText {
+  item_id: string;
+  text: string;
+  thread_id: string;
+  truncated?: boolean;
+  turn_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
