@@ -128,12 +128,11 @@ func (a *App) AgentConversationClaimed(ctx context.Context, conversation string)
 }
 
 const runnerReceiptHistoryTaskQuery = pendingManagerReceiptRuns + `
- SELECT r.task_id FROM pending_receipt_runs p
- CROSS JOIN runs r ON r.run_id=p.run_id
- CROSS JOIN issue_manager_tasks m ON m.task_id=r.task_id
- WHERE m.issue_id=? AND r.observed_state IN ('finished','failed')
- AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
- ORDER BY r.created_at LIMIT 1`
+ SELECT receipt.task_id FROM pending_receipt_runs receipt
+ WHERE (SELECT m.issue_id FROM issue_manager_tasks m WHERE m.task_id=receipt.task_id)=?
+ AND receipt.observed_state IN ('finished','failed')
+ AND receipt.native_closed_at>0 AND receipt.native_close_activity=receipt.native_activity
+ ORDER BY receipt.created_at LIMIT 1`
 
 func runnerReceiptSelection(ctx context.Context, q store.Querier, issue string) (hostedconfig.Selection, bool, error) {
 	var task string
