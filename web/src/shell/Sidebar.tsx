@@ -40,7 +40,7 @@ export function Sidebar({
       <Icon />
       <span className={styles.label}>{label}</span>
       {path === "/inbox" && pending.count > 0 && (
-        <span className={styles.badge}>
+        <span className={styles.badge} data-badge="pending">
           {pending.count}
           {pending.more ? "+" : ""}
         </span>

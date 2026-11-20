@@ -33,7 +33,7 @@ const deliveryLabels: Record<string, string> = {
   end_delivery: "结束交付",
 };
 
-function isDeliveryDecision(item: AttentionView) {
+export function isDeliveryDecision(item: AttentionView) {
   const options = item.question_options ?? item.decision?.options;
   return (
     Array.isArray(options) &&
