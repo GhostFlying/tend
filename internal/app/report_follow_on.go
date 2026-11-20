@@ -129,7 +129,8 @@ func settleReportFollowOn(ctx context.Context, x *Exec, tx *store.Tx, issue prot
 		Options: []string{protocol.ReportContinueImplementation, protocol.ReportMoveToBacklog, protocol.ReportCloseOnly},
 	})
 	attention, err := createAttentionWithReport(ctx, &inner, tx, &protocol.ReportFollowOn{
-		ArtifactID: artifact.ArtifactID, RunID: runID, AssignmentEpoch: issue.AssignmentEpoch, ImplementationScope: scope,
+		ArtifactID: artifact.ArtifactID, RunID: runID, AssignmentEpoch: issue.AssignmentEpoch,
+		AdmissionRevision: issue.TodoRevision, ImplementationScope: scope,
 	})
 	if err != nil {
 		return nil, false, err
@@ -291,6 +292,9 @@ func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue prot
 	if err != nil {
 		return err
 	}
+	if !reportDecisionCurrent(issue, a) {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "settle the renewed report decision before completing the Issue")
+	}
 	if a.Status == "open" {
 		return nil // The ordinary Attention blocker supplies the original identity.
 	}
@@ -304,11 +308,39 @@ func reportFollowOnClosureGuard(ctx context.Context, q store.Querier, issue prot
 	if v == nil || !v.Stopped {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "wait for the original report execution to confirm physical stop")
 	}
-	return nil
+	d, err := store.GetDecision(ctx, q, a.DecisionID)
+	if err != nil {
+		return err
+	}
+	if d.Status != store.DecisionAnswered {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "settle the renewed report decision before completing the Issue")
+	}
+	var answer decisionAnswer
+	if err := json.Unmarshal([]byte(d.AnswerJSON), &answer); err != nil {
+		return err
+	}
+	switch answer.Option {
+	case protocol.ReportContinueImplementation:
+		return nil
+	case protocol.ReportCloseOnly:
+		artifact, err := store.GetArtifact(ctx, q, a.ReportFollowOn.ArtifactID)
+		if err != nil {
+			return err
+		}
+		task, err := store.GetTask(ctx, q, artifact.TaskID)
+		if err != nil {
+			return err
+		}
+		if task.CurrentArtifactID == artifact.ArtifactID {
+			return nil
+		}
+	}
+	return protocol.Errorf(protocol.CodeInvalidTransition, "settle the renewed report decision before completing the Issue")
 }
 
 func reportDecisionCurrent(issue protocol.Issue, a protocol.Attention) bool {
 	return a.ReportFollowOn != nil && a.Status != "withdrawn" && issue.AssignmentEpoch == a.ReportFollowOn.AssignmentEpoch &&
+		issue.TodoRevision == a.ReportFollowOn.AdmissionRevision &&
 		issue.Plan.ReportFollowOnDecision && issue.AssignmentState == "active" &&
 		(issue.State == protocol.IssueActive || issue.State == protocol.IssuePaused) &&
 		issue.BoardStatus() != protocol.IssueBacklog

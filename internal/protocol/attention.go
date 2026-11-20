@@ -41,6 +41,7 @@ type ReportFollowOn struct {
 	ArtifactID          string `json:"artifact_id"`
 	RunID               string `json:"run_id"`
 	AssignmentEpoch     int64  `json:"assignment_epoch"`
+	AdmissionRevision   int64  `json:"admission_revision,omitempty"`
 	ImplementationScope string `json:"implementation_scope"`
 }
 
