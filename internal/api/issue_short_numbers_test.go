@@ -63,6 +63,21 @@ func TestIssueShortNumbersThroughOwnerHTTP(t *testing.T) {
 	if status := e.do("GET", "/api/v1/issues/"+first.ShortCode+"?projection=identity", token, nil, &identity); status != http.StatusOK || identity.IssueID != first.IssueID || identity.Title != first.Plan.Title {
 		t.Fatalf("identity HTTP%d %+v", status, identity)
 	}
+	cli := newCapabilityCLI(t, e)
+	fullIdentity := cli.run("issue", "show", strings.ToLower(first.ShortCode), "--identity", "--json")
+	var cliIdentity protocol.IssueIdentity
+	decodeAuditJSON(t, fullIdentity, &cliIdentity)
+	if cliIdentity != identity {
+		t.Fatalf("CLI identity = %+v, want %+v", cliIdentity, identity)
+	}
+	narrowIdentity := cli.run("issue", "show", bare, "--identity", "--fields", "short_code,title")
+	assertAuditFields(t, fullIdentity, narrowIdentity, "short_code", "title")
+	if code, _ := cli.call("issue", "show", first.ShortCode, "--identity", "--revision", "1"); code == 0 {
+		t.Fatal("issue show accepted both a current identity and a historical revision")
+	}
+	fullHistorical := cli.run("issue", "show", first.IssueID, "--revision", "1", "--json")
+	narrowHistorical := cli.run("issue", "show", first.ShortCode, "--revision", "1", "--fields", "issue_id,revision,historical")
+	assertAuditFields(t, fullHistorical, narrowHistorical, "issue_id", "revision", "historical")
 	for _, term := range []string{bare, "step+search", strings.ToLower(first.ShortCode)} {
 		var page protocol.IssuePage
 		status := e.do("GET", "/api/v1/issues?project=web&search="+term, token, nil, &page)
