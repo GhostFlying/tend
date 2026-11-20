@@ -35,7 +35,9 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	reason := fs.String("reason", "", "diagnosis or reconciliation evidence")
 	until := fs.Int64("until", 0, "defer until Unix seconds")
 	mode := fs.String("mode", "", "backend adoption: when-idle or interrupt")
-	session := fs.String("session-id", "", "original native session to adopt after an uncertain creation")
+	session := fs.String("session-id", "", "original native session to adopt or reconcile as exited")
+	creation := fs.String("creation-id", "", "original unresolved creation ID for exit reconciliation")
+	exitEvidence := fs.String("exit-evidence", "", "native evidence that the original thread exited")
 	turn := fs.String("turn-id", "", "original native turn receipt to reconcile")
 	base := fs.String("base", "", "base branch for a serialized native independent review")
 	head := fs.String("head", "", "exact candidate commit for independent review")
@@ -55,6 +57,9 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 	}
 	if *scheduled && action != "audit" {
 		return usagef("--scheduled is only valid for audit")
+	}
+	if (*creation != "" || *exitEvidence != "") && action != "reconcile" {
+		return usagef("--creation-id and --exit-evidence are only valid for reconcile")
 	}
 	if *revision < -1 {
 		return usagef("revision must be nonnegative")
@@ -84,6 +89,8 @@ func runMaintenance(ctx context.Context, e *Env, args []string) error {
 		return printCapabilityValue(e, value, *asJSON)
 	}
 	input := protocol.MaintenanceRequest{ScheduledAudit: *scheduled, RequestID: *request, ExpectedRevision: *revision, CaseID: *id, Reason: *reason, Verification: *verification, Until: *until, Mode: *mode, SessionID: *session}
+	input.CreationID = *creation
+	input.ExitEvidence = *exitEvidence
 	input.ReleaseDir = *releaseDir
 	if input.ReleaseDir != "" {
 		input.ReleaseDir, err = filepath.Abs(input.ReleaseDir)

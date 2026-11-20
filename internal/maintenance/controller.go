@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -52,6 +53,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 	// Copy slice backing arrays before mutation so a rejected command is inert.
 	c.state.Cases = slices.Clone(c.state.Cases)
 	c.state.Pending = slices.Clone(c.state.Pending)
+	duplicateSchedule := false
 	switch action {
 	case "check":
 		c.state.CheckRequested = true
@@ -59,9 +61,11 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		if req.ScheduledAudit {
 			hour := c.opts.Now().UTC().Format("2006-01-02T15")
 			if c.state.ScheduledHour >= hour {
+				duplicateSchedule = true
 				break
 			}
 			c.state.ScheduledHour = hour
+			c.state.PendingAudits = append(c.state.PendingAudits, req.RequestID)
 		}
 		c.state.Failure = nil
 		c.enqueue(action)
@@ -157,24 +161,7 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 			v.DeferUntil = req.Until
 		}
 	case "reconcile":
-		if c.state.Active == nil {
-			break
-		}
-		if c.state.Active.SessionID != "" && req.TurnID != "" && req.Reason != "" {
-			active := *c.state.Active
-			active.TurnID = req.TurnID
-			c.state.Active = &active
-			break
-		}
-		if c.state.Active.SessionID != "" || req.SessionID == "" || req.Reason == "" {
-			err = protocol.Errorf(protocol.CodeInvalidRequest, "adopting an unknown creation requires original session_id and reason")
-			break
-		}
-		active := *c.state.Active
-		active.SessionID = req.SessionID
-		active.Phase = "idle"
-		c.state.Active = &active
-		c.state.Predecessor = nil
+		err = c.reconcileNative(req)
 	case "upgrade-plan":
 		c.state.Upgrade, err = c.planUpgrade(req.RequestID, req.ReleaseDir)
 	case "upgrade-apply":
@@ -202,7 +189,9 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		c.state = before
 		return protocol.MaintenanceReceipt{}, err
 	}
-	c.state.Revision++
+	if !duplicateSchedule {
+		c.state.Revision++
+	}
 	raw, err := marshalState(c.state)
 	if err != nil {
 		c.state = before
@@ -214,7 +203,10 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		return protocol.MaintenanceReceipt{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `UPDATE state SET body=? WHERE id=1`, raw); err == nil {
+	if !duplicateSchedule {
+		_, err = tx.ExecContext(ctx, `UPDATE state SET body=? WHERE id=1`, raw)
+	}
+	if err == nil {
 		body, encodeErr := json.Marshal(struct {
 			Action  string
 			Request protocol.MaintenanceRequest
@@ -225,6 +217,9 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		}
 	}
 	if err == nil {
+		err = c.writeHistory(ctx, tx)
+	}
+	if err == nil {
 		err = tx.Commit()
 	}
 	if err != nil {
@@ -232,7 +227,55 @@ func (c *Controller) Command(ctx context.Context, action string, req protocol.Ma
 		c.fault = err
 		return protocol.MaintenanceReceipt{}, err
 	}
+	c.state.History = nil
 	return commandReceipt(action, req, c.state.Revision), nil
+}
+
+func (c *Controller) reconcileNative(req protocol.MaintenanceRequest) error {
+	a := c.state.Active
+	if req.CreationID != "" || req.ExitEvidence != "" {
+		if req.CreationID == "" || strings.TrimSpace(req.SessionID) == "" ||
+			strings.TrimSpace(req.ExitEvidence) == "" || strings.TrimSpace(req.Verification) == "" ||
+			strings.TrimSpace(req.Reason) == "" || req.TurnID != "" {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "creation exit requires original creation and native session IDs, exit evidence, verification of no turn, and a correlation reason")
+		}
+		if a == nil || a.ID != req.CreationID || a.Phase != "creating" || a.SessionID != "" || a.InputID != "" || a.TurnID != "" ||
+			a.ObservedSessionID != "" && a.ObservedSessionID != req.SessionID {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "matching unresolved creation with no submitted input required")
+		}
+		exited := *a
+		exited.ObservedSessionID = req.SessionID
+		exited.ReconciledBy = req.RequestID
+		exited.Phase = "creation-exited"
+		exited.EndedAt = c.opts.Now().Unix()
+		c.state.History = append(c.state.History, exited)
+		c.state.Active = nil
+		c.state.NativeError = ""
+		return nil
+	}
+	if a == nil {
+		return nil
+	}
+	active := *a
+	if a.SessionID != "" && req.TurnID != "" && req.Reason != "" {
+		active.TurnID = req.TurnID
+		c.state.Active = &active
+		return nil
+	}
+	if a.SessionID != "" || req.SessionID == "" || req.Reason == "" {
+		return protocol.Errorf(protocol.CodeInvalidRequest, "adopting an unknown creation requires original session_id and reason")
+	}
+	if a.ObservedSessionID != "" && a.ObservedSessionID != req.SessionID {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "original native session does not match the received thread identity")
+	}
+	active.SessionID = req.SessionID
+	active.Phase = "idle"
+	active.ReconciledBy = req.RequestID
+	active.SessionProfile = ""
+	c.state.Active = &active
+	c.state.Predecessor = nil
+	c.state.NativeError = ""
+	return nil
 }
 
 func commandReceipt(action string, req protocol.MaintenanceRequest, revision int64) protocol.MaintenanceReceipt {
@@ -288,6 +331,8 @@ func (c *Controller) finish(interrupted bool) {
 	c.state.Active = nil
 }
 
+var errCreationNeedsReconciliation = errors.New("maintenance: native creation requires reconciliation")
+
 // Step performs at most one native mutation after persisting its intent.
 // An uncertain creation or input is retained, never sent again after restart.
 func (c *Controller) Step(ctx context.Context) error {
@@ -316,7 +361,7 @@ func (c *Controller) Step(ctx context.Context) error {
 	if c.state.Active != nil {
 		a := c.state.Active
 		if a.SessionID == "" {
-			return errors.New("maintenance: native creation requires reconciliation")
+			return errCreationNeedsReconciliation
 		}
 		mode := ReadMetadata
 		if a.InputID != "" {
@@ -326,6 +371,10 @@ func (c *Controller) Step(ctx context.Context) error {
 			}
 		}
 		native, err := c.opts.Native.Read(ctx, a.Backend, a.SessionID, mode)
+		if a.Phase == "idle" && a.InputID == "" && a.SessionProfile != "" && len(c.state.PendingAudits) != 0 &&
+			(errors.Is(err, ErrThreadUnavailable) || err == nil && native.Unusable) {
+			return c.retireAuditThread(ctx)
+		}
 		if err != nil {
 			return err
 		}
@@ -386,9 +435,8 @@ func (c *Controller) Step(ctx context.Context) error {
 				}
 			}
 			if outcome == "failed" || outcome == "interrupted" && !interrupted {
-				for _, reason := range a.InputReasons {
-					c.enqueue(reason)
-				}
+				c.restoreInputs(a, a.InputReasons)
+				c.clearAuditThread(a.SessionID)
 				c.finish(false)
 				if c.state.PendingBackend == nil {
 					failure := c.state.History[len(c.state.History)-1]
@@ -405,7 +453,27 @@ func (c *Controller) Step(ctx context.Context) error {
 				c.state.RecheckedAfter = a.Audit.Recheck[n-1]
 			}
 		} else if a.Audit != nil && interrupted {
-			c.enqueue("audit")
+			c.restoreInputs(a, []string{"audit"})
+		}
+		if a.ScheduledAuditID != "" && outcome == "completed" {
+			if c.state.PendingBackend == nil && a.SessionProfile != "" && !native.Unusable {
+				c.state.IdleAuditSession = &protocol.MaintenanceAuditSession{
+					SessionID: a.SessionID, RolloutPath: a.RolloutPath,
+					SandboxPolicy: a.SandboxPolicy, Profile: a.SessionProfile,
+				}
+			}
+			c.finish(false)
+			// Repair and inline review queued during an audit continue on the
+			// same thread, under a separate work record.
+			if c.state.PendingBackend == nil && (c.state.Review != nil && c.state.Review.Phase == "queued" ||
+				slices.ContainsFunc(c.state.Pending, func(reason string) bool { return reason != "audit" })) {
+				c.state.Active = &protocol.MaintenanceSession{
+					ID: c.opts.ID(), Backend: a.Backend, Phase: "idle", StartedAt: c.opts.Now().Unix(),
+					SessionID: a.SessionID, RolloutPath: a.RolloutPath,
+					SandboxPolicy: a.SandboxPolicy, SessionProfile: a.SessionProfile,
+				}
+			}
+			return c.save(ctx)
 		}
 		if c.state.PendingBackend != nil {
 			c.finish(interrupted)
@@ -427,6 +495,7 @@ func (c *Controller) Step(ctx context.Context) error {
 		c.state.Backend = *c.state.PendingBackend
 		c.state.PendingBackend = nil
 		c.state.SwitchMode = ""
+		c.state.IdleAuditSession = nil
 		return c.save(ctx)
 	}
 	reviewQueued := c.state.Review != nil && c.state.Review.Phase == "queued"
@@ -438,26 +507,19 @@ func (c *Controller) Step(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		c.state.Active = &protocol.MaintenanceSession{ID: c.opts.ID(), Backend: c.state.Backend, Phase: "creating", StartedAt: c.opts.Now().Unix(), Predecessor: c.state.Predecessor}
-		if err := c.save(ctx); err != nil {
-			return err
-		}
-		thread, err := c.opts.Native.NewThread(ctx, c.state.Backend, c.cfg.Workspace, string(instructions))
-		if err != nil {
-			if errors.Is(err, ErrNotSent) {
-				c.state.Active = nil
-				if e := c.save(ctx); e != nil {
-					return e
-				}
+		profile := digest(struct {
+			Backend                 protocol.MaintenanceBackend
+			Workspace, Instructions string
+		}{c.state.Backend, c.cfg.Workspace, string(instructions)})
+		if !reviewQueued && len(c.state.PendingAudits) != 0 && c.state.IdleAuditSession != nil {
+			wait, err := c.selectAuditThread(ctx, profile)
+			if err != nil || wait {
+				return err
 			}
-			return err
 		}
-		c.state.Active.SessionID = thread.ID
-		c.state.Active.RolloutPath = thread.Path
-		c.state.Active.SandboxPolicy = thread.Sandbox
-		c.state.Active.Phase = "idle"
-		c.state.Predecessor = nil
-		return c.save(ctx)
+		if c.state.Active == nil {
+			return c.createThread(ctx, string(instructions), profile)
+		}
 	}
 	a := c.state.Active
 	if a.InputID != "" {
@@ -470,25 +532,40 @@ func (c *Controller) Step(ctx context.Context) error {
 	a.InputReasons = slices.Clone(c.state.Pending)
 	a.Phase = "sending"
 	a.Prompt = fmt.Sprintf("Maintain Tend within the configured instructions. Triggers: %s. Read current evidence with `tend maintenance status --socket %s`, `tend maintenance cases --socket %s` and the configured Tend owner CLI. Diagnose before changing business state; healthy waits need no intervention. Repair detector omissions and add fault/healthy regressions. Resolve or defer diagnosed cases through the CLI. This is one bounded inspection; finish when no actionable work remains. Do not create another maintenance session.", strings.Join(c.state.Pending, ", "), shellArg(c.cfg.ControlSocket), shellArg(c.cfg.ControlSocket))
+	c.state.Pending = nil
 	if slices.Contains(a.InputReasons, "audit") {
+		if len(c.state.PendingAudits) > 0 {
+			a.ScheduledAuditID = c.state.PendingAudits[0]
+			c.state.PendingAudits = c.state.PendingAudits[1:]
+			if len(c.state.PendingAudits) > 0 {
+				c.enqueue("audit")
+			}
+		}
 		a.Audit = c.auditChanges()
 		raw, _ := json.Marshal(a.Audit)
 		a.Prompt += "\nInspect this bounded list of changes since the last completed audit and recheck the listed interventions against their original business evidence: " + string(raw)
+		if a.ScheduledAuditID != "" {
+			a.Prompt += "\nIndependently look for missed maintenance work even if the list is empty. Choose which current evidence to inspect."
+		}
 	}
 	if a.Predecessor != nil {
 		a.Prompt += fmt.Sprintf(" Previous agent: %s; session ID: %s.", a.Predecessor.Agent, a.Predecessor.SessionID)
 	}
-	c.state.Pending = nil
 	if err := c.save(ctx); err != nil {
 		return err
 	}
 	id, err := c.opts.Native.Start(ctx, a.Backend, nativeThread(a), a.InputID, a.Prompt)
 	if err != nil {
 		if errors.Is(err, ErrNotSent) {
-			a.Audit = nil
-			for _, reason := range a.InputReasons {
-				c.enqueue(reason)
+			c.restoreInputs(a, a.InputReasons)
+			if a.ScheduledAuditID != "" && errors.Is(err, ErrThreadUnavailable) {
+				if e := c.retireAuditThread(ctx); e != nil {
+					return e
+				}
+				return err
 			}
+			a.ScheduledAuditID = ""
+			a.Audit = nil
 			a.InputID = ""
 			a.Prompt = ""
 			a.Phase = "idle"
@@ -501,6 +578,93 @@ func (c *Controller) Step(ctx context.Context) error {
 	a.TurnID = id
 	a.Phase = "running"
 	return c.save(ctx)
+}
+
+func (c *Controller) createThread(ctx context.Context, instructions, profile string) error {
+	c.state.Active = &protocol.MaintenanceSession{ID: c.opts.ID(), Backend: c.state.Backend, Phase: "creating", StartedAt: c.opts.Now().Unix(), Predecessor: c.state.Predecessor, SessionProfile: profile}
+	if err := c.save(ctx); err != nil {
+		return err
+	}
+	thread, err := c.opts.Native.NewThread(ctx, c.state.Backend, c.cfg.Workspace, instructions)
+	if err == nil && thread.ID == "" {
+		err = errors.New("maintenance: native creation response omitted thread identity")
+	}
+	if err != nil {
+		if errors.Is(err, ErrNotSent) {
+			c.state.Active = nil
+		} else {
+			c.state.Active.CreationError = err.Error()
+			c.state.Active.ObservedSessionID = thread.ID
+			c.state.Active.RolloutPath = thread.Path
+			c.state.Active.SandboxPolicy = thread.Sandbox
+		}
+		// Even when the caller's deadline caused the missing reply, keep
+		// the first native diagnosis with the original write-ahead intent.
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if e := c.save(persistCtx); e != nil {
+			return e
+		}
+		return err
+	}
+	c.state.Active.SessionID = thread.ID
+	c.state.Active.RolloutPath = thread.Path
+	c.state.Active.SandboxPolicy = thread.Sandbox
+	c.state.Active.Phase = "idle"
+	c.state.Predecessor = nil
+	return c.save(ctx)
+}
+
+func (c *Controller) selectAuditThread(ctx context.Context, profile string) (wait bool, err error) {
+	session := c.state.IdleAuditSession
+	if session.Profile != profile {
+		c.state.IdleAuditSession = nil
+		return false, nil
+	}
+	native, err := c.opts.Native.Read(ctx, c.state.Backend, session.SessionID, ReadMetadata)
+	if errors.Is(err, ErrThreadUnavailable) || err == nil && native.Unusable {
+		c.state.IdleAuditSession = nil
+		return false, nil
+	}
+	if err != nil || native.Busy {
+		return true, err
+	}
+	c.state.Active = &protocol.MaintenanceSession{
+		ID: c.opts.ID(), Backend: c.state.Backend, Phase: "idle", StartedAt: c.opts.Now().Unix(),
+		SessionID: session.SessionID, RolloutPath: session.RolloutPath,
+		SandboxPolicy: session.SandboxPolicy, SessionProfile: session.Profile,
+	}
+	c.state.IdleAuditSession = nil
+	return false, nil
+}
+
+func (c *Controller) clearAuditThread(id string) {
+	if c.state.IdleAuditSession != nil && c.state.IdleAuditSession.SessionID == id {
+		c.state.IdleAuditSession = nil
+	}
+}
+
+func (c *Controller) retireAuditThread(ctx context.Context) error {
+	a := c.state.Active
+	c.clearAuditThread(a.SessionID)
+	if n, ok := c.opts.Native.(interface{ ForgetUnstarted(string) }); ok {
+		n.ForgetUnstarted(a.SessionID)
+	}
+	a.EndedAt = c.opts.Now().Unix()
+	a.Phase = "unavailable"
+	a.Prompt = ""
+	c.state.History = append(c.state.History, *a)
+	c.state.Active = nil
+	return c.save(ctx)
+}
+
+func (c *Controller) restoreInputs(a *protocol.MaintenanceSession, reasons []string) {
+	if a.ScheduledAuditID != "" {
+		c.state.PendingAudits = append([]string{a.ScheduledAuditID}, c.state.PendingAudits...)
+	}
+	for _, reason := range reasons {
+		c.enqueue(reason)
+	}
 }
 
 func shellArg(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }

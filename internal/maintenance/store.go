@@ -29,8 +29,9 @@ type Native interface {
 
 // NativeThread retains the resolved permissions across controller restarts.
 type NativeThread struct {
-	ID, Path string
-	Sandbox  map[string]any
+	ID, Path    string
+	Sandbox     map[string]any
+	RequireIdle bool
 }
 
 type NativeReadMode int
@@ -42,15 +43,20 @@ const (
 )
 
 func nativeThread(s *protocol.MaintenanceSession) NativeThread {
-	return NativeThread{ID: s.SessionID, Path: s.RolloutPath, Sandbox: s.SandboxPolicy}
+	return NativeThread{ID: s.SessionID, Path: s.RolloutPath, Sandbox: s.SandboxPolicy, RequireIdle: s.ScheduledAuditID != ""}
 }
 
 // ErrNotSent proves the native mutation was never submitted or was rejected.
 var ErrNotSent = errors.New("native operation was not accepted")
 
+// ErrThreadUnavailable is an explicit, identity-matching provider rejection.
+// It can retire an idle thread but cannot resolve an outstanding native operation.
+var ErrThreadUnavailable = errors.New("native thread is unavailable")
+
 type NativeState struct {
-	Busy  bool
-	Turns []NativeTurn
+	Busy     bool
+	Unusable bool
+	Turns    []NativeTurn
 }
 type NativeTurn struct{ ID, InputID, Status string }
 
@@ -134,7 +140,15 @@ func Open(ctx context.Context, cfg Config, opts Options) (*Controller, error) {
 	if c.state.Format != 1 {
 		return fail(errors.New("maintenance: unsupported durable format"))
 	}
-	if len(c.state.History) > 0 {
+	// A pre-upgrade snapshot may still hold the original creation error.
+	// The generic reconcile wait from an older controller has no diagnostic.
+	a := c.state.Active
+	recoverCreationError := a != nil && a.Phase == "creating" && a.SessionID == "" &&
+		a.CreationError == "" && c.state.NativeError != "" && c.state.NativeError != errCreationNeedsReconciliation.Error()
+	if recoverCreationError {
+		a.CreationError = c.state.NativeError
+	}
+	if len(c.state.History) > 0 || recoverCreationError {
 		if err := c.save(ctx); err != nil {
 			return fail(err)
 		}
@@ -158,24 +172,13 @@ func (c *Controller) save(ctx context.Context) error {
 		return c.fault
 	}
 	c.state.Revision++
-	snapshot := c.state
-	snapshot.History = nil
-	raw, err := json.Marshal(snapshot)
+	raw, err := marshalState(c.state)
 	if err == nil {
 		var tx *sql.Tx
 		tx, err = c.db.BeginTx(ctx, nil)
 		if err == nil {
 			defer tx.Rollback()
-			for _, session := range c.state.History {
-				body, e := json.Marshal(session)
-				if e != nil {
-					err = e
-					break
-				}
-				if _, err = tx.ExecContext(ctx, `INSERT INTO history(id,body) VALUES(?,?)`, session.ID, body); err != nil {
-					break
-				}
-			}
+			err = c.writeHistory(ctx, tx)
 			if err == nil {
 				_, err = tx.ExecContext(ctx, `INSERT INTO state(id,body) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body`, raw)
 			}
@@ -233,6 +236,8 @@ func (c *Controller) Status() protocol.MaintenanceStatus {
 	_ = json.Unmarshal(raw, &s)
 	if c.fault != nil {
 		s.NativeError = "maintenance: persistence failure; controller restart required"
+	} else if s.Active != nil && s.Active.Phase == "creating" && s.Active.CreationError != "" {
+		s.NativeError = errCreationNeedsReconciliation.Error() + ": " + s.Active.CreationError
 	} else if s.Failure != nil {
 		s.NativeError = "maintenance: native turn " + s.Failure.Outcome + "; inspect session history and request audit, resume or backend adoption before retrying"
 	}
@@ -249,4 +254,20 @@ func digest(v any) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
-func marshalState(v protocol.MaintenanceStatus) ([]byte, error) { return json.Marshal(v) }
+func marshalState(v protocol.MaintenanceStatus) ([]byte, error) {
+	v.History = nil
+	return json.Marshal(v)
+}
+
+func (c *Controller) writeHistory(ctx context.Context, tx *sql.Tx) error {
+	for _, session := range c.state.History {
+		body, err := json.Marshal(session)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO history(id,body) VALUES(?,?)`, session.ID, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
