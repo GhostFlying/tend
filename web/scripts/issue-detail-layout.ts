@@ -1723,7 +1723,7 @@ try {
           },
         },
       ];
-      publish();
+      publish("conversation.message", { ...ownerItems[0]!.item, control: { revision: 1 } });
       const ownerQueue = page.getByRole("region", { name: "待处理队列", exact: true });
       await ownerQueue.getByText("待处理 · 1", { exact: true }).waitFor();
       await ownerQueue.locator("summary").filter({ hasText: "一条真实用户消息" }).waitFor();
@@ -1741,7 +1741,7 @@ try {
         state: "queued" as const,
       };
       ownerItems = [ordinary, { ...ordinary, position: 5, item: urgentInput }];
-      publish();
+      publish("conversation.message", { ...urgentInput, control: { revision: 1 } });
       await ownerQueue.getByText("待处理 · 2", { exact: true }).waitFor();
       assert.equal(await ownerQueue.getByRole("button", { name: "撤回" }).count(), 2);
       const urgentOriginal: IssueTranscriptBlock = {

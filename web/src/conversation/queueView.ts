@@ -36,6 +36,7 @@ export class ConversationQueue {
 
   changed(event: LedgerEvent): void {
     if (
+      event.kind === "conversation.queue_changed" ||
       event.kind === "conversation.message_state" ||
       event.kind === "conversation.processing_stopped" ||
       event.kind === "conversation.message_withdrawn" ||
