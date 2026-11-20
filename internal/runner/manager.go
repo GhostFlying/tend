@@ -625,9 +625,26 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 // A completed native call retains its exact reply while the connection is
 // unavailable. Keep the original session alive for its already admitted turn.
 func (r *Runner) deliverActiveManagerReceipt(ctx context.Context, as protocol.Assignment, env *protocol.Envelope) error {
+	if !as.EventSync || env.Operation != protocol.OpManagerNativeReply {
+		return r.sendManagerReceipt(ctx, as, env)
+	}
+	var reply protocol.ManagerNativeReply
+	if err := json.Unmarshal(env.Payload, &reply); err != nil {
+		return err
+	}
+	if reply.Error == "" {
+		closeReply, err := r.cfg.Journal.IsManagerClose(ctx, reply.ID)
+		if err != nil {
+			return err
+		}
+		if closeReply {
+			return r.sendManagerReceipt(ctx, as, env)
+		}
+	}
+
 	for {
 		err := r.sendManagerReceipt(ctx, as, env)
-		if !as.EventSync || ctx.Err() != nil || err == nil ||
+		if ctx.Err() != nil || err == nil ||
 			(!errors.Is(err, context.DeadlineExceeded) && !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome) {
 			return err
 		}
