@@ -1,4 +1,4 @@
-import type { IssueAssignee, IssuePage, IssueWorkStatus } from "../api/generated/api.ts";
+import type { IssueAssignee, IssueBoardColumn, IssuePage } from "../api/generated/api.ts";
 import type { Reader } from "../live/data.ts";
 import { Store } from "../state/store.ts";
 import { WorkItemRead } from "../workitems/live.ts";
@@ -11,12 +11,11 @@ export interface BoardFilter {
   waitingOnMe?: boolean;
 }
 
-export function boardPagePath(filter: BoardFilter, status: IssueWorkStatus): string {
+export function boardPagePath(filter: BoardFilter, status: IssueBoardColumn): string {
   const query = new URLSearchParams({
     board: "true",
-    group_review: "true",
     parent_id: "",
-    board_status: status,
+    board_column: status,
     limit: "25",
   });
   if (filter.project) query.set("project", filter.project);
@@ -83,8 +82,8 @@ class BoardColumnRead {
 }
 
 export class IssueBoardData {
-  readonly summary = new Store<Pick<IssuePage, "counts" | "assignees" | "facts_seq">>({});
-  readonly columns: ReadonlyMap<IssueWorkStatus, BoardColumnRead>;
+  readonly summary = new Store<Pick<IssuePage, "column_counts" | "assignees" | "facts_seq">>({});
+  readonly columns: ReadonlyMap<IssueBoardColumn, BoardColumnRead>;
   private key = "";
 
   constructor(api: Reader) {
@@ -94,7 +93,7 @@ export class IssueBoardData {
         new BoardColumnRead(api, (page) => {
           if ((page.facts_seq ?? 0) < (this.summary.get().facts_seq ?? 0)) return;
           this.summary.set({
-            ...(page.counts ? { counts: page.counts } : {}),
+            ...(page.column_counts ? { column_counts: page.column_counts } : {}),
             ...(page.assignees ? { assignees: page.assignees } : {}),
             facts_seq: page.facts_seq ?? 0,
           });

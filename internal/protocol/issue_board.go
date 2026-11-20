@@ -31,6 +31,32 @@ func (c IssueControl) BoardStatus() IssueWorkStatus {
 	return c.WorkStatus
 }
 
+// IssueBoardColumn is a display projection of recorded execution and wait facts.
+type IssueBoardColumn string
+
+const (
+	IssueColumnBacklog   IssueBoardColumn = "backlog"
+	IssueColumnWIP       IssueBoardColumn = "wip"
+	IssueColumnWaiting   IssueBoardColumn = "waiting"
+	IssueColumnDone      IssueBoardColumn = "done"
+	IssueColumnCancelled IssueBoardColumn = "cancelled"
+)
+
+func IssueBoardColumnValues() []IssueBoardColumn {
+	return []IssueBoardColumn{IssueColumnBacklog, IssueColumnWIP, IssueColumnWaiting, IssueColumnDone, IssueColumnCancelled}
+}
+
+type IssueBoardWaitHint string
+
+const (
+	IssueBoardWaitCI       IssueBoardWaitHint = "ci"
+	IssueBoardWaitDecision IssueBoardWaitHint = "decision"
+)
+
+func IssueBoardWaitHintValues() []IssueBoardWaitHint {
+	return []IssueBoardWaitHint{IssueBoardWaitCI, IssueBoardWaitDecision}
+}
+
 type IssuePauseProgress struct {
 	Pending       int64  `json:"pending"`
 	Stopped       int64  `json:"stopped"`
@@ -40,6 +66,8 @@ type IssuePauseProgress struct {
 }
 
 type IssueBoardCard struct {
+	Column                   IssueBoardColumn    `json:"column,omitempty"`
+	WaitHint                 IssueBoardWaitHint  `json:"wait_hint,omitempty"`
 	RetainedExecution        bool                `json:"retained_execution,omitempty"`
 	QueueReason              *QueueWaitReason    `json:"queue_reason,omitempty"`
 	Pause                    *IssuePauseProgress `json:"pause,omitempty"`

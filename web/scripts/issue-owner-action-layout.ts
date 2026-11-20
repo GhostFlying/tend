@@ -58,11 +58,7 @@ export async function checkIssueOwnerActionLayout(
         requests.push(url);
         const filtered = url.searchParams.get("waiting_on_me") === "true";
         if (filtered) await hold;
-        if (
-          filtered &&
-          url.searchParams.get("board_status") === "in_progress" &&
-          !activeAvailable
-        ) {
+        if (filtered && url.searchParams.get("board_column") === "wip" && !activeAvailable) {
           return route.fulfill({
             status: 503,
             json: { error: { message: "Fixture interruption" } },
@@ -95,8 +91,8 @@ export async function checkIssueOwnerActionLayout(
       const board = page.getByRole("region", { name: "Issue 白板" });
       await board.getByRole("heading", { name: "所有 Issue" }).waitFor();
       const tabs = page.getByRole("tablist", { name: "工作状态" });
-      const activeColumn = board.getByRole("region", { name: "进行中列" });
-      const todoColumn = board.getByRole("region", { name: "待推进列" });
+      const activeColumn = board.getByRole("region", { name: "WIP列" });
+      const todoColumn = board.getByRole("region", { name: "Waiting列" });
       const runningCard = activeColumn.getByRole("button", { name: running.title, exact: true });
       const reviewCard = activeColumn.getByRole("button", { name: review.title, exact: true });
       const unmatched = activeColumn.getByRole("button", { name: system.title, exact: true });
@@ -120,23 +116,23 @@ export async function checkIssueOwnerActionLayout(
       await runningCard.waitFor();
       await reviewCard.waitFor();
       assert(requests.some((url) => url.searchParams.get("waiting_on_me") === "true"));
-      assert(requests.every((url) => url.searchParams.get("group_review") === "true"));
-      assert(requests.every((url) => url.searchParams.get("board_status") !== "in_review"));
+      assert.equal(new Set(requests.map((url) => url.searchParams.get("board_column"))).size, 5);
+      assert(requests.every((url) => url.searchParams.get("board_column") !== "todo"));
       assert.equal(await reviewCard.count(), 1);
       await page.screenshot({ path: join(output, `board-owner-action-${width}.png`) });
 
       if (mobile) {
         assert.equal(await tabs.getByRole("tab", { name: /^(待检查|审阅中)/ }).count(), 0);
-        const activeTab = tabs.getByRole("tab", { name: /^进行中/ });
+        const activeTab = tabs.getByRole("tab", { name: /^WIP/ });
         await activeTab.focus();
         await page.keyboard.press("ArrowRight");
         assert.equal(
-          await tabs.getByRole("tab", { name: /^已完成/ }).getAttribute("aria-selected"),
+          await tabs.getByRole("tab", { name: /^Waiting/ }).getAttribute("aria-selected"),
           "true",
         );
-        await tabs.getByRole("tab", { name: /^待推进/ }).tap();
+        await tabs.getByRole("tab", { name: /^Waiting/ }).tap();
         await todoColumn.getByRole("button", { name: todo.title, exact: true }).waitFor();
-        const firstTab = tabs.getByRole("tab", { name: /^待安排/ });
+        const firstTab = tabs.getByRole("tab", { name: /^Backlog/ });
         await firstTab.tap();
         const scroller = tabs.locator("..");
         const before = await scroller.evaluate((el) => el.scrollLeft);
@@ -177,7 +173,7 @@ export async function checkIssueOwnerActionLayout(
         const request = page.waitForRequest(
           (req) => req.url().endsWith("/api/v1/ops") && req.method() === "POST",
         );
-        await drop(board.getByRole("region", { name: "待安排列" }));
+        await drop(board.getByRole("region", { name: "Backlog列" }));
         const submitted = await request;
         await submitted.response();
         const envelope = submitted.postDataJSON();

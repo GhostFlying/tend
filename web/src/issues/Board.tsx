@@ -16,6 +16,7 @@ import {
 } from "react";
 import type {
   IssueAssignee,
+  IssueBoardColumn,
   IssueBlocker,
   IssueSummary,
   IssueWorkStatus,
@@ -29,7 +30,7 @@ import { AssigneeName } from "./AssigneeName.tsx";
 import { ChildProgress, type ExpandedChildView } from "./ChildProgress.tsx";
 import {
   boardColumns,
-  boardColumnStatus,
+  boardDropStatus,
   issueWorkStatuses,
   workStatusLabel,
   blockerLabels,
@@ -104,14 +105,14 @@ export function IssueBoard({
   const mobileTabs = useRef<HTMLDivElement>(null);
   const columns = useRef<HTMLDivElement>(null);
   const desktopScroll = useRef({ left: 0, top: 0 });
-  const mobileScrollTops = useRef(new Map<IssueWorkStatus, number>());
-  const tabScrollTarget = useRef<IssueWorkStatus | null>(null);
+  const mobileScrollTops = useRef(new Map<IssueBoardColumn, number>());
+  const tabScrollTarget = useRef<IssueBoardColumn | null>(null);
   const boardFocus = useRef<{ control: Element; reveal: boolean; trackScroll: boolean } | null>(
     null,
   );
   const focusBeforeLayoutChange = useRef<{ key: string; reveal: boolean } | null>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia(mobileBoardQuery).matches);
-  const [mobileColumn, setMobileColumn] = useState<IssueWorkStatus>("in_progress");
+  const [mobileColumn, setMobileColumn] = useState<IssueBoardColumn>("wip");
   const [childViews, setChildViews] = useState(() => new Map<string, ExpandedChildView>());
   const setChildView = (id: string, view: ExpandedChildView | undefined) =>
     setChildViews((current) => {
@@ -124,7 +125,7 @@ export function IssueBoard({
   const [startCategory, setStartCategory] = useState("");
   const categories = useStore(live.agents.categories.state);
   const [menu, setMenu] = useState<IssueSummary | null>(null);
-  const [over, setOver] = useState<IssueWorkStatus | null>(null);
+  const [over, setOver] = useState<IssueBoardColumn | null>(null);
   const dragged = useRef<IssueSummary | null>(null);
   const toggleCancelled = () => {
     const expanded = !cancelledExpanded;
@@ -135,7 +136,7 @@ export function IssueBoard({
       /* Keep the session preference when storage is unavailable. */
     }
   };
-  const scrollToColumn = (status: IssueWorkStatus) => {
+  const scrollToColumn = (status: IssueBoardColumn) => {
     const scroller = columns.current;
     if (scroller) {
       const index = boardColumns.findIndex(({ id }) => id === status);
@@ -272,7 +273,7 @@ export function IssueBoard({
     const timeout = setTimeout(() => setFeedback(null), 4000);
     return () => clearTimeout(timeout);
   }, [feedback, setFeedback]);
-  const counts = summary.counts;
+  const counts = summary.column_counts;
   const total = counts
     ? Object.values(counts).reduce<number>((sum, n) => sum + (n ?? 0), 0)
     : undefined;
@@ -409,7 +410,7 @@ export function IssueBoard({
             </p>
           )}
           <div ref={mobileTabs} className={styles.mobileTabs}>
-            <Tabs<IssueWorkStatus>
+            <Tabs<IssueBoardColumn>
               label="工作状态"
               value={mobileColumn}
               onChange={(status) => {
@@ -489,7 +490,7 @@ export function IssueBoard({
                     : undefined
                 }
                 onDragOver={(event) => {
-                  if (dragged.current && online) {
+                  if (dragged.current && online && boardDropStatus(dragged.current, id)) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                     setOver(id);
@@ -500,7 +501,8 @@ export function IssueBoard({
                   const item = dragged.current;
                   dragged.current = null;
                   setOver(null);
-                  if (item && boardColumnStatus(item) !== id) move(item, id);
+                  const status = item && boardDropStatus(item, id);
+                  if (item && status && online) move(item, status);
                 }}
               >
                 {(item) => (
@@ -711,7 +713,7 @@ function BoardColumn({
   children,
   ...drag
 }: {
-  status: IssueWorkStatus;
+  status: IssueBoardColumn;
   label: string;
   count?: number | undefined;
   inert: boolean;
@@ -810,6 +812,7 @@ const BoardCard = memo(function BoardCard({
   onDragEnd: DragEventHandler;
 }) {
   const b = item.board;
+  const responsibility = responsibilityLabel(item);
   return (
     <article
       className={styles.card}
@@ -853,16 +856,21 @@ const BoardCard = memo(function BoardCard({
             pendingCategoryID={item.board?.pending_manager_category_id}
           />
         </span>
-        <Badge
-          className={styles.execution}
-          tone={
-            b?.execution.unknown || b?.execution.waiting_owner || b?.attention_count
-              ? "warn"
-              : "neutral"
-          }
-        >
-          {responsibilityLabel(item)}
-        </Badge>
+        {responsibility && (
+          <Badge
+            className={styles.execution}
+            tone={
+              b?.wait_hint ||
+              b?.execution.unknown ||
+              b?.execution.waiting_owner ||
+              b?.attention_count
+                ? "warn"
+                : "neutral"
+            }
+          >
+            {responsibility}
+          </Badge>
+        )}
         {workStatus(item) === "in_review" && <Badge>{workStatusLabel("in_review")}</Badge>}
       </div>
       {!["closed", "cancelled"].includes(item.state) &&

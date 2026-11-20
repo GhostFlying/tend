@@ -114,14 +114,11 @@
   border-radius: 50%;
   background: var(--idle);
 }
-.dot[data-status="todo"] {
+.dot[data-status="waiting"] {
   background: var(--label-3);
 }
-.dot[data-status="in_progress"] {
+.dot[data-status="wip"] {
   background: var(--warn);
-}
-.dot[data-status="in_review"] {
-  background: var(--accent);
 }
 .dot[data-status="done"] {
   background: var(--ok);

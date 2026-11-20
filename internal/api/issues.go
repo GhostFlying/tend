@@ -20,6 +20,11 @@ func (s *Server) issues(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "group_review must be a boolean and requires board=true when enabled"))
 		return
 	}
+	filter.BoardColumn = protocol.IssueBoardColumn(query.Get("board_column"))
+	if filter.BoardColumn != "" && (!filter.Board || filter.BoardStatus != "" || filter.GroupReview) {
+		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "board_column requires board=true and excludes board_status and group_review"))
+		return
+	}
 	filter.AssigneeKind = protocol.IssueAssigneeKind(query.Get("assignee_kind"))
 	filter.AssigneeRef = query.Get("assignee_ref")
 	if filter.State != "" && !slices.Contains([]protocol.IssueState{protocol.IssueActive, protocol.IssuePaused, protocol.IssueCancelling, protocol.IssueCancelled, protocol.IssueClosed}, filter.State) {

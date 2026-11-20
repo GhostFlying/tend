@@ -175,6 +175,33 @@ func TestIssueBoardWaitingOnMeUsesOwnerInbox(t *testing.T) {
 		}
 		cursor = "&after=" + grouped.Next
 	}
+	for _, path := range []string{
+		"/api/v1/issues?board_column=waiting",
+		boardPath + "&board_column=todo",
+		boardPath + "&board_column=wip&group_review=true",
+		boardPath + "&board_column=wip&board_status=in_progress",
+	} {
+		if code := e.do("GET", path, token, nil, nil); code != http.StatusBadRequest {
+			t.Fatal("invalid board column filter returned", code, path)
+		}
+	}
+	// These fixtures were admitted and given manual working statuses, but no
+	// Run started. The execution view keeps the queue and the legacy read intact.
+	const waitingColumn = "&board_column=waiting&limit=1"
+	cursor = ""
+	for index, expected := range wanted {
+		result := page(token, waitingColumn+cursor)
+		if !slices.Equal(ids(result), []string{expected.id}) || result.ColumnCounts[protocol.IssueColumnWaiting] != 3 ||
+			len(result.ColumnCounts) != 5 || len(result.Counts) != 0 {
+			t.Fatalf("execution column count or membership at page %d: %+v", index, result)
+		}
+		item := result.Items[0]
+		if item.EffectiveWorkStatus != expected.status || item.Board.Column != protocol.IssueColumnWaiting || item.Board.WaitHint != "" ||
+			result.More != (index < len(wanted)-1) {
+			t.Fatalf("execution board changed the work status, hint, or cursor: %+v", result)
+		}
+		cursor = "&after=" + result.Next
+	}
 	if code := e.do("GET", boardPath+"&group_review=true&board_status=in_review", token, nil, nil); code != http.StatusBadRequest {
 		t.Fatal("grouped read exposed the removed column", code)
 	}

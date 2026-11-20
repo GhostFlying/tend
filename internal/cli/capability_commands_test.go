@@ -813,6 +813,24 @@ func TestCapabilityIssueFiltersRejectUnsupportedCombinationsBeforeHTTP(t *testin
 	}
 }
 
+func TestIssueListExecutionBoardColumn(t *testing.T) {
+	f := newFakeServer(t)
+	f.on("GET /api/v1/issues", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		q := r.URL.Query()
+		if q.Get("board") != "true" || q.Get("board_column") != "waiting" || q.Get("waiting_on_me") != "true" || q.Get("after") != "cursor" || q.Get("board_status") != "" {
+			t.Errorf("execution board filters = %v", q)
+		}
+		json.NewEncoder(w).Encode(protocol.IssuePage{Items: []protocol.IssueSummary{{
+			Title: "Wait for CI", Board: &protocol.IssueBoardCard{Column: protocol.IssueColumnWaiting, WaitHint: protocol.IssueBoardWaitCI},
+		}}})
+	})
+	env := newTestEnv(t, f.srv.URL)
+	if code := env.main("issue", "list", "--board", "--board-column", "waiting", "--waiting-on-me", "--after", "cursor"); code != exitOK ||
+		!strings.Contains(env.out.String(), "Board column: waiting (ci)") {
+		t.Fatal(code, env.out, env.errOut)
+	}
+}
+
 func TestCapabilityImageShowReadsCompleteLargeResponse(t *testing.T) {
 	f := newFakeServer(t)
 	data := strings.Repeat("A", (16<<20)+4096)

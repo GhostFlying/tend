@@ -26,7 +26,7 @@ class Deferred implements Reader {
   }
   async answer(status: string, page: IssuePage) {
     const i = this.requests.findIndex(
-      (r) => new URL(r.path, "https://tend.invalid").searchParams.get("board_status") === status,
+      (r) => new URL(r.path, "https://tend.invalid").searchParams.get("board_column") === status,
     );
     expect(i).toBeGreaterThanOrEqual(0);
     const request = this.requests.splice(i, 1)[0]!;
@@ -50,8 +50,7 @@ test("project and assignee filters always retain top-level scope", () => {
   expect(Object.fromEntries(url.searchParams)).toMatchObject({
     parent_id: "",
     board: "true",
-    group_review: "true",
-    board_status: "done",
+    board_column: "done",
     assignee_ref: "hosted/manager",
     include_closed: "true",
   });
@@ -60,39 +59,49 @@ test("column pagination appends the loaded prefix, counts remain server totals, 
   const api = new Deferred();
   const board = new IssueBoardData(api);
   board.open({});
-  await api.answer("todo", {
+  await api.answer("waiting", {
     items: [item("a")],
     more: true,
     next: "a",
-    counts: { todo: 3 },
+    column_counts: { waiting: 3 },
     facts_seq: 2,
   });
   expect(api.requests.every((request) => !request.path.startsWith("/api/v1/issues/"))).toBe(true);
-  const column = board.columns.get("todo")!;
+  const column = board.columns.get("waiting")!;
   void column.more();
-  await api.answer("todo", {
+  await api.answer("waiting", {
     items: [item("a")],
     more: true,
     next: "a",
-    counts: { todo: 3 },
+    column_counts: { waiting: 3 },
     facts_seq: 2,
   });
-  const next = await api.answer("todo", {
+  const next = await api.answer("waiting", {
     items: [item("b"), item("c")],
     more: false,
-    counts: { todo: 3 },
+    column_counts: { waiting: 3 },
     facts_seq: 2,
   });
   expect(new URL(next.path, "https://tend.invalid").searchParams.get("after")).toBe("a");
   expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["a", "b", "c"]);
-  expect(board.summary.get().counts?.todo).toBe(3);
+  expect(board.summary.get().column_counts?.waiting).toBe(3);
   void column.read.refresh();
-  await api.answer("todo", { items: [item("c")], more: false, counts: { todo: 1 }, facts_seq: 3 });
+  await api.answer("waiting", {
+    items: [item("c")],
+    more: false,
+    column_counts: { waiting: 1 },
+    facts_seq: 3,
+  });
   expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["c"]);
   void column.read.refresh();
-  await api.answer("todo", { items: [item("a")], more: false, counts: { todo: 3 }, facts_seq: 2 });
+  await api.answer("waiting", {
+    items: [item("a")],
+    more: false,
+    column_counts: { waiting: 3 },
+    facts_seq: 2,
+  });
   expect(column.read.state.get().value?.items?.map((x) => x.issue_id)).toEqual(["c"]);
-  expect(board.summary.get().counts?.todo).toBe(1);
+  expect(board.summary.get().column_counts?.waiting).toBe(1);
   board.close();
 });
 test("late responses from previous filters cannot replace current cards or counts", async () => {
@@ -101,18 +110,23 @@ test("late responses from previous filters cannot replace current cards or count
   board.open({ project: "old" });
   const old = api.requests.splice(0);
   board.open({ project: "new" });
-  await api.answer("todo", {
+  await api.answer("waiting", {
     items: [item("new")],
     more: false,
-    counts: { todo: 1 },
+    column_counts: { waiting: 1 },
     facts_seq: 5,
   });
   for (const request of old) {
     expect(request.signal?.aborted).toBe(true);
-    request.resolve({ items: [item("old")], more: false, counts: { todo: 99 }, facts_seq: 99 });
+    request.resolve({
+      items: [item("old")],
+      more: false,
+      column_counts: { waiting: 99 },
+      facts_seq: 99,
+    });
   }
   await flush();
-  expect(board.summary.get().counts?.todo).toBe(1);
-  expect(board.columns.get("todo")!.read.state.get().value?.items?.[0]?.issue_id).toBe("new");
+  expect(board.summary.get().column_counts?.waiting).toBe(1);
+  expect(board.columns.get("waiting")!.read.state.get().value?.items?.[0]?.issue_id).toBe("new");
   board.close();
 });

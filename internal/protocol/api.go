@@ -44,7 +44,7 @@ func APITypes() []any {
 func APIEnums() []any {
 	return []any{
 		[]DecisionContinuationMode{DecisionContinueNow, DecisionWait, DecisionDependency},
-		IssueWorkStatusValues(),
+		IssueWorkStatusValues(), IssueBoardColumnValues(), IssueBoardWaitHintValues(),
 		[]ArchiveState{ArchiveReady, ArchiveUnsupported, ArchiveUnavailable},
 		[]IssueState{IssueActive, IssuePaused, IssueCancelling, IssueCancelled, IssueClosed},
 		[]IssueAssigneeKind{IssueAssigneeOwner, IssueAssigneeAgent},

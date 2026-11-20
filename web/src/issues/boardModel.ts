@@ -1,4 +1,9 @@
-import type { ExecutionCounts, IssueSummary, IssueWorkStatus } from "../api/generated/api.ts";
+import type {
+  ExecutionCounts,
+  IssueBoardColumn,
+  IssueSummary,
+  IssueWorkStatus,
+} from "../api/generated/api.ts";
 
 export const issueWorkStatuses: readonly { id: IssueWorkStatus; label: string }[] = [
   { id: "backlog", label: "待安排" },
@@ -9,7 +14,13 @@ export const issueWorkStatuses: readonly { id: IssueWorkStatus; label: string }[
   { id: "cancelled", label: "已取消" },
 ];
 
-export const boardColumns = issueWorkStatuses.filter(({ id }) => id !== "in_review");
+export const boardColumns: readonly { id: IssueBoardColumn; label: string }[] = [
+  { id: "backlog", label: "Backlog" },
+  { id: "wip", label: "WIP" },
+  { id: "waiting", label: "Waiting" },
+  { id: "done", label: "Done" },
+  { id: "cancelled", label: "Cancelled" },
+];
 
 export const workStatus = (
   item: Pick<IssueSummary, "board" | "state" | "work_status" | "effective_work_status">,
@@ -25,9 +36,19 @@ export const workStatus = (
 export const workStatusLabel = (status: IssueWorkStatus) =>
   issueWorkStatuses.find((column) => column.id === status)?.label ?? status;
 
-export function boardColumnStatus(item: Parameters<typeof workStatus>[0]): IssueWorkStatus {
-  const status = workStatus(item);
-  return status === "in_review" ? "in_progress" : status;
+export function boardDropStatus(
+  item: IssueSummary,
+  column: IssueBoardColumn,
+): IssueWorkStatus | undefined {
+  if (item.board?.column === column) return undefined;
+  switch (column) {
+    case "waiting":
+      return workStatus(item) === "backlog" ? "todo" : undefined;
+    case "wip":
+      return undefined;
+    default:
+      return column;
+  }
 }
 
 export const waitingExternalLabel = "等待外部条件";
@@ -73,6 +94,10 @@ export function responsibilityLabel(item: IssueSummary): string {
     if (counts?.paused && label !== pausedExecutionLabel) labels.push(pausedExecutionLabel);
     return labels.join(" · ");
   };
+  if (board?.column === "waiting") {
+    if (board.wait_hint === "ci") return "等 CI";
+    if (board.wait_hint === "decision") return "等你决定";
+  }
   if (counts?.unknown) return summarize("执行结果待核对", true);
   if (board?.owner_attention_count || counts?.waiting_owner) return summarize("等待你处理", true);
   if (board?.attention_count || counts?.waiting_supervisor)
@@ -81,8 +106,7 @@ export function responsibilityLabel(item: IssueSummary): string {
   if (execution !== "暂无执行") return summarize(execution);
   if (item.state === "paused") return "Issue 已暂停";
   if (board?.children?.running) return "子 Issue 正在推进";
-  if (board?.progress?.next_step && !board.progress.historical) return "继续推进";
-  return "待确认下一步";
+  return "";
 }
 
 export function notificationLabel(due: number, now: number): string {

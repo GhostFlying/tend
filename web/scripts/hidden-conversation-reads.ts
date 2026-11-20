@@ -80,9 +80,9 @@ const server = createServer(async (req, res) => {
     res.on("close", () => streams.delete(res));
     return;
   }
-  if (path === "/api/v1/issues" && url.searchParams.has("board_status")) {
+  if (path === "/api/v1/issues" && url.searchParams.has("board_column")) {
     const items =
-      url.searchParams.get("board_status") === "backlog"
+      url.searchParams.get("board_column") === "backlog"
         ? [
             {
               issue_id: "reconnect",

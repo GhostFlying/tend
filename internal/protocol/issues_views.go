@@ -12,12 +12,13 @@ type IssueSummary struct {
 }
 
 type IssuePage struct {
-	Counts    map[IssueWorkStatus]int `json:"counts,omitempty"`
-	Assignees []IssueAssignee         `json:"assignees,omitempty"`
-	FactsSeq  int64                   `json:"facts_seq,omitempty"`
-	Items     []IssueSummary          `json:"items"`
-	Next      string                  `json:"next,omitempty"`
-	More      bool                    `json:"more"`
+	ColumnCounts map[IssueBoardColumn]int `json:"column_counts,omitempty"`
+	Counts       map[IssueWorkStatus]int  `json:"counts,omitempty"`
+	Assignees    []IssueAssignee          `json:"assignees,omitempty"`
+	FactsSeq     int64                    `json:"facts_seq,omitempty"`
+	Items        []IssueSummary           `json:"items"`
+	Next         string                   `json:"next,omitempty"`
+	More         bool                     `json:"more"`
 }
 
 // IssueTaskSummary keeps the new Issue surface independent of work_item fields.

@@ -202,26 +202,7 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.ExternalWait) (bool, string, error) {
 	switch v.Kind {
 	case "checks":
-		row, err := store.GetDeliveryObservation(ctx, q, v.IssueID, v.TargetID)
-		if err != nil {
-			return false, "", err
-		}
-		o := row.Observation
-		oldHead := v.ObservedHead
-		v.ObservedRevision = row.FactRevision
-		v.ObservedHead = o.HeadSHA
-		v.ObservedBase, v.ObservedTarget = o.BaseSHA, o.TargetSHA
-		v.ObservedState = o.State
-		if oldHead != "" && o.HeadSHA != "" && oldHead != o.HeadSHA {
-			return true, "candidate_changed", nil
-		}
-		if o.State == "closed" || o.State == "merged" {
-			return true, "pull_request_" + o.State, nil
-		}
-		if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && (o.CI.State == "success" || o.CI.State == "failure" || o.CI.State == "cancelled" || o.CI.State == "skipped") {
-			v.ObservedState = o.CI.State
-			return true, "checks_" + o.CI.State, nil
-		}
+		return store.ObserveChecksWait(ctx, q, v)
 	case "review":
 		var raw string
 		if err := q.QueryRowContext(ctx, `SELECT body_json FROM shared_delivery_reviews WHERE review_id=?`, v.TargetID).Scan(&raw); err != nil {

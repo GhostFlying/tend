@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -88,6 +89,7 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 	project := fs.String("project", "", "issue project filter")
 	board := fs.Bool("board", false, "use the global board projection, including direct child progress and activity previews")
 	boardStatus := fs.String("board-status", "", "board work status (display column with --group-review)")
+	boardColumn := fs.String("board-column", "", "execution board column: all, backlog, wip, waiting, done, cancelled (requires --board)")
 	groupReview := fs.Bool("group-review", false, "include review Issues in the in_progress display column (requires --board)")
 	waitingOnMe := fs.Bool("waiting-on-me", false, "only Issues linked to actions in your Inbox (requires --board)")
 	assigneeKind := fs.String("assignee-kind", "", "owner or agent filter")
@@ -113,6 +115,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		if (*groupReview || *waitingOnMe || *boardStatus != "" || *assigneeKind != "" || *assigneeRef != "") && !*board {
 			return usagef("group-review, waiting-on-me, board-status and assignee filters require --board")
 		}
+		if *boardColumn != "" && (!*board || *groupReview || *boardStatus != "" || *boardColumn != "all" && !slices.Contains(protocol.IssueBoardColumnValues(), protocol.IssueBoardColumn(*boardColumn))) {
+			return usagef("board-column must be all, backlog, wip, waiting, done or cancelled and requires --board without --board-status or --group-review")
+		}
 		if *groupReview && *boardStatus == string(protocol.IssueInReview) {
 			return usagef("in_review is included in the in_progress display column with --group-review")
 		}
@@ -136,6 +141,9 @@ func runIssue(ctx context.Context, e *Env, args []string) error {
 		}
 		if *boardStatus != "" {
 			query.Set("board_status", *boardStatus)
+		}
+		if *boardColumn != "" {
+			query.Set("board_column", *boardColumn)
 		}
 		if *groupReview {
 			query.Set("group_review", "true")
