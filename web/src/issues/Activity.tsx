@@ -55,6 +55,12 @@ import styles from "./DetailPage.module.css";
 const emptyEntries: IssueActivityEntry[] = [];
 type ProcessScrollPosition = ScrollAnchor | "end";
 
+function findActivityTarget(scroll: RefObject<HTMLDivElement | null>, messageID: string) {
+  const root = scroll.current;
+  const target = root?.querySelector<HTMLElement>(`[data-scroll-id="${CSS.escape(messageID)}"]`);
+  return root && target ? { root, target } : undefined;
+}
+
 export function IssueActivity({
   issue,
   targetMessage,
@@ -561,11 +567,9 @@ export function IssueActivity({
       skippedAnchor.current === targetMessage
     )
       return;
-    const root = scroll.current;
-    const target = root?.querySelector<HTMLElement>(
-      `[data-scroll-id="${CSS.escape(targetMessage)}"]`,
-    );
-    if (!target || !root) return;
+    const anchor = findActivityTarget(scroll, targetMessage);
+    if (!anchor) return;
+    const { root, target } = anchor;
     const frame = requestAnimationFrame(() => {
       if (
         located.current === targetMessage ||
