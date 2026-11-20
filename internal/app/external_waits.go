@@ -654,7 +654,7 @@ func (RecordSessionStop) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 		return Outcome{}, err
 	}
 	if p.PhysicalExit && protocol.RunnerOwnsExecution(r.Protocol) && r.Role == x.Principal.Role {
-		if _, err := tx.Exec(ctx, `UPDATE runs SET runner_stopped_at=? WHERE run_id=? AND runner_stopped_at=0`, x.Now.UnixMilli(), r.RunID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET announced_event_sequence=MAX(announced_event_sequence,?),runner_stopped_at=CASE WHEN writer_state_sequence<=? AND runner_stopped_at=0 THEN ? ELSE runner_stopped_at END WHERE run_id=?`, p.EventSequence, p.EventSequence, x.Now.UnixMilli(), r.RunID); err != nil {
 			return Outcome{}, err
 		}
 		if p.ThreadID == "" {

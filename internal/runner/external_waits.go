@@ -247,7 +247,14 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 		return err
 	}
 	if env == nil {
-		env, err = r.newEnvelope(protocol.OpRunsRecordSessionStop, runTarget(as), protocol.SessionStopPayload{ThreadID: saved.Thread, PhysicalExit: protocol.RunnerOwnsExecution(as.Protocol)})
+		payload := protocol.SessionStopPayload{ThreadID: saved.Thread, PhysicalExit: protocol.RunnerOwnsExecution(as.Protocol)}
+		if payload.PhysicalExit {
+			payload.EventSequence, err = r.cfg.Journal.LastEventSequence(ctx, as.RunID)
+			if err != nil {
+				return err
+			}
+		}
+		env, err = r.newEnvelope(protocol.OpRunsRecordSessionStop, runTarget(as), payload)
 		if err != nil {
 			return err
 		}

@@ -147,11 +147,12 @@ var (
 
 // active is a run with a live executor.
 type active struct {
-	as       protocol.Assignment
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	deadline time.Time
-	desired  protocol.RunDesired
+	recoveryAttempt int // Previous process attempt observed at offline startup.
+	as              protocol.Assignment
+	ctx             context.Context
+	cancel          context.CancelCauseFunc
+	deadline        time.Time
+	desired         protocol.RunDesired
 	// heldAt is when the runner itself learned of a takeover; a desired
 	// state tend sent before then does not undo it.
 	heldAt time.Time
@@ -223,6 +224,7 @@ type Runner struct {
 	instanceID                      string
 	generation                      int64
 	sequence                        int64
+	recoveredAttempts               map[string]int
 	grantDeadlines                  map[string]time.Time
 	helloConfirmed                  bool
 	grantServerDeadline             int64
@@ -322,6 +324,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		defer listener.Close()
 		r.wg.Go(func() { r.serveUpdater(ctx, listener) })
+	}
+	// Freeze predecessor attempts before any concurrent hello can start work.
+	initial, err := r.cfg.Journal.Runs(ctx)
+	if err != nil {
+		return err
+	}
+	r.recoveredAttempts = make(map[string]int)
+	for _, run := range initial {
+		if protocol.RunnerOwnsExecution(run.Assignment.Protocol) && run.Attempts > 0 {
+			r.recoveredAttempts[run.Assignment.RunID] = run.Attempts
+		}
 	}
 	// Lease upkeep runs before anything can start a worker.
 	r.wg.Go(func() { r.heartbeats(ctx) })
@@ -816,6 +829,11 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 			}
 			r.startWithControl(ctx, as, sent, pauseObservations[v.RunID])
 		case v.Verdict == protocol.VerdictStop:
+			if protocol.RunnerOwnsExecution(as.Protocol) {
+				if err := r.cfg.Journal.SetReceivedDesired(ctx, as.RunID, protocol.DesiredStopped); err != nil {
+					return err
+				}
+			}
 			if err := r.authorizeRetainedControl(ctx, v.RunID, false, func() error {
 				return r.cfg.Journal.AuthorizeRetainedStop(ctx, v.RunID, env.RequestID)
 			}); err != nil {
@@ -917,6 +935,9 @@ func (r *Runner) start(ctx context.Context, as protocol.Assignment, renewedAt ti
 }
 
 func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, observedAt time.Time, pauseObservation bool) {
+	r.startExecution(ctx, as, observedAt, pauseObservation, r.recoveredAttempts[as.RunID])
+}
+func (r *Runner) startExecution(ctx context.Context, as protocol.Assignment, observedAt time.Time, pauseObservation bool, recoveryAttempt int) {
 	runID := as.RunID
 	if err := r.cfg.Journal.RecordExternalWait(ctx, as.RunID, as.ExternalWait); err != nil {
 		r.cfg.Log.ErrorContext(ctx, "external wait assignment not journaled", "run_id", as.RunID, "err", err)
@@ -937,7 +958,12 @@ func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, o
 		return
 	}
 	deadline := r.authorizedDeadline(as.RunID, r.fenceDeadline(observedAt))
-	if !protocol.RunnerOwnsExecution(as.Protocol) && !r.cfg.Now().Before(deadline) {
+	enforceDeadline := !protocol.RunnerOwnsExecution(as.Protocol)
+	if !enforceDeadline && r.maintenance() {
+		deadline = r.authorizedDeadline(as.RunID, time.Time{})
+		enforceDeadline = !deadline.IsZero()
+	}
+	if enforceDeadline && !r.cfg.Now().Before(deadline) {
 		// The renewal is already too old to write on; reconcile first.
 		r.cfg.Log.WarnContext(ctx, "lease too old to start a run; reconciling", "run_id", runID)
 		r.requestReconcile()
@@ -990,7 +1016,25 @@ func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, o
 	if desired == "" {
 		desired = protocol.DesiredRun
 	}
-	a := &active{as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1), reporting: pauseOnly, pauseOnly: pauseOnly}
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		if err := r.cfg.Journal.SetReceivedDesired(ctx, runID, desired); err != nil {
+			r.mu.Unlock()
+			cancel(err)
+			r.requestReconcile()
+			return
+		}
+		persisted, err := r.cfg.Journal.ReceivedDesired(ctx, runID)
+		if err != nil {
+			r.mu.Unlock()
+			cancel(err)
+			r.requestReconcile()
+			return
+		}
+		if persisted == protocol.DesiredStopped {
+			desired = persisted
+		}
+	}
+	a := &active{recoveryAttempt: recoveryAttempt, as: as, ctx: runCtx, cancel: cancel, deadline: deadline, desired: desired, resume: make(chan struct{}, 1), reporting: pauseOnly, pauseOnly: pauseOnly}
 	r.active[runID] = a
 	r.mu.Unlock()
 	r.wg.Go(func() {
@@ -1241,10 +1285,18 @@ func (r *Runner) watchdog(ctx context.Context) {
 		case <-time.After(max(r.leaseTTL()/20, 10*time.Millisecond)):
 		}
 		now := r.cfg.Now()
+		maintenance := r.maintenance()
 		r.mu.Lock()
 		var late []string
 		for id, a := range r.active {
-			if !a.reporting && now.After(a.deadline) && (!protocol.RunnerOwnsExecution(a.as.Protocol) || !r.grantDeadlines[id].IsZero()) {
+			deadline := a.deadline
+			if protocol.RunnerOwnsExecution(a.as.Protocol) {
+				if !maintenance {
+					continue
+				}
+				deadline = r.grantDeadlines[id]
+			}
+			if !a.reporting && !deadline.IsZero() && !now.Before(deadline) {
 				late = append(late, id)
 			}
 		}

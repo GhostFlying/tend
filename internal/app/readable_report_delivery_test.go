@@ -267,6 +267,7 @@ func TestReportDeliveryClosedAnomalyKeepsOriginalAuthorityBoundaries(t *testing.
 			case "run":
 				principal.Subject = "different-run"
 			case "expired_lease":
+				renewalBoundFixture(t, h, protocol.Assignment{RunID: principal.Subject})
 				h.clock.Advance(24 * time.Hour)
 			}
 			count := h.count("attentions")

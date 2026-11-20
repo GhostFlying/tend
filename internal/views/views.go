@@ -31,14 +31,13 @@ func Summary(r store.TaskRow) protocol.TaskSummary {
 // maxTasks bounds a task listing.
 const maxTasks = 200
 
-// Tasks lists tasks, unfinished first, leaving out finished ones unless
-// asked for. A project limits the listing to its tasks; empty lists every
 func runSyncObservation(ctx context.Context, q store.Querier, run string) (*protocol.RunSyncObservation, error) {
 	var o protocol.RunSyncObservation
 	err := q.QueryRowContext(ctx, `SELECT COALESCE(h.last_seen_at,0), MAX(COALESCE(r.last_confirmed_at,0), COALESCE(l.created_at,0),COALESCE(m.received_at,0)),
- CASE WHEN COALESCE(m.received_at,0)>0 AND m.received_at>=COALESCE(r.last_confirmed_at,0) THEN 'manager.event'
+ CASE WHEN COALESCE(m.received_at,0)>0 AND m.received_at>=MAX(COALESCE(r.last_confirmed_at,0),COALESCE(l.created_at,0)) THEN 'manager.event'
       WHEN COALESCE(l.created_at,0)>0 AND l.created_at>=COALESCE(r.last_confirmed_at,0) THEN l.kind ELSE r.observed_state END,
- r.stop_requested_at,MAX(r.runner_stopped_at,CASE WHEN r.native_close_activity=r.native_activity THEN r.native_closed_at ELSE 0 END),r.announced_event_sequence,MAX(COALESCE(l.seq,0),COALESCE(m.seq,0))
+ r.stop_requested_at,MAX(r.runner_stopped_at,CASE WHEN r.native_close_activity=r.native_activity THEN r.native_closed_at ELSE 0 END),MAX(r.announced_event_sequence,COALESCE(l.seq,0),COALESCE(m.seq,0)),
+ CASE WHEN r.protocol>=7 THEN MAX(r.received_event_sequence,COALESCE(m.seq,0)) ELSE MAX(COALESCE(l.seq,0),COALESCE(m.seq,0)) END
  FROM runs r LEFT JOIN hosts h ON h.host_id=r.host_id
  LEFT JOIN run_logs l ON l.run_id=r.run_id AND l.seq=(SELECT MAX(seq) FROM run_logs WHERE run_id=r.run_id)
  LEFT JOIN manager_native_events m ON m.run_id=r.run_id AND m.seq=(SELECT MAX(seq) FROM manager_native_events WHERE run_id=r.run_id)
@@ -46,7 +45,7 @@ func runSyncObservation(ctx context.Context, q store.Querier, run string) (*prot
 	return &o, err
 }
 
-// project.
+// Tasks lists tasks, unfinished first, optionally restricted to a project.
 func Tasks(ctx context.Context, q store.Querier, includeFinished bool, project string) ([]protocol.TaskSummary, error) {
 	rows, err := store.ListTasks(ctx, q, project, maxTasks)
 	if err != nil {

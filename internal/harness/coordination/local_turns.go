@@ -45,6 +45,17 @@ func (d *Driver) forwardNative(ctx context.Context, t harness.Thread, e harness.
 	}
 	input := harness.TurnInput{Text: next, Model: d.Profile.Model, Effort: d.Profile.Effort,
 		UserMessageID: protocol.NativeObjectID(protocol.PrefixMessage, t.ID(), e.TurnID+"/"+call)}
+	root := event.RootTurnID
+	if root == "" {
+		root = e.TurnID
+	}
+	d.mu.Lock()
+	if d.pendingLocal == nil {
+		d.pendingLocal = map[string]string{}
+	}
+	d.pendingLocal[t.ID()] = root
+	d.mu.Unlock()
+	defer func() { d.mu.Lock(); delete(d.pendingLocal, t.ID()); d.mu.Unlock() }()
 	id, err := t.StartTurn(ctx, input)
 	if err != nil {
 		return err

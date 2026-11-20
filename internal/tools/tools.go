@@ -44,6 +44,8 @@ type Call struct {
 	// independently of a later consumed or explicitly selected owner source.
 	PlanningSourceMessageID string
 	TurnID                  string
+	// ExecutionTurnID binds locally continued native turns to their admitted coordinator input.
+	ExecutionTurnID string
 	// ExecutionRequestID identifies the native execution independently of owner attribution.
 	ExecutionRequestID string
 	// ParentRequestID is the request that delivered the actual owner source.

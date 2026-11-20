@@ -88,6 +88,10 @@ func (ReportRunStarted) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
+	if protocol.RunnerOwnsExecution(rc.run.Protocol) && rc.run.ObservedState != protocol.RunStarting {
+		// A late startup observation cannot move a newer physical state backwards.
+		return Outcome{NoEffect: true, Result: newTaskResult(toDomain(rc.task, rc.spec.Budget()), nil)}, nil
+	}
 	if !domain.RunTransitionAllowed(rc.run.ObservedState, protocol.RunRunning, false) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "run is %s", rc.run.ObservedState)
 	}

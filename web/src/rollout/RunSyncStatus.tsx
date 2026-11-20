@@ -18,7 +18,8 @@ export function RunSyncStatus({ facts }: { facts: RunSyncObservation | undefined
     return () => window.clearInterval(timer);
   }, [hasFacts]);
   if (!facts) return null;
-  const missing = (facts.announced_sequence ?? 0) - (facts.received_sequence ?? 0);
+  const advertised = facts.announced_sequence ?? 0;
+  const received = facts.received_sequence ?? 0;
   return (
     <small>
       {facts.stop_requested_at ? (
@@ -30,7 +31,7 @@ export function RunSyncStatus({ facts }: { facts: RunSyncObservation | undefined
       {facts.last_progress_at
         ? ` · 最后进展于${since(facts.last_progress_at, now)}（${facts.last_progress}）`
         : ""}
-      {missing > 0 ? ` · 已知还有 ${missing} 条事件待同步` : ""}
+      {advertised > received ? ` · 已连续收到第 ${received} 条，runner 已记录到第 ${advertised} 条` : ""}
     </small>
   );
 }

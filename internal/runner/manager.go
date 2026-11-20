@@ -202,6 +202,11 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
+	if protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && run.Attempts == r.recoveredAttempts[as.RunID] && !run.StoppedConfirmed {
+		// A new stdio process cannot prove what the predecessor dispatched.
+		// Keep the original credentials, process claim and tool identities for reconciliation.
+		return fmt.Errorf("%w: original manager process exit is unconfirmed", harness.ErrOwnedWorkerUnconfirmed)
+	}
 	resolved, err := r.resolveManagerExecution(ctx, as)
 	if err != nil {
 		return err
@@ -244,7 +249,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}, OnSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {
 		return r.registerRollout(sourceCtx, as.RunID, source)
 	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
-	if protocol.RunnerOwnsExecution(as.Protocol) && as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly {
+	if protocol.RunnerOwnsExecution(as.Protocol) && !as.Manager.RequireReceiptReader && !as.Manager.ReceiptOnly {
 		driver.LocalTurns = journal.ManagerLocalTurns{Journal: r.cfg.Journal, RunID: as.RunID}
 	}
 	uploadKey := sha256.Sum256([]byte(as.RunID))
@@ -438,19 +443,27 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 				return err
 			}
 		}
-		op, err := r.send(liveSession, runCredential(as), request)
-		if err != nil {
-			return err
-		}
-		if op.Status != protocol.OpSucceeded {
-			return errors.New("runner: native claim has not succeeded")
-		}
-		if err = r.confirmManagerClaim(ctx, as, request); err != nil {
-			return err
-		}
 		var command protocol.ManagerNativeRequest
-		if err = json.Unmarshal(op.Result, &command); err != nil {
-			return err
+		if protocol.RunnerOwnsExecution(as.Protocol) {
+			command, err = r.cfg.Journal.ReceivedManagerOperation(ctx, as.RunID)
+			if err != nil {
+				return err
+			}
+		}
+		if command.ID == "" {
+			op, err := r.send(liveSession, runCredential(as), request)
+			if err != nil {
+				return err
+			}
+			if op.Status != protocol.OpSucceeded {
+				return errors.New("runner: native claim has not succeeded")
+			}
+			if err = r.confirmManagerClaim(ctx, as, request); err != nil {
+				return err
+			}
+			if err = json.Unmarshal(op.Result, &command); err != nil {
+				return err
+			}
 		}
 		if command.ID == "" {
 			if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {

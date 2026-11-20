@@ -46,7 +46,7 @@ func (r *Runner) resumeDelegated(ctx context.Context) error {
 		if as.Role == protocol.RoleIssueManager && run.Attempts > 0 && !run.StoppedConfirmed {
 			continue
 		}
-		r.start(ctx, as, r.cfg.Now())
+		r.startExecution(ctx, as, r.cfg.Now(), false, run.Attempts)
 	}
 	return nil
 }
@@ -58,10 +58,10 @@ func (r *Runner) flushStartReports(ctx context.Context, as protocol.Assignment) 
 	}
 	for _, env := range reports {
 		op, err := r.sendOnce(ctx, runCredential(as), &env)
-		if err != nil && !(env.Operation == protocol.OpRunsReportStarted && protocol.CodeOf(err) == protocol.CodeInvalidTransition) {
+		if err != nil {
 			return err
 		}
-		if err == nil && op.Status != protocol.OpSucceeded {
+		if op.Status != protocol.OpSucceeded {
 			return fmt.Errorf("startup receipt pending: %s", env.Operation)
 		}
 		if err := r.cfg.Journal.AckStartReport(ctx, as.RunID, env.RequestID); err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 func runner(host string) protocol.Principal {
@@ -181,6 +182,7 @@ func TestFault_HeartbeatLostRunnerAlive(t *testing.T) {
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
 
 	// Heartbeats stop arriving; the lease runs out.
+	renewalBoundFixture(t, h, as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if n, err := h.app.ExpireLeases(context.Background()); err != nil || n != 1 {
 		t.Fatalf("ExpireLeases = %d, %v", n, err)
@@ -600,6 +602,7 @@ func TestResumedInterruptedRunDeliversResult(t *testing.T) {
 	_, res := h.createTask(owner, createTaskPayload{Title: "a", Spec: testSpec})
 	as, _, _ := h.claim("linux-1")
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	renewalBoundFixture(t, h, as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if _, err := h.app.ExpireLeases(context.Background()); err != nil {
 		t.Fatal(err)
@@ -669,5 +672,34 @@ func renewalBoundFixture(t *testing.T, h *harness, as protocol.Assignment) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDelegatedEventWatermarkRequiresContiguousOriginals(t *testing.T) {
+	h := newHarness(t)
+	_, task := h.createTask(owner, createTaskPayload{Title: "event gap", Spec: testSpec})
+	as, ok, _ := h.claim("linux-1")
+	if !ok {
+		t.Fatal("no claim")
+	}
+	for _, tc := range []struct{ seq, want int64 }{{3, 0}, {1, 1}, {2, 3}} {
+		_, err := h.app.RecordRunEvents(t.Context(), runPrincipal(as.RunID, as.Role), as.RunID, []protocol.RunEvent{{Seq: tc.seq, Kind: "item.completed"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+			d, err := views.Task(t.Context(), tx.Q(), task.TaskID)
+			if err != nil {
+				return err
+			}
+			o := d.Runs[0].Observation
+			if o.ReceivedSequence != tc.want || o.AnnouncedSequence != 3 {
+				t.Fatal("missing original was hidden", o)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

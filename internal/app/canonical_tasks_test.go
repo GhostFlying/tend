@@ -558,6 +558,7 @@ func TestCanonicalTaskUnknownBlocksCancelAndReparentUntilRealReconcile(t *testin
 		t.Fatal("no implementation")
 	}
 	h.runAs(run, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	renewalBoundFixture(t, h, run)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 		t.Fatalf("expire %d %v", n, err)

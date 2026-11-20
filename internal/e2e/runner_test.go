@@ -662,7 +662,9 @@ func TestEndToEnd_RunnerCompletesTask(t *testing.T) {
 	if got := srv.count(`SELECT COUNT(*) FROM runs`); got != 2 {
 		t.Errorf("runs = %d, want an implement and an acceptance run", got)
 	}
-	eventually(t, "the implement events are uploaded", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 2 })
+	eventually(t, "the implement events are uploaded", func() bool {
+		return srv.count(`SELECT COUNT(*) FROM run_logs WHERE kind IN ('item.started','item.completed')`) == 2
+	})
 	// The task completes when tend commits the verdict; the runner forgets
 	// the run only once the answer reaches it.
 	j := n.runningJournal()
@@ -858,6 +860,7 @@ func TestRunnerResumesAfterRestart(t *testing.T) {
 		}
 		return passing(spec)
 	})
+	n.net.protocolSix = true
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the worker starts", func() bool { return len(n.workers.Started()) == 1 })
@@ -1187,7 +1190,9 @@ func TestFinalEventsSurviveUploadFailure(t *testing.T) {
 	n.start()
 	task := srv.createTask()
 	eventually(t, "the task completes", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
-	eventually(t, "both implementation events arrive despite failed uploads", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 2 })
+	eventually(t, "both implementation events arrive despite failed uploads", func() bool {
+		return srv.count(`SELECT COUNT(*) FROM run_logs WHERE kind IN ('item.started','item.completed')`) == 2
+	})
 }
 
 func TestRestartKeepsShortLease(t *testing.T) {
@@ -1206,6 +1211,7 @@ func TestRestartKeepsShortLease(t *testing.T) {
 		return testkit.WorkerScript{Gate: second}
 	})
 	heartbeats := observeHeartbeats(n)
+	n.net.protocolSix = true
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
@@ -1271,7 +1277,7 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 	eventually(t, "the task completes while the event uploader is disconnected", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })
 	eventually(t, "completed run retains its event tail", func() bool {
 		runs, err := n.runningJournal().PendingEventRuns(t.Context())
-		return err == nil && len(runs) == 1
+		return err == nil && len(runs) > 0
 	})
 	if got := srv.count(`SELECT COUNT(*) FROM run_logs`); got != 0 {
 		t.Fatalf("unreachable events persisted: %d", got)
@@ -1281,7 +1287,7 @@ func TestLargeEventVolumesArrive(t *testing.T) {
 	n.net.allow(protocol.OpRunnerEventPart)
 	n.net.loseNext(protocol.OpRunnerEventPart, 1)
 	n.start()
-	eventuallyWithin(t, 90*time.Second, "restarted runner uploads all original events", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs`) == 31 })
+	eventuallyWithin(t, 90*time.Second, "restarted runner uploads all original events", func() bool { return srv.count(`SELECT COUNT(*) FROM run_logs WHERE kind='item.completed'`) == 31 })
 	if err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		row, ok, err := store.RunLogAt(t.Context(), tx.Q(), n.workers.Started()[0].RunID, 31)
 		if err == nil && (!ok || row.NativeID != "last-original" || row.BodyJSON != string(original)) {

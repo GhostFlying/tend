@@ -136,6 +136,7 @@ func TestRunObservationRejectsInactiveIdentity(t *testing.T) {
 func TestRunObservationRechecksAfterProcessProbe(t *testing.T) {
 	h, as, _ := observationFixture(t, protocol.RoleImplement)
 	h.app.observeDeployment = func(context.Context) (protocol.ObservedDeployment, error) {
+		renewalBoundFixture(t, h, as)
 		h.clock.Advance(24 * time.Hour)
 		return protocol.ObservedDeployment{}, nil
 	}
@@ -179,6 +180,7 @@ func TestRunObservationAfterRecoveryBeforeRunningEvent(t *testing.T) {
 	for _, state := range []protocol.RunObserved{protocol.RunStarting, protocol.RunRunning, protocol.RunWaiting, protocol.RunInterrupted} {
 		t.Run(string(state), func(t *testing.T) {
 			h, as, _ := observationFixture(t, protocol.RoleImplement)
+			renewalBoundFixture(t, h, as)
 			h.clock.Advance(DefaultLeaseTTL + time.Second)
 			if _, err := h.app.ExpireLeases(t.Context()); err != nil {
 				t.Fatal(err)

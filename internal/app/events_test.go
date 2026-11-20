@@ -272,6 +272,7 @@ func TestMaintenanceWritesWake(t *testing.T) {
 		t.Error("a log alone notified ledger changes")
 	}
 
+	renewalBoundFixture(t, h, as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if _, err := h.app.ExpireLeases(ctx); err != nil {
 		t.Fatal(err)

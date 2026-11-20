@@ -1042,6 +1042,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	if c.CoordinatorRootTurn != "" {
 		sourceTurn = c.CoordinatorRootTurn
 	}
+	call.ExecutionTurnID = sourceTurn
 	rec, ok, err := m.app.TurnDelivery(ctx, c.ThreadID, sourceTurn)
 	if err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not look up the call's turn", "turn", c.TurnID, "err", err)
