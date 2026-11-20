@@ -600,15 +600,17 @@ function AttentionForm({
                   </label>
                 )}
               </div>
-              <label>
-                {deliveryDecision && shownChoice === "" ? "说明" : "补充说明（可选）"}
-                <Textarea
-                  className={styles.textarea}
-                  value={shownText}
-                  disabled={blocked || choiceRequiresNoText}
-                  onChange={(e) => setText(e.target.value)}
-                />
-              </label>
+              {!a.report_follow_on && (
+                <label>
+                  {deliveryDecision && shownChoice === "" ? "说明" : "补充说明（可选）"}
+                  <Textarea
+                    className={styles.textarea}
+                    value={shownText}
+                    disabled={blocked || choiceRequiresNoText}
+                    onChange={(e) => setText(e.target.value)}
+                  />
+                </label>
+              )}
               {choiceRequiresNoText && (
                 <p className={styles.muted}>
                   批准和结束交付仅提交所选决定。附带条件时请选择「仅回复说明」。
