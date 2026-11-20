@@ -164,6 +164,7 @@ func TestPauseControlHelloPreservesLapsedLease(t *testing.T) {
 		t.Fatalf("no negotiated pause assignment: %+v", as)
 	}
 	issueAdmissionStatus(t, h, admissionCurrent(t, h, i.IssueID), protocol.IssueBacklog, nil)
+	renewalBoundFixture(t, h, *as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if _, err := h.app.ExpireLeases(t.Context()); err != nil {
 		t.Fatal(err)

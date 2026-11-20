@@ -108,19 +108,20 @@ type ManagerNativeEvent struct {
 
 // IssueManagerView separates published category work from its actual assignee.
 type IssueManagerView struct {
-	ControlMode           ControlMode        `json:"control_mode,omitempty"`
-	ReconciliationPending bool               `json:"reconciliation_pending,omitempty"`
-	Recovery              *AgentRecoveryView `json:"recovery,omitempty"`
-	ConversationID        string             `json:"conversation_id,omitempty"`
-	NativeThreadID        string             `json:"native_thread_id,omitempty"`
-	RunID                 string             `json:"run_id,omitempty"`
-	TaskID                string             `json:"task_id"`
-	CategoryID            string             `json:"category_id"`
-	State                 TaskLifecycle      `json:"state"`
-	HostID                string             `json:"host_id,omitempty"`
-	Agent                 *AgentIdentity     `json:"agent,omitempty"`
-	Execution             *RunExecutionPin   `json:"execution,omitempty"`
-	QueueReason           *QueueWaitReason   `json:"queue_reason,omitempty"`
+	Observation           *RunSyncObservation `json:"observation,omitempty"`
+	ControlMode           ControlMode         `json:"control_mode,omitempty"`
+	ReconciliationPending bool                `json:"reconciliation_pending,omitempty"`
+	Recovery              *AgentRecoveryView  `json:"recovery,omitempty"`
+	ConversationID        string              `json:"conversation_id,omitempty"`
+	NativeThreadID        string              `json:"native_thread_id,omitempty"`
+	RunID                 string              `json:"run_id,omitempty"`
+	TaskID                string              `json:"task_id"`
+	CategoryID            string              `json:"category_id"`
+	State                 TaskLifecycle       `json:"state"`
+	HostID                string              `json:"host_id,omitempty"`
+	Agent                 *AgentIdentity      `json:"agent,omitempty"`
+	Execution             *RunExecutionPin    `json:"execution,omitempty"`
+	QueueReason           *QueueWaitReason    `json:"queue_reason,omitempty"`
 }
 
 // ManagerStoppedPayload confirms process exit only after all earlier events.

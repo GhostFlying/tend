@@ -1,3 +1,4 @@
+import { RunSyncStatus } from "../rollout/RunSyncStatus.tsx";
 import type { IssueManagerView } from "../api/generated/api.ts";
 import { queueReasonText } from "../tasks/execution.ts";
 import { controlLabels, lifecycleLabels } from "../tasks/status.ts";
@@ -23,6 +24,7 @@ export function ManagerStatus({
   return (
     <div className={styles.managerStatus} aria-label="负责人运行状态">
       <span>{phase}</span>
+      <RunSyncStatus facts={manager.observation} />
       {manager.control_mode && manager.control_mode !== "managed" && (
         <p>{controlLabels[manager.control_mode]}</p>
       )}

@@ -53,8 +53,8 @@ func TestNativeExecutionRequiresFrozenCentralRuntimeAndLiveLease(t *testing.T) {
 		t.Fatal("host gained run access", err)
 	}
 	h.clock.Advance(10 * time.Minute)
-	if _, err := h.app.NativeExecutionControl(t.Context(), p); protocol.CodeOf(err) != protocol.CodeForbidden {
-		t.Fatal("expired lease remained usable", err)
+	if desired, err := h.app.NativeExecutionControl(t.Context(), p); err != nil || desired != protocol.DesiredHeld {
+		t.Fatal("silence changed explicit takeover of the delegated Run", desired, err)
 	}
 	if _, err := h.app.DeploymentID(t.Context()); err != nil {
 		t.Fatal(err)

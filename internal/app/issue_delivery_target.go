@@ -209,7 +209,7 @@ func currentDeliveryExecutionLease(ctx context.Context, q store.Querier, task st
 	if err != nil || !current || task.Lifecycle.Terminal() || task.ControlMode != protocol.ControlManaged {
 		return false, err
 	}
-	runs, err := store.FollowupIDs(ctx, q, `SELECT r.run_id FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state='running' AND r.desired_state='run' AND l.status='active' AND (r.protocol>=7 OR l.expires_at>?) AND a.status='dispatched' AND a.target_spec_version=? AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0`, task.TaskID, now, task.SpecVersion)
+	runs, err := store.FollowupIDs(ctx, q, `SELECT r.run_id FROM runs r JOIN leases l USING(run_id) JOIN plan_actions a USING(action_id) WHERE r.task_id=? AND r.observed_state='running' AND r.desired_state='run' AND l.status='active' AND l.expires_at>? AND a.status='dispatched' AND a.target_spec_version=? AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0`, task.TaskID, now, task.SpecVersion)
 	if err != nil {
 		return false, err
 	}

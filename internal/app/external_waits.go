@@ -653,6 +653,14 @@ func (RecordSessionStop) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 	if err != nil {
 		return Outcome{}, err
 	}
+	if p.PhysicalExit && protocol.RunnerOwnsExecution(r.Protocol) && r.Role == x.Principal.Role {
+		if _, err := tx.Exec(ctx, `UPDATE runs SET runner_stopped_at=? WHERE run_id=? AND runner_stopped_at=0`, x.Now.UnixMilli(), r.RunID); err != nil {
+			return Outcome{}, err
+		}
+		if p.ThreadID == "" {
+			return Outcome{Result: p}, nil
+		}
+	}
 	if r.Protocol < 3 || r.Role != x.Principal.Role || strings.TrimSpace(p.ThreadID) == "" || !utf8.ValidString(p.ThreadID) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "current protocol and original thread identity are required")
 	}

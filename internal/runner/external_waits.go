@@ -236,7 +236,7 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 	if err != nil {
 		return err
 	}
-	if saved.Thread == "" {
+	if saved.Thread == "" && !protocol.RunnerOwnsExecution(as.Protocol) {
 		return nil
 	}
 	if !saved.StoppedConfirmed {
@@ -247,7 +247,7 @@ func (r *Runner) reportSessionStop(ctx context.Context, as protocol.Assignment) 
 		return err
 	}
 	if env == nil {
-		env, err = r.newEnvelope(protocol.OpRunsRecordSessionStop, runTarget(as), protocol.SessionStopPayload{ThreadID: saved.Thread})
+		env, err = r.newEnvelope(protocol.OpRunsRecordSessionStop, runTarget(as), protocol.SessionStopPayload{ThreadID: saved.Thread, PhysicalExit: protocol.RunnerOwnsExecution(as.Protocol)})
 		if err != nil {
 			return err
 		}

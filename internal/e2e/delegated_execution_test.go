@@ -18,10 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/GhostFlying/tend/internal/app"
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
+	"github.com/GhostFlying/tend/internal/views"
 )
 
 // The native peer speaks the normal app-server protocol. Only an actual
@@ -146,6 +149,11 @@ func (w realWorkerWorkspace) Start(ctx context.Context, s harness.WorkerSpec) (h
 }
 
 func TestFault_DelegatedRunFinishesAcrossPartition(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) { partitionedNativeExecution(t, stop) })
+	}
+}
+func partitionedNativeExecution(t *testing.T, stop bool) {
 	clock := testkit.NewClock()
 	ttl := time.Second
 	srv := newServer(t, ttl, clock.Now)
@@ -206,6 +214,55 @@ func TestFault_DelegatedRunFinishesAcrossPartition(t *testing.T) {
 	}
 	if got := srv.count(`SELECT COUNT(*) FROM artifacts WHERE task_id=?`, task); got != 0 {
 		t.Fatal("offline result visible prematurely", got)
+	}
+	if stop {
+		eventually(t, "native result receipt is durable in the offline journal", func() bool {
+			runs, err := n.runningJournal().Runs(t.Context())
+			if err != nil || len(runs) != 1 {
+				return false
+			}
+			events, err := n.runningJournal().PendingEvents(t.Context(), runs[0].Assignment.RunID, 100)
+			if err != nil {
+				return false
+			}
+			for _, e := range events {
+				if e.Kind == protocol.EventWorkerSubmitted && bytes.Contains(e.Body, []byte("pull/1")) {
+					return true
+				}
+			}
+			return false
+		})
+		revision := srv.task(task).ControlRevision
+		env := protocol.Envelope{RequestID: srv.ids.New(protocol.PrefixRequest), Operation: "tasks.cancel", Target: protocol.Target{Type: "task", ID: task}, ExpectedControlRevision: &revision, Payload: json.RawMessage(`{}`)}
+		if op, err := srv.app.Execute(t.Context(), owner, &env, app.CancelTask{}); err != nil || op.Status != protocol.OpSucceeded {
+			t.Fatal(op, err)
+		}
+		status := func() *protocol.RunSyncObservation {
+			var d protocol.TaskDetail
+			err := srv.store.Read(t.Context(), func(tx *store.ReadTx) error {
+				var err error
+				d, err = views.Task(t.Context(), tx.Q(), task)
+				return err
+			})
+			if err != nil || len(d.Runs) != 1 {
+				t.Fatal("read cancelled Run", err, len(d.Runs))
+			}
+			return d.Runs[0].Observation
+		}
+		if o := status(); o.StopRequestedAt == 0 || o.StoppedAt != 0 {
+			t.Fatal("stop was presented as confirmed while offline", o)
+		}
+		n.net.dropNext(protocol.OpRunnerSyncEvents, 10000)
+		n.net.set(false)
+		eventually(t, "runner confirms physical exit while its outcome is still queued", func() bool { return status().StoppedAt > 0 })
+		n.net.allow(protocol.OpRunnerSyncEvents)
+		eventually(t, "cancelled Run retains its already created PR", func() bool {
+			return srv.count(`SELECT COUNT(*) FROM run_logs WHERE kind='worker.result_submitted' AND body_json LIKE '%pull/1%'`) == 1
+		})
+		if got := srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=? AND role='accept'`, task); got != 0 || pulls.Load() != 1 {
+			t.Fatal("withdrawn Run scheduled acceptance or duplicated the PR", got, pulls.Load())
+		}
+		return
 	}
 	n.net.set(false)
 	eventually(t, "implementation and independent acceptance settle", func() bool { return srv.task(task).Lifecycle == protocol.TaskCompleted })

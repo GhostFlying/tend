@@ -79,7 +79,8 @@ const OpRunsRecordSessionStop = "runs.record_session_stop"
 
 // SessionStopPayload is a physical close fact, not permission to resume work.
 type SessionStopPayload struct {
-	ThreadID string `json:"thread_id"`
+	PhysicalExit bool   `json:"physical_exit,omitempty"`
+	ThreadID     string `json:"thread_id"`
 }
 
 // SessionContinuation is an optional optimization across two stopped Runs.

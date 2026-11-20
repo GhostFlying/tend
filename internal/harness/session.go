@@ -138,12 +138,13 @@ type ToolSpec struct {
 // ToolCall is the model calling one of tend's tools. ThreadID, TurnID and
 // CallID together identify the call; CallID alone is opaque.
 type ToolCall struct {
-	ThreadID  string
-	TurnID    string
-	CallID    string
-	Namespace string
-	Tool      string
-	Arguments json.RawMessage
+	CoordinatorRootTurn string `json:"-"`
+	ThreadID            string
+	TurnID              string
+	CallID              string
+	Namespace           string
+	Tool                string
+	Arguments           json.RawMessage
 	// UserText and UserItemID snapshot the latest native user item at request
 	// arrival, before asynchronous tool execution can race later input.
 	UserText   string
@@ -227,7 +228,9 @@ type EventAcknowledger interface {
 }
 
 type Event struct {
-	CoordinatorSequence int64 `json:"-"`
+	CoordinatorRootTurn  string `json:"-"`
+	CoordinatorContinued bool   `json:"-"`
+	CoordinatorSequence  int64  `json:"-"`
 	// Origin identity is local coordinator metadata, never native wire input.
 	OriginRunID     string `json:"-"`
 	OriginSequence  int64  `json:"-"`

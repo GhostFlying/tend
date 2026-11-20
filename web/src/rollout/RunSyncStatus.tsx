@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RunView } from "../api/generated/api.ts";
+import type { RunSyncObservation } from "../api/generated/api.ts";
 
 function since(at: number, now: number) {
   const minutes = Math.max(0, Math.floor((now - at) / 60_000));
@@ -9,8 +9,7 @@ function since(at: number, now: number) {
   return `${Math.floor(minutes / 1440)} 天前`;
 }
 
-export function RunSyncStatus({ run }: { run: RunView }) {
-  const facts = run.observation;
+export function RunSyncStatus({ facts }: { facts: RunSyncObservation | undefined }) {
   const hasFacts = facts !== undefined;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

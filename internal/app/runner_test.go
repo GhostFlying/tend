@@ -659,3 +659,15 @@ func (h *harness) heartbeat(ctx context.Context, p protocol.Principal, runs []pr
 	})
 	return h.app.RuntimeHeartbeat(ctx, p, protocol.HeartbeatPayload{Runtime: runtime, Runs: runs})
 }
+
+// renewalBoundFixture models a Run persisted by a protocol-six claim. The
+// runner E2E suite exercises the actual protocol-six peer and handshake.
+func renewalBoundFixture(t *testing.T, h *harness, as protocol.Assignment) {
+	t.Helper()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE runs SET protocol=6 WHERE run_id=?`, as.RunID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -222,6 +222,7 @@ func TestFault_PreparationJournalReleaseSettlesAfterLeaseReconciliation(t *testi
 	for _, reconcile := range []bool{false, true} {
 		t.Run(map[bool]string{false: "expired", true: "reconciled running"}[reconcile], func(t *testing.T) {
 			h, runtime, _, as := preparationAssignment(t)
+			renewalBoundFixture(t, h, as)
 			h.clock.Advance(DefaultLeaseTTL + time.Second)
 			if _, err := h.app.ExpireLeases(t.Context()); err != nil {
 				t.Fatal(err)

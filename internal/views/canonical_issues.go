@@ -77,6 +77,12 @@ func CanonicalIssue(ctx context.Context, q store.Querier, id string, revision in
 		if err := q.QueryRowContext(ctx, `SELECT COALESCE((SELECT t.thread_id FROM runner_coordination_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 1),''),COALESCE((SELECT run_id FROM runs WHERE task_id=? AND observed_state IN ('starting','running','waiting','interrupted','unknown') ORDER BY created_at DESC LIMIT 1),'')`, id, manager.AssignmentEpoch, manager.TaskID).Scan(&out.Manager.NativeThreadID, &out.Manager.RunID); err != nil {
 			return out, err
 		}
+		if out.Manager.RunID != "" {
+			out.Manager.Observation, err = runSyncObservation(ctx, q, out.Manager.RunID)
+			if err != nil {
+				return out, err
+			}
+		}
 		if manager.Pin != nil {
 			identity := manager.Pin.Identity
 			out.Manager.Agent = &identity

@@ -10757,6 +10757,9 @@
         "native_thread_id": {
           "type": "string"
         },
+        "observation": {
+          "$ref": "#/definitions/RunSyncObservation"
+        },
         "queue_reason": {
           "$ref": "#/definitions/QueueWaitReason"
         },
@@ -18043,6 +18046,9 @@
     "SessionStopPayload": {
       "additionalProperties": false,
       "properties": {
+        "physical_exit": {
+          "type": "boolean"
+        },
         "thread_id": {
           "type": "string"
         }

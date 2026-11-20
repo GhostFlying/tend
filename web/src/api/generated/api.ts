@@ -1390,6 +1390,7 @@ export interface IssueManagerView {
   execution?: RunExecutionPin;
   host_id?: string;
   native_thread_id?: string;
+  observation?: RunSyncObservation;
   queue_reason?: QueueWaitReason;
   reconciliation_pending?: boolean;
   recovery?: AgentRecoveryView;
@@ -1441,6 +1442,19 @@ export interface ExecutionProfile {
 export interface AgentRuntimeReference {
   revision: number;
   runtime_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunSyncObservation".
+ */
+export interface RunSyncObservation {
+  announced_sequence?: number;
+  last_contact_at?: number;
+  last_progress?: string;
+  last_progress_at?: number;
+  received_sequence?: number;
+  stop_requested_at?: number;
+  stopped_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -1937,19 +1951,6 @@ export interface RunCapabilityBinding {
   pin: RunExecutionPin;
   required: CapabilityReference[] | null;
   required_sha256: string;
-}
-/**
- * This interface was referenced by `TendAPI`'s JSON-Schema
- * via the `definition` "RunSyncObservation".
- */
-export interface RunSyncObservation {
-  announced_sequence?: number;
-  last_contact_at?: number;
-  last_progress?: string;
-  last_progress_at?: number;
-  received_sequence?: number;
-  stop_requested_at?: number;
-  stopped_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -7165,6 +7166,7 @@ export interface SessionRequest {
  * via the `definition` "SessionStopPayload".
  */
 export interface SessionStopPayload {
+  physical_exit?: boolean;
   thread_id: string;
 }
 /**

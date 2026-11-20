@@ -41,6 +41,7 @@ func TestManagerHistoryReadingDoesNotCreateExpiringLeaseOrSupervisorFault(t *tes
 
 func TestFault_ManagerLeaseExpiryStopsAtParentOwner(t *testing.T) {
 	h, _, issue, as, _ := reviewManagerAssignment(t)
+	renewalBoundFixture(t, h, as)
 	parent := createCanonicalOwnerTestIssue(t, h)
 	issue = canonicalTaskIssue(t, h, issue.IssueID)
 	payload := struct {

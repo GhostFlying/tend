@@ -244,6 +244,9 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}, OnSource: func(sourceCtx context.Context, source protocol.RolloutPreviewSource) error {
 		return r.registerRollout(sourceCtx, as.RunID, source)
 	}, Session: session, Directory: dir, Instructions: resolved.Instructions, Profile: resolved.Profile}
+	if protocol.RunnerOwnsExecution(as.Protocol) && as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly {
+		driver.LocalTurns = journal.ManagerLocalTurns{Journal: r.cfg.Journal, RunID: as.RunID}
+	}
 	uploadKey := sha256.Sum256([]byte(as.RunID))
 	driver.Upload = func(ctx context.Context, path, name string) (protocol.ArtifactFile, error) {
 		return r.uploadFile(ctx, as, Prepared{Dir: dir, StateDir: filepath.Join(r.cfg.Journal.Directory(), "manager-uploads", hex.EncodeToString(uploadKey[:]))}, path, name)

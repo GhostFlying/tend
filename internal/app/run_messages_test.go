@@ -276,7 +276,7 @@ func TestRunMessagesHostedSourceAndOfflineLease(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := claimMessage(t, h, as, m); got.Status != protocol.RunMessageFailed || got.Reason != "run_unavailable" {
+	if got := claimMessage(t, h, as, m); got.Status != protocol.RunMessageDispatching {
 		t.Fatal(got)
 	}
 }

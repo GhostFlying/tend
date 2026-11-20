@@ -33,6 +33,9 @@ type ReplyPrefixAcknowledger interface {
 }
 
 type Event struct {
+	RootTurnID string `json:"root_turn_id,omitempty"`
+	Continued  bool   `json:"continued,omitempty"`
+
 	Historical     bool              `json:"-"`
 	SourceRunID    string            `json:"-"`
 	SourceSequence int64             `json:"-"`
@@ -334,7 +337,9 @@ func (s *Session) startToolLocked(t *thread, e Event) {
 				}
 			}
 		} else if t.handler != nil {
-			result = t.handler(s.ctx, *e.Call)
+			call := *e.Call
+			call.CoordinatorRootTurn = e.RootTurnID
+			result = t.handler(s.ctx, call)
 		}
 		err := s.transport.Call(s.ctx, "tool_result", Request{ThreadID: t.ID(), TurnID: e.Call.TurnID, CallID: e.Call.CallID, ToolResult: result}, nil)
 		if err == nil || errors.Is(err, harness.ErrRejected) {
@@ -356,6 +361,8 @@ func coordinatorNativeEvent(e Event) *harness.Event {
 		return nil
 	}
 	copy := *e.Native
+	copy.CoordinatorRootTurn = e.RootTurnID
+	copy.CoordinatorContinued = e.Continued
 	copy.CoordinatorSequence = e.Sequence
 	copy.OriginRunID, copy.OriginSequence = e.SourceRunID, e.SourceSequence
 	return &copy
@@ -453,6 +460,7 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // Driver runs operations against the runner-local native process. The caller
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
+	LocalTurns           LocalTurns
 	RequireReceiptReader bool
 	NativeOwnerTools     bool
 	OnSource             func(context.Context, protocol.RolloutPreviewSource) error
@@ -548,6 +556,10 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			for key, value := range Isolation() {
 				cfg.Config[key] = value
 			}
+		}
+		local := d.LocalTurns != nil && nativeOwner && !receiptHistory && !cfg.Ephemeral && cfg.Purpose != "internal_summary"
+		if local {
+			cfg.Tools = append(cfg.Tools, continueRunTool)
 		}
 		if d.Upload != nil && nativeOwner && !receiptHistory {
 			cfg.Tools = append(cfg.Tools, harness.UploadFileToolSpec)
@@ -670,7 +682,17 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 							}
 							return
 						}
-						if d.emit(ctx, Event{ThreadID: t.ID(), Native: &e}) != nil {
+						if err := d.forwardNative(ctx, t, e, local); err != nil {
+							if ctx.Err() == nil {
+								d.mu.Lock()
+								if d.failures != nil {
+									select {
+									case d.failures <- err:
+									default:
+									}
+								}
+								d.mu.Unlock()
+							}
 							return
 						}
 					}
@@ -784,6 +806,15 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	d.tools[key] = ch
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); delete(d.tools, key); d.mu.Unlock(); d.wg.Done() }()
+	if call.Tool == continueRunTool.Name && d.LocalTurns != nil && d.NativeOwnerTools {
+		d.mu.Lock()
+		private := d.private[call.ThreadID]
+		d.mu.Unlock()
+		if private {
+			return harness.ToolResult{Text: "private threads cannot continue the owner Run"}
+		}
+		return d.queueLocal(ctx, call)
+	}
 	if call.Tool == harness.UploadFileTool && d.Upload != nil {
 		var p struct {
 			Path string `json:"path"`
@@ -800,7 +831,15 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 		return harness.ToolResult{Success: true, Text: string(raw)}
 	}
 
-	if err := d.emit(ctx, Event{ThreadID: call.ThreadID, Call: &call}); err != nil {
+	var root string
+	if d.LocalTurns != nil {
+		var err error
+		root, err = d.LocalTurns.Root(ctx, call.ThreadID, call.TurnID)
+		if err != nil {
+			return harness.ToolResult{Text: err.Error()}
+		}
+	}
+	if err := d.emit(ctx, Event{ThreadID: call.ThreadID, Call: &call, RootTurnID: root}); err != nil {
 		if ctx.Err() != nil {
 			return harness.ToolResult{Text: "Coordinator execution ended before tool event delivery; preserve the original call for reconciliation"}
 		}

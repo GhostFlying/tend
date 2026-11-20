@@ -211,6 +211,15 @@ func (r *Results) Handle(ctx context.Context, c ToolCall) ToolResult {
 			return ToolResult{Text: err.Error()}
 		}
 	}
+	if r.Spec.Delegated && r.Spec.OnRetainedEvent != nil {
+		body, err := json.Marshal(out)
+		if err == nil {
+			err = r.Spec.OnRetainedEvent(ctx, WorkerEvent{NativeID: c.CallID, Kind: protocol.EventWorkerSubmitted, Body: body})
+		}
+		if err != nil {
+			return ToolResult{Text: "failed to retain submitted result: " + err.Error()}
+		}
+	}
 	r.mu.Lock()
 	r.result = &out
 	r.mu.Unlock()

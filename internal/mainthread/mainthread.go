@@ -904,6 +904,9 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 			return err
 		}
 	case ev.Kind == harness.EventTurnStarted:
+		if ev.CoordinatorRootTurn != "" {
+			return nil
+		}
 		// One turn at a time: the first turn to start after a turn/start
 		// is that delivery's, even before the start response arrives.
 		m.mu.Lock()
@@ -920,11 +923,14 @@ func (m *Manager) handle(ctx context.Context, th harness.Thread, ev harness.Even
 			}
 		}
 	case ev.Kind == harness.EventTurnCompleted:
+		if ev.CoordinatorContinued {
+			return nil
+		}
 		defer m.wakeNativeUsage()
 		m.refreshUsage(ctx, th)
 		m.mu.Lock()
 		a := m.active
-		if a != nil && a.turnID == ev.TurnID {
+		if a != nil && (a.turnID == ev.TurnID || ev.CoordinatorRootTurn != "" && a.turnID == ev.CoordinatorRootTurn) {
 			if ev.Failure != nil {
 				a.failure = ev.Failure
 			}
@@ -1032,7 +1038,11 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		TurnID:    c.TurnID,
 		Native:    c.ThreadID + "/" + c.TurnID + "/" + c.CallID, Tool: c.Tool, Arguments: c.Arguments,
 	}
-	rec, ok, err := m.app.TurnDelivery(ctx, c.ThreadID, c.TurnID)
+	sourceTurn := c.TurnID
+	if c.CoordinatorRootTurn != "" {
+		sourceTurn = c.CoordinatorRootTurn
+	}
+	rec, ok, err := m.app.TurnDelivery(ctx, c.ThreadID, sourceTurn)
 	if err != nil {
 		m.cfg.Log.ErrorContext(ctx, "could not look up the call's turn", "turn", c.TurnID, "err", err)
 		return harness.ToolResult{Text: "Could not reconcile the tool's original turn; no tool was executed. Read the ledger before retrying."}
@@ -1041,13 +1051,13 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 		call.SourceMessageID, call.ParentRequestID = rec.MessageID, rec.RequestID
 	} else {
 		m.mu.Lock()
-		if a := m.active; a != nil && (a.turnID == "" || a.turnID == c.TurnID) {
+		if a := m.active; a != nil && (a.turnID == "" || a.turnID == sourceTurn) {
 			call.SourceMessageID, call.ParentRequestID = a.messageID, a.requestID
 		}
 		m.mu.Unlock()
 	}
 	if call.ParentRequestID != "" {
-		if err := m.app.ObserveNativeStart(ctx, call.ParentRequestID, c.ThreadID, c.TurnID); err != nil {
+		if err := m.app.ObserveNativeStart(ctx, call.ParentRequestID, c.ThreadID, sourceTurn); err != nil {
 			m.cfg.Log.ErrorContext(ctx, "could not record early native tool identity", "turn", c.TurnID, "err", err)
 			return harness.ToolResult{Text: "The native execution identity could not be recorded; no tool mutation was submitted."}
 		}
@@ -1083,7 +1093,7 @@ func (m *Manager) onToolCall(ctx context.Context, c harness.ToolCall) harness.To
 	call.PlanningSourceMessageID = call.SourceMessageID
 	m.mu.Lock()
 	inheritedOwner := ""
-	if a := m.active; a != nil && a.recovery && (a.turnID == "" || a.turnID == c.TurnID) {
+	if a := m.active; a != nil && a.recovery && (a.turnID == "" || a.turnID == sourceTurn) {
 		inheritedOwner = a.sourceMessageID
 	}
 	m.mu.Unlock()
