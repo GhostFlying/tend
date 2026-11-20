@@ -67,3 +67,13 @@ func DecisionHasDeliveryDuty(ctx context.Context, q Querier, decisionID string) 
  WHERE a.decision_id=?)`, decisionID).Scan(&found)
 	return found, err
 }
+
+// HasRecordedDeliveryAnswer keeps historical display provenance when the current
+// duty moves on to another question. It does not authorize a new answer.
+func HasRecordedDeliveryAnswer(ctx context.Context, q Querier, decisionID string) (bool, error) {
+	var found bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM issue_delivery_answers WHERE decision_id=?
+ )`, decisionID).Scan(&found)
+	return found, err
+}
