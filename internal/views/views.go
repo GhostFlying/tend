@@ -610,7 +610,7 @@ func readEvents(ctx context.Context, q store.Querier, after int64, limit int, ch
 		ev := protocol.LedgerEvent{EventSeq: e.Seq, ObjectType: e.ObjectType, ObjectID: e.ObjectID, Kind: e.Kind, CreatedAt: time.UnixMilli(e.CreatedAt).UTC()}
 		if e.ObjectType == "message" {
 			if chat {
-				conversation, visible, err := store.ChatMessageIndex(ctx, q, e.ObjectID)
+				conversation, visible, withdrawn, err := store.ChatMessageIndex(ctx, q, e.ObjectID)
 				if err != nil && !errors.Is(err, store.ErrNotFound) {
 					return nil, after, 0, err
 				}
@@ -618,6 +618,7 @@ func readEvents(ctx context.Context, q store.Querier, after int64, limit int, ch
 					if strings.HasPrefix(conversation, "issue:") || (conversation != "" &&
 						(e.Kind == "conversation.message_state" || e.Kind == "conversation.processing_stopped" || e.Kind == "messaging.interaction_changed")) {
 						ev.ConversationID = conversation
+						ev.ChatRemoved = withdrawn && e.Kind == "conversation.message_state"
 						out = append(out, ev)
 					}
 					continue

@@ -289,7 +289,7 @@ try {
     assert(count(`/api/v1/conversation/queue?category=${category}`) > 0);
   assert(count("/api/v1/conversation/settings?") > 0);
   assert.equal(count("/api/v1/conversation/transcript?"), 0);
-  assert(count("/api/v1/agent-conversations/main/compactions") > 0);
+  assert.equal(count("/api/v1/agent-conversations/main/compactions"), 0);
 
   holdUsage = true;
   const inflight = new Promise<void>((done) => (heldUsage = done));

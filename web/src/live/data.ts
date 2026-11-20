@@ -98,6 +98,7 @@ export class LiveData {
   private resumeGeneration = 0;
   private historyGeneration = 0;
   private historyThrough = 0;
+  private readonly withdrawn = new Set<string>();
   private readonly choiceVersions = new Map<string, WorkItemChoice>();
   private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
   /** Conversation events that arrived while the latest page was being read. */
@@ -265,7 +266,13 @@ export class LiveData {
         this.directChats.refresh();
         if (event.kind === "messaging.interaction_changed") void this.refreshSnapshot();
       }
-      if (event.conversation_id === this.conversationID) this.queueView.changed(event);
+      if (event.conversation_id === this.conversationID) {
+        this.queueView.changed(event);
+        if (event.chat_removed) {
+          if (this.held) this.held.push(event);
+          else this.applyItem(event);
+        }
+      }
       return;
     }
     if (event.item?.kind === "tool_use" || event.kind === "conversation.process_changed") return;
@@ -440,7 +447,9 @@ export class LiveData {
       const now = this.conversationStore.get();
       this.conversationStore.set({
         ...now,
-        items: merge(page.items ?? [], now.items).map((item) => this.currentChoices(item)),
+        items: merge(page.items ?? [], now.items)
+          .filter((item) => !this.withdrawn.has(item.message_id))
+          .map((item) => this.currentChoices(item)),
         more: page.more,
         before: page.items?.[0]?.seq ?? now.before,
         loadingEarlier: false,
@@ -529,6 +538,7 @@ export class LiveData {
       const items = (page.items ?? []).map((item) => this.currentChoices(item));
       through = page.event_seq ?? 0;
       this.historyThrough = through;
+      this.withdrawn.clear();
       this.recovered("conversation");
       // Items before the page's first one are dropped: the page may have
       // moved past them while the stream was down, so they could be stale.
@@ -556,6 +566,19 @@ export class LiveData {
 
   private applyItem(event: LedgerEvent): void {
     if (event.event_seq <= this.historyThrough) return;
+    if (event.chat_removed) {
+      this.withdrawn.add(event.object_id);
+      const state = this.conversationStore.get();
+      const items = state.items.filter((item) => item.message_id !== event.object_id);
+      if (items.length !== state.items.length)
+        this.conversationStore.set({
+          ...state,
+          items,
+          processingSince: keepFor(state.processingSince, items),
+        });
+      return;
+    }
+    if (this.withdrawn.has(event.object_id)) return;
     const previous = this.conversationStore
       .get()
       .items.find((it) => it.message_id === event.item?.message_id);

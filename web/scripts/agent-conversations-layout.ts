@@ -675,12 +675,43 @@ try {
     await page.getByRole("button", { name: "更多", exact: true }).click();
     assert.equal(await page.getByRole("menuitem", { name: "执行记录", exact: true }).count(), 0);
     await navigate(page, "/diagnostics");
-    await page.getByRole("button", { name: "主 Agent 执行记录", exact: true }).click();
-    await page.getByRole("dialog", { name: "持久处理记录" }).waitFor();
-    await page
-      .getByRole("dialog", { name: "持久处理记录" })
-      .getByRole("button", { name: "关闭" })
-      .click();
+    await page.getByRole("button", { name: "会话执行记录", exact: true }).click();
+    const diagnostics = page.getByRole("dialog", { name: "持久处理记录" });
+    await diagnostics.waitFor();
+    await page.route("**/api/v1/agent-conversations?projection=issues", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              conversation_id: "consultation:example",
+              kind: "consultation",
+              title: "独立咨询示例",
+            },
+          ],
+        },
+      }),
+    );
+    await diagnostics.getByRole("button", { name: "加载其他会话", exact: true }).click();
+    const consultationRollout = page.waitForResponse((response) =>
+      decodeURIComponent(new URL(response.url()).pathname).endsWith(
+        "/consultation:example/rollout",
+      ),
+    );
+    await diagnostics.getByLabel("会话").selectOption("consultation:example");
+    assert.equal((await consultationRollout).status(), 200);
+    const compactions = page.waitForResponse((response) =>
+      decodeURIComponent(new URL(response.url()).pathname).endsWith(
+        "/consultation:example/compactions",
+      ),
+    );
+    await diagnostics.getByRole("button", { name: "Compact 历史", exact: true }).click();
+    assert.equal((await compactions).status(), 200);
+    await diagnostics.getByText(/自动 · 已完成/).waitFor();
+    await diagnostics.screenshot({
+      path: join(output, "consultation-diagnostics-" + width + ".png"),
+    });
+    await diagnostics.getByRole("button", { name: "关闭" }).click();
+    await page.unroute("**/api/v1/agent-conversations?projection=issues");
     await navigate(page, "/diagnostics/main");
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),

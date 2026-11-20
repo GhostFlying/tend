@@ -74,12 +74,15 @@ export function Composer({
     (active?.status === "processing" ? active.item.message_id : undefined) ??
     (!queueState.supported ? processing(conversation.items)?.message_id : undefined);
   const activeOwnerInput =
-    issueComposer &&
-    conversation.items.some(
-      (item) =>
-        item.message_id === stopMessageID && item.author === "owner" && item.state === "processing",
-    );
-  const busy = !!stopMessageID;
+    owner?.processing_owner_input ??
+    ((active?.status === "processing" && active.item.author === "owner") ||
+      conversation.items.some(
+        (item) =>
+          item.message_id === stopMessageID &&
+          item.author === "owner" &&
+          item.state === "processing",
+      ));
+  const busy = issueComposer ? activeOwnerInput : !!stopMessageID;
   const queued = !!owner?.total;
 
   useEffect(() => {

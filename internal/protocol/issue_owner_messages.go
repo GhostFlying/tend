@@ -55,6 +55,7 @@ type IssueConversationQueueEntry struct {
 }
 type IssueConversationQueuePage struct {
 	InterruptibleMessageID string                        `json:"interruptible_message_id,omitempty"`
+	ProcessingOwnerInput   bool                          `json:"processing_owner_input,omitempty"`
 	ProcessingStartedAt    int64                         `json:"processing_started_at,omitempty"`
 	Active                 *IssueConversationQueueEntry  `json:"active,omitempty"`
 	Enabled                bool                          `json:"enabled"`

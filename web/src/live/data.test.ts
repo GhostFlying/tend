@@ -1241,3 +1241,34 @@ test.each([
     }
   },
 );
+
+test("a scoped removal stays removed across an in-flight older page", async () => {
+  const api = new FakeApi();
+  const live = new LiveData(api);
+  void live.reload();
+  await api.answer("/api/v1/snapshot", snapshot);
+  await api.answer("/api/v1/conversation", { items: [owner(4), owner(5)], more: true });
+  void live.loadEarlier();
+  live.apply({
+    event_seq: 8,
+    object_type: "message",
+    object_id: "msg_2",
+    kind: "conversation.message_state",
+    created_at: "2026-11-20T00:00:00Z",
+    conversation_id: "main",
+    chat_removed: true,
+  });
+  live.apply({
+    event_seq: 9,
+    object_type: "message",
+    object_id: "msg_5",
+    kind: "conversation.message_state",
+    created_at: "2026-11-20T00:00:00Z",
+    conversation_id: "main",
+    chat_removed: true,
+  });
+  await api.answer("/api/v1/conversation", { items: [owner(2), owner(3)], more: false });
+  expect(live.conversation.get().items.map((item) => item.seq)).toEqual([3, 4]);
+  expect(live.conversation.get().before).toBe(2);
+  await live.stop();
+});

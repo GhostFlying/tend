@@ -132,7 +132,9 @@ const conversationCols = `m.seq, m.kind, m.message_id, m.author, m.body, COALESC
 
 // chatVisibleMessage is shared by Chat history and live updates. Other owner
 // and diagnostic projections still read the original conversation rows.
-const chatVisibleMessage = `m.kind='message' AND (
+const chatMessageWithdrawn = `EXISTS(SELECT 1 FROM conversation_message_controls mc WHERE mc.message_id=m.message_id AND mc.withdrawn_at<>0)`
+
+const chatVisibleMessage = `m.kind='message' AND NOT ` + chatMessageWithdrawn + ` AND (
 	m.author<>'system' OR
 	EXISTS(SELECT 1 FROM issue_completion_reports c WHERE c.published_message_id=m.message_id) OR
 	EXISTS(SELECT 1 FROM work_item_choices c WHERE c.message_id=m.message_id AND c.status='open')
@@ -140,12 +142,12 @@ const chatVisibleMessage = `m.kind='message' AND (
 
 // ChatMessageIndex reads visibility and scope without resolving message bodies
 // or joining tool records. Process changes can still invalidate Issue activity.
-func ChatMessageIndex(ctx context.Context, q Querier, id string) (conversation string, visible bool, err error) {
-	err = q.QueryRowContext(ctx, `SELECT m.conversation_id, (`+chatVisibleMessage+`) FROM conversation_messages m WHERE m.message_id=?`, id).Scan(&conversation, &visible)
+func ChatMessageIndex(ctx context.Context, q Querier, id string) (conversation string, visible, withdrawn bool, err error) {
+	err = q.QueryRowContext(ctx, `SELECT m.conversation_id, (`+chatVisibleMessage+`), `+chatMessageWithdrawn+` FROM conversation_messages m WHERE m.message_id=?`, id).Scan(&conversation, &visible, &withdrawn)
 	if err != nil {
-		return "", false, notFound(err, "chat message "+id)
+		return "", false, false, notFound(err, "chat message "+id)
 	}
-	return conversation, visible, nil
+	return conversation, visible, withdrawn, nil
 }
 
 // ListChatMessages pages by original message sequence after applying visibility.
