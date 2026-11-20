@@ -60,23 +60,27 @@ func TestWorkerExplicitCloseCarriesCapturedFragmentOnSameReceipt(t *testing.T) {
 		wire            int64
 		wantProcessText bool
 		cancelAtClose   bool
+		shutdownAtClose bool
 	}{
-		{"normal", protocol.CurrentRunnerProtocol, true, false},
-		{"cancel_after_native_close", protocol.CurrentRunnerProtocol, true, true},
-		{"old_server_current_wire", protocol.CurrentRunnerProtocol, false, true},
-		{"old_server_previous_wire", protocol.MinimumRunnerProtocol, false, true},
+		{"normal", protocol.CurrentRunnerProtocol, true, false, false},
+		{"cancel_after_native_close", protocol.CurrentRunnerProtocol, true, true, false},
+		{"shutdown_after_native_close", protocol.CurrentRunnerProtocol, true, true, true},
+		{"old_server_current_wire", protocol.CurrentRunnerProtocol, false, true, false},
+		{"old_server_previous_wire", protocol.MinimumRunnerProtocol, false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testWorkerExplicitClose(t, tc.wire, tc.wantProcessText, tc.cancelAtClose)
+			testWorkerExplicitClose(t, tc.wire, tc.wantProcessText, tc.cancelAtClose, tc.shutdownAtClose)
 		})
 	}
 }
 
-func testWorkerExplicitClose(t *testing.T, wire int64, wantProcessText, cancelAtClose bool) {
+func testWorkerExplicitClose(t *testing.T, wire int64, wantProcessText, cancelAtClose, shutdownAtClose bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	attempt, cancelAttempt := context.WithCancel(ctx)
+	lifetime, cancelLifetime := context.WithCancel(ctx)
+	defer cancelLifetime()
+	attempt, cancelAttempt := context.WithCancel(lifetime)
 	defer cancelAttempt()
 	r, as, _, _ := retainedRunnerFixture(t, protocol.RoleIssueManager)
 	r.runnerProtocol = wire
@@ -96,7 +100,9 @@ func testWorkerExplicitClose(t *testing.T, wire int64, wantProcessText, cancelAt
 		eventFailureResolver: eventFailureResolver{closeRecoveryResolver{native: fake}},
 		afterClose: func() {
 			physicallyClosed = true
-			if cancelAtClose {
+			if shutdownAtClose {
+				cancelLifetime()
+			} else if cancelAtClose {
 				cancelAttempt()
 			}
 		},
@@ -141,7 +147,7 @@ func testWorkerExplicitClose(t *testing.T, wire int64, wantProcessText, cancelAt
 				command := protocol.ManagerNativeRequest{ID: "original-close", Method: "close", Payload: json.RawMessage(`{}`)}
 				result = command
 				if wantProcessText {
-					result = protocol.ManagerNativeClaimResult{ManagerNativeRequest: command, AcceptsCloseProcessText: true}
+					result = protocol.ManagerNativeClaimResult{ManagerNativeRequest: command, AcceptsCloseProcessText: true, AcceptsShutdownProcessText: true}
 				}
 			}
 		case protocol.OpManagerNativeReply:
@@ -203,7 +209,7 @@ func testWorkerExplicitClose(t *testing.T, wire int64, wantProcessText, cancelAt
 	}))
 	defer server.Close()
 	r.c.base, r.c.http = server.URL, server.Client()
-	err := r.managerNative(attempt, ctx, as)
+	err := r.managerNative(attempt, lifetime, as)
 	if cancelAtClose {
 		mu.Lock()
 		sent, delivered, sequence := sentClose, gotClose, lastSequence

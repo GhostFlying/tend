@@ -182,11 +182,16 @@ func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command, sourc
 // command is durable, an in-flight observation, or absent.
 func activeManagerClaimResult(request *protocol.ManagerNativeRequest) any {
 	if request == nil {
-		return map[string]any{"request": nil, "accepts_disconnect_process_text": true}
+		return map[string]any{
+			"request":                         nil,
+			"accepts_disconnect_process_text": true,
+			"accepts_shutdown_process_text":   true,
+		}
 	}
 	return protocol.ManagerNativeClaimResult{
 		ManagerNativeRequest:         *request,
 		AcceptsCloseProcessText:      request.Method == "close",
 		AcceptsDisconnectProcessText: true,
+		AcceptsShutdownProcessText:   true,
 	}
 }
