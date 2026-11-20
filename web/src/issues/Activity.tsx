@@ -893,11 +893,7 @@ function ActivityBlock({
                           open: traceOpen,
                           ready: !!process.value,
                           activeTool: block.process?.active_tool,
-                          latestActivity: block.process?.state
-                            ? (block.items?.findLast(
-                                (item) => item.assistant_state === "streaming",
-                              ) ?? null)
-                            : undefined,
+                          latestActivity: null,
                           toggle: () => {
                             if (!traceOpen) requestProcess();
                             setTraceOpen(!traceOpen);

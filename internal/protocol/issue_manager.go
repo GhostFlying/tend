@@ -106,6 +106,16 @@ type ManagerNativeEvent struct {
 	Body     json.RawMessage `json:"body"`
 }
 
+// WorkerProcessText is an observed partial reply attached to an existing
+// native event. It has no separate event sequence or acknowledgement.
+type WorkerProcessText struct {
+	ThreadID  string `json:"thread_id"`
+	TurnID    string `json:"turn_id"`
+	ItemID    string `json:"item_id"`
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
 // IssueManagerView separates published category work from its actual assignee.
 type IssueManagerView struct {
 	Observation           *RunSyncObservation `json:"observation,omitempty"`

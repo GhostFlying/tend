@@ -240,6 +240,8 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	opened = true
 	nativeClosed := false
 	var emitMu sync.Mutex
+	streamText := as.Manager.ConversationID == "" || as.Manager.ConversationID == "main"
+	var processText workerProcessText
 	driver := coordination.Driver{RequireReceiptReader: as.Manager.RequireReceiptReader, NativeOwnerTools: as.Manager.NativeOwnerTools && !as.Manager.ReceiptOnly, OnUsageStopped: func(stopCtx context.Context, thread string) error {
 		return r.cfg.Journal.StopUsageSource(stopCtx, as.RunID, thread)
 	}, BeforeUsageDispatch: func(sourceCtx context.Context, source nativeusage.Source) error {
@@ -308,6 +310,9 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	driver.Emit = func(ctx context.Context, event coordination.Event) error {
 		emitMu.Lock()
 		defer emitMu.Unlock()
+		if !streamText && processText.capture(&event) {
+			return nil
+		}
 		if event.Native != nil {
 			native := *event.Native
 			if native.ContextUsage != nil || native.Kind == harness.EventTurnCompleted {

@@ -14,7 +14,7 @@ import (
 
 // bufferBackgroundReply keeps ordinary output out of the transcript until the
 // background turn has made its final visible/silent choice.
-func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload, preservePrefix bool, deliveryTurn string) (bool, Outcome, error) {
+func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordAgentMessagePayload, policy agentMessageRecordPolicy, deliveryTurn string) (bool, Outcome, error) {
 	if deliveryTurn == "" {
 		deliveryTurn = p.TurnID
 	}
@@ -41,8 +41,15 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 		}
 	}
 	result := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
-	extend := preservePrefix && oldStatus == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old)
-	if err == nil && (oldStatus != string(protocol.AssistantStreaming) && !extend || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old))) {
+	extend := policy.extendInterruptedPrefix && oldStatus == string(protocol.AssistantInterrupted) && status == protocol.AssistantInterrupted && strings.HasPrefix(p.Body, old)
+	restore := policy.reconciled && status == protocol.AssistantCompleted &&
+		(oldStatus == string(protocol.AssistantInterrupted) || oldStatus == string(protocol.AssistantUnknown))
+	if restore {
+		if err := tx.Q().QueryRowContext(ctx, `SELECT conversation_id NOT IN ('','main') FROM conversation_messages WHERE message_id=?`, b.MessageID).Scan(&restore); err != nil {
+			return true, Outcome{}, err
+		}
+	}
+	if err == nil && (oldStatus != string(protocol.AssistantStreaming) && !extend && !restore || (status == protocol.AssistantStreaming && !strings.HasPrefix(p.Body, old))) {
 		return true, result, nil
 	}
 	if p.Body == "" && errors.Is(err, sql.ErrNoRows) {
@@ -52,13 +59,13 @@ func bufferBackgroundReply(ctx context.Context, x *Exec, tx *store.Tx, p recordA
 	if err != nil {
 		return true, Outcome{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(status), x.Env.RequestID, x.Now.UnixMilli(), preservePrefix && status == protocol.AssistantInterrupted)
+	_, err = tx.Exec(ctx, `INSERT INTO background_replies(batch_id,thread_id,turn_id,item_id,body,status,request_id,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(batch_id,thread_id,turn_id,item_id) DO UPDATE SET body=excluded.body,status=excluded.status,published=CASE WHEN ? THEN 0 ELSE background_replies.published END`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID, retained, string(status), x.Env.RequestID, x.Now.UnixMilli(), extend || restore)
 	if err != nil {
 		return true, Outcome{}, err
 	}
 	// Late terminal output follows the already settled batch disposition.
 	if b.Status != "pending" && b.Status != "frozen" {
-		err = publishBackgroundReplies(ctx, x, tx, b, b.Status, agentMessageRecordPolicy{extendInterruptedPrefix: preservePrefix})
+		err = publishBackgroundReplies(ctx, x, tx, b, b.Status, policy)
 	}
 	return true, result, err
 }
@@ -126,18 +133,19 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 }
 
 func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b protocol.BackgroundBatch, status string, policy ...agentMessageRecordPolicy) error {
-	rows, err := tx.Q().QueryContext(ctx, `SELECT thread_id,turn_id,item_id,body,status,request_id,kind,tool_json,created_at FROM background_replies WHERE batch_id=? AND published=0 ORDER BY seq`, b.BatchID)
+	rows, err := tx.Q().QueryContext(ctx, `SELECT r.thread_id,r.turn_id,r.item_id,r.body,r.status,r.request_id,r.kind,r.tool_json,r.created_at,m.conversation_id NOT IN ('','main') FROM background_replies r JOIN conversation_messages m ON m.message_id=? WHERE r.batch_id=? AND r.published=0 ORDER BY r.seq`, b.MessageID, b.BatchID)
 	if err != nil {
 		return err
 	}
 	type reply struct {
 		thread, turn, item, body, status, request, kind, tool string
 		created                                               int64
+		worker                                                bool
 	}
 	var replies []reply
 	for rows.Next() {
 		var r reply
-		if err := rows.Scan(&r.thread, &r.turn, &r.item, &r.body, &r.status, &r.request, &r.kind, &r.tool, &r.created); err != nil {
+		if err := rows.Scan(&r.thread, &r.turn, &r.item, &r.body, &r.status, &r.request, &r.kind, &r.tool, &r.created, &r.worker); err != nil {
 			rows.Close()
 			return err
 		}
@@ -178,7 +186,8 @@ func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b prot
 			if err == nil {
 				_, err = tx.Exec(ctx, `UPDATE background_replies SET status=? WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, string(p.Status), b.BatchID, r.thread, r.turn, r.item)
 			}
-		} else if r.body != "" && !(status == store.TurnCompleted && b.Checkin != nil) {
+		} else if r.body != "" && !(status == store.TurnCompleted && b.Checkin != nil) &&
+			(!r.worker || r.status == string(protocol.AssistantCompleted)) {
 			r.body, err = store.ResolveJSON(ctx, tx.Q(), r.body)
 			if err != nil {
 				return err

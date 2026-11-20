@@ -66,7 +66,7 @@ func TestManagerEventACKOnlyWakesSchedulingForClosingOrTerminalReceipt(t *testin
 	appendEvent := func() {
 		t.Helper()
 		sequence++
-		op := h.runAs(assignment, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"agent_message_delta","TurnID":"turn","ItemID":"reply","Text":"x"}}`)}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent})
+		op := h.runAs(assignment, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"item_completed","TurnID":"turn","ItemID":"reply","ItemType":"agentMessage","Text":"x"}}`)}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent})
 		if op.Error != nil {
 			t.Fatal(op)
 		}

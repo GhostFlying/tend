@@ -387,6 +387,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	if !remote {
 		m.refreshUsage(ctx, th)
 	}
+	streamText := m.streamAssistantText()
 	drafts := replyDrafts{}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -400,8 +401,10 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		if err := m.app.AwaitNativeReceipts(cleanup, th.ID()); err != nil {
 			diagnostics.cleanup(cleanup, slog.LevelError, "fence_native_receipts", err)
 		}
-		if err := m.flushClosingReplies(cleanup, th, drafts, protocol.AssistantInterrupted); err != nil {
-			diagnostics.cleanup(cleanup, slog.LevelError, "preserve_partial_replies", err)
+		if streamText {
+			if err := m.flushClosingReplies(cleanup, th, drafts, protocol.AssistantInterrupted); err != nil {
+				diagnostics.cleanup(cleanup, slog.LevelError, "preserve_partial_replies", err)
+			}
 		}
 		m.detach(th)
 		m.mu.Lock()
@@ -419,6 +422,9 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 	}()
 	lastConcurrencyActivity := int64(0)
 	processEvent := func(ctx context.Context, ev harness.Event) (eventErr error) {
+		if !streamText && ev.Kind == harness.EventAgentMessageDelta {
+			return nil // Legacy fragments are available to the process reader.
+		}
 		ev.AttachmentRunID = diagnostics.runID
 		ctx = diagnostics.eventContext(ctx, ev)
 		defer func() {
@@ -433,8 +439,10 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			return nil
 		}
 		if ev.Kind == harness.EventCoordinatorDisconnected || ev.Kind == harness.EventCoordinatorHistoryEnd {
-			if err := m.flushReplies(ctx, th, drafts, "", protocol.AssistantUnknown); err != nil {
-				return err
+			if streamText {
+				if err := m.flushReplies(ctx, th, drafts, "", protocol.AssistantUnknown); err != nil {
+					return err
+				}
 			}
 			if err := ack(); err != nil {
 				return err
@@ -529,8 +537,10 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 			case "failed":
 				state = protocol.AssistantFailed
 			}
-			if err := m.flushReplies(ctx, th, drafts, ev.TurnID, state); err != nil {
-				return fmt.Errorf("mainthread: settle replies: %w", err)
+			if streamText {
+				if err := m.flushReplies(ctx, th, drafts, ev.TurnID, state); err != nil {
+					return fmt.Errorf("mainthread: settle replies: %w", err)
+				}
 			}
 			for key := range drafts {
 				if key.turn == ev.TurnID {
@@ -538,7 +548,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 				}
 			}
 		}
-		if ev.Tool != nil {
+		if streamText && ev.Tool != nil {
 			if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
 				return fmt.Errorf("mainthread: preserve reply order: %w", err)
 			}
@@ -642,8 +652,10 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 					return nil
 				}
 			}
-			if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
-				return fmt.Errorf("mainthread: flush replies: %w", err)
+			if streamText {
+				if err := m.flushReplies(ctx, th, drafts, "", ""); err != nil {
+					return fmt.Errorf("mainthread: flush replies: %w", err)
+				}
 			}
 			if restart, err := m.environmentRestart(ctx, s, th); err != nil {
 				m.cfg.Log.WarnContext(ctx, "environment adoption pending", "err", err)

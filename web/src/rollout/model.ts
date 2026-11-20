@@ -53,6 +53,7 @@ export function firstLine(text: string): string {
 const titles: Record<string, string> = {
   unknownFormat: "未知格式",
   agentMessage: "Agent 回复",
+  agentMessageFragment: "回复片段",
   commandExecution: "执行命令",
   mcpToolCall: "调用工具",
   dynamicToolCall: "调用工具",
@@ -98,6 +99,7 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
       continue;
     }
     const prior = step;
+    const fragment = type === "agentMessageFragment";
     const text =
       string(data.text) ||
       orcaReply ||
@@ -144,7 +146,7 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
       lastSeq: row.seq,
       rows: [...(prior?.rows ?? []), row],
       kind:
-        type === "agentMessage"
+        type === "agentMessage" || fragment
           ? "text"
           : type === "reasoning"
             ? "reasoning"
@@ -163,7 +165,10 @@ export function buildSteps(logs: readonly RunLogView[]): Step[] {
         ) ||
         prior?.summary ||
         title,
-      text: text || prior?.text || "",
+      text:
+        fragment && data.truncated === true
+          ? text + "\n\n[已采集片段到此为止]"
+          : text || prior?.text || "",
       input: input || prior?.input || "",
       output,
       status,
