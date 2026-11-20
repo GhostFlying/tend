@@ -55,21 +55,33 @@ export class ConversationQueue {
       while (this.dirty && this.controller) {
         this.dirty = false;
         const { signal } = this.controller;
-        try {
-          const [owner, withdrawn] = await Promise.all([
-            this.readCategory("owner", signal),
-            this.readCategory("withdrawn", signal),
-          ]);
-          if (!signal.aborted)
-            this.state.set({ supported: true, pages: { owner, withdrawn }, error: undefined });
-        } catch (error) {
-          if (signal.aborted) continue;
-          if (error instanceof ApiError && error.status === 404) {
-            this.state.set({ ...this.state.get(), supported: false, error: undefined });
-          } else {
-            this.state.set({ ...this.state.get(), error: String(error) });
-            this.timer = setTimeout(() => void this.refresh(), 3000);
-          }
+        const read = async (category: Category) => {
+          const page = await this.readCategory(category, signal);
+          if (signal.aborted) return;
+          const state = this.state.get();
+          this.state.set({
+            ...state,
+            supported: category === "owner" ? true : state.supported,
+            pages: { ...state.pages, [category]: page },
+          });
+        };
+        const [owner, withdrawn] = await Promise.allSettled([read("owner"), read("withdrawn")]);
+        if (signal.aborted) continue;
+        if (
+          owner.status === "rejected" &&
+          owner.reason instanceof ApiError &&
+          owner.reason.status === 404
+        ) {
+          this.state.set({ ...this.state.get(), supported: false, error: undefined });
+          continue;
+        }
+        const failure = owner.status === "rejected" ? owner : withdrawn;
+        this.state.set({
+          ...this.state.get(),
+          error: failure.status === "rejected" ? String(failure.reason) : undefined,
+        });
+        if (failure.status === "rejected") {
+          this.timer = setTimeout(() => void this.refresh(), 3000);
         }
       }
     })().finally(() => {
