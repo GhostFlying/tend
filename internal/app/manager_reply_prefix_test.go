@@ -51,6 +51,7 @@ func TestFault_ManagerFrozenCloseWaitsForOriginalReplyPrefixes(t *testing.T) {
 				if op := h.runAs(as, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: body}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
+				setLegacyManagerFragmentPending(t, h, as.RunID, sequence)
 				if sequence <= 16 {
 					if err := h.app.AcknowledgeManagerEvent(t.Context(), as.RunID, sequence, "native", "original-turn", item, false); err != nil {
 						t.Fatal(err)

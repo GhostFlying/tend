@@ -3,10 +3,11 @@ package views
 import (
 	"context"
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/protocol"
-	"github.com/GhostFlying/tend/internal/store"
 	"slices"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // RunRollout returns either the newest window, its predecessor or its successor.
@@ -17,10 +18,22 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 		return v, err
 	}
 	v.Observed = run.ObservedState
-	if err = q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM run_logs WHERE run_id=?`, id).Scan(&v.Watermark); err != nil {
+	source := "run_logs"
+	fields := "seq,COALESCE(native_id,''),kind,body_json,created_at"
+	process := false
+	if run.Role == protocol.RoleIssueManager {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main')) AND NOT EXISTS(SELECT 1 FROM run_logs WHERE run_id=?)`, run.TaskID, id).Scan(&process); err != nil {
+			return v, err
+		}
+		if process {
+			source, fields = "manager_native_events", "seq,'','',body_json,0"
+		}
+	}
+	from := " FROM " + source + " WHERE run_id=?"
+	if err = q.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0)"+from, id).Scan(&v.Watermark); err != nil {
 		return v, err
 	}
-	query := `SELECT seq,COALESCE(native_id,''),kind,body_json,created_at FROM run_logs WHERE run_id=?`
+	query := "SELECT " + fields + from
 	args := []any{id}
 	descending := after == 0
 	if before > 0 {
@@ -52,7 +65,13 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 			return v, err
 		}
 		r.Body = json.RawMessage(body)
-		r.CreatedAt = time.UnixMilli(at)
+		if process {
+			if err := projectManagerProcessEvent(&r); err != nil {
+				return v, err
+			}
+		} else {
+			r.CreatedAt = time.UnixMilli(at)
+		}
 		v.Logs = append(v.Logs, r)
 	}
 	if err = rows.Err(); err != nil {
@@ -71,7 +90,7 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 		v.After = after
 		v.Before = before
 	}
-	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND seq<?),EXISTS(SELECT 1 FROM run_logs WHERE run_id=? AND seq>?)`, id, v.Before, id, v.After).Scan(&v.MoreBefore, &v.MoreAfter); err != nil {
+	if err = q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1"+from+" AND seq<?),EXISTS(SELECT 1"+from+" AND seq>?)", id, v.Before, id, v.After).Scan(&v.MoreBefore, &v.MoreAfter); err != nil {
 		return v, err
 	}
 	return v, nil

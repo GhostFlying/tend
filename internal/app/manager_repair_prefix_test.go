@@ -151,6 +151,7 @@ func TestManagerRepairPrefixKeepsLaterOriginalDeltaUnapplied(t *testing.T) {
 	if op := h.runAs(as, protocol.OpManagerNativeEvent, late, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	setLegacyManagerFragmentPending(t, h, as.RunID, late.Sequence)
 	if err := h.app.AcknowledgeManagerRepairPrefix(t.Context(), as.RunID, 19, "native", "original-turn", "original-item", "part17part18part19", []int64{17, 18, 19}); err != nil {
 		t.Fatal(err)
 	}

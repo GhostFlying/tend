@@ -36,14 +36,15 @@ type Event struct {
 	RootTurnID string `json:"root_turn_id,omitempty"`
 	Continued  bool   `json:"continued,omitempty"`
 
-	Historical     bool              `json:"-"`
-	SourceRunID    string            `json:"-"`
-	SourceSequence int64             `json:"-"`
-	Sequence       int64             `json:"sequence"`
-	Disconnected   bool              `json:"disconnected,omitempty"`
-	ThreadID       string            `json:"thread_id"`
-	Native         *harness.Event    `json:"native,omitempty"`
-	Call           *harness.ToolCall `json:"call,omitempty"`
+	Historical     bool                         `json:"-"`
+	SourceRunID    string                       `json:"-"`
+	SourceSequence int64                        `json:"-"`
+	Sequence       int64                        `json:"sequence"`
+	Disconnected   bool                         `json:"disconnected,omitempty"`
+	ThreadID       string                       `json:"thread_id"`
+	Native         *harness.Event               `json:"native,omitempty"`
+	Call           *harness.ToolCall            `json:"call,omitempty"`
+	ProcessText    []protocol.WorkerProcessText `json:"process_text,omitempty"`
 }
 
 type RetainedToolResults interface {

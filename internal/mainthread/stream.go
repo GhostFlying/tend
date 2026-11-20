@@ -44,6 +44,10 @@ type repairPrefixAcknowledger interface {
 // Reply persistence needs only its original identity, not a live native thread.
 type replyThread interface{ ID() string }
 
+func (m *Manager) streamAssistantText() bool {
+	return m.cfg.ConversationID == "" || m.cfg.ConversationID == "main"
+}
+
 func (d replyDrafts) begin(ev harness.Event, m *Manager) {
 	k := replyKey{ev.TurnID, ev.ItemID}
 	if d[k] != nil {
@@ -180,7 +184,9 @@ func (m *Manager) recordReplySources(ctx context.Context, th replyThread, ev har
 		native += fmt.Sprintf("/%s:%x", state, sha256.Sum256([]byte(ev.Text)))
 	}
 	_, replay := th.(*databaseReplyThread)
-	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{PreservePrefix: replay, DeliveryTurn: ev.CoordinatorRootTurn})
+	return m.record(ctx, th, native, "conversation.record_agent_message", payload, app.RecordAgentMessage{
+		PreservePrefix: replay, Reconciled: !m.streamAssistantText(), DeliveryTurn: ev.CoordinatorRootTurn,
+	})
 }
 
 // A ticker, closing drain, or another event may flush retained drafts. Always

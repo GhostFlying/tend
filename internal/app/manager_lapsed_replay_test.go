@@ -60,6 +60,9 @@ func lapsedReplyFixtureForTurn(t *testing.T, native string) (*harness, protocol.
 		if op := h.runAs(as, protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: body}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
+		if sequence >= 17 {
+			setLegacyManagerFragmentPending(t, h, as.RunID, sequence)
+		}
 		if sequence < 17 {
 			if err := h.app.AcknowledgeManagerEvent(t.Context(), as.RunID, sequence, "native", "", "", false); err != nil {
 				t.Fatal(err)
@@ -80,6 +83,18 @@ func lapsedReplyFixtureForTurn(t *testing.T, native string) (*harness, protocol.
 		t.Fatal(err)
 	}
 	return h, as, close
+}
+
+// These tests exercise prefix reconciliation against the old persisted shape.
+// New Worker ingress retains the same original but does not wait for a prefix.
+func setLegacyManagerFragmentPending(t *testing.T, h *harness, run string, sequence int64) {
+	t.Helper()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE manager_native_events SET applied=0 WHERE run_id=? AND seq=?`, run, sequence)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestFault_LapsedManagerReplaysOnlyItsFrozenDatabasePrefix(t *testing.T) {
@@ -308,6 +323,7 @@ func TestLapsedManagerReplayRetainsAppliedFragmentsAndItsReadBoundary(t *testing
 	if op := h.runAs(as, protocol.OpManagerNativeEvent, late, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 		t.Fatal("late original event was rejected after lapse", op)
 	}
+	setLegacyManagerFragmentPending(t, h, as.RunID, late.Sequence)
 	if len(scope.Events) != 3 || scope.Events[2].Sequence != 19 {
 		t.Fatal("later event changed an existing read boundary", scope.Events)
 	}

@@ -393,10 +393,11 @@ func (c RecordAgentMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown assistant status")
 	}
-	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p, c.PreservePrefix, c.DeliveryTurn); handled {
+	policy := agentMessageRecordPolicy{reconciled: c.Reconciled, extendInterruptedPrefix: c.PreservePrefix}
+	if handled, out, err := bufferBackgroundReply(ctx, x, tx, p, policy, c.DeliveryTurn); handled {
 		return out, err
 	}
-	return recordVisibleAgentMessage(ctx, x, tx, agentMessageRecordPolicy{reconciled: c.Reconciled, extendInterruptedPrefix: c.PreservePrefix})
+	return recordVisibleAgentMessage(ctx, x, tx, policy)
 }
 
 func preserveRecordedReplyPrefix(ctx context.Context, tx *store.Tx, thread string, p recordAgentMessagePayload) error {

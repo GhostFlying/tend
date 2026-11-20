@@ -467,14 +467,22 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "native events must be contiguous")
 		}
 		var event struct {
-			Root      string `json:"root_turn_id"`
-			Continued bool   `json:"continued"`
-			ThreadID  string `json:"thread_id"`
-			Native    *struct {
-				Kind       string
-				TurnID     string
-				TurnStatus string
-				Failure    *protocol.AgentFailure
+			Root         string          `json:"root_turn_id"`
+			Continued    bool            `json:"continued"`
+			ThreadID     string          `json:"thread_id"`
+			Call         json.RawMessage `json:"call"`
+			Disconnected bool            `json:"disconnected"`
+			Native       *struct {
+				Kind         string
+				TurnID       string
+				ItemID       string
+				ItemType     string
+				Text         *string
+				Tool         json.RawMessage
+				RequestUsage json.RawMessage
+				ContextUsage json.RawMessage
+				TurnStatus   string
+				Failure      *protocol.AgentFailure
 			} `json:"native"`
 		}
 		parsed := json.Unmarshal(p.Body, &event) == nil
@@ -506,6 +514,23 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 				}
 			}
 		}
+		// Old runners still send text on the original sequence. Retain the
+		// event for process reads but do not wait for a conversation write.
+		processText := false
+		if parsed && event.Native != nil && event.Native.Kind == "agent_message_delta" &&
+			(event.Native.ItemType == "" || event.Native.ItemType == "agentMessage") &&
+			event.ThreadID != "" && event.Native.TurnID != "" && event.Native.ItemID != "" && event.Native.Text != nil &&
+			!event.Disconnected && (len(event.Call) == 0 || string(event.Call) == "null") &&
+			(len(event.Native.Tool) == 0 || string(event.Native.Tool) == "null") &&
+			(len(event.Native.RequestUsage) == 0 || string(event.Native.RequestUsage) == "null") &&
+			(len(event.Native.ContextUsage) == 0 || string(event.Native.ContextUsage) == "null") &&
+			event.Native.TurnStatus == "" && event.Native.Failure == nil {
+			var err error
+			err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main'))`, r.TaskID).Scan(&processText)
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
 		projectionOnly := false
 		if parsed && event.Native != nil {
 			switch event.Native.Kind {
@@ -521,7 +546,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json,received_at) VALUES(?,?,?,?)`, run, p.Sequence, body, x.Now.UnixMilli())
+		_, err = tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json,received_at,applied) VALUES(?,?,?,?,?)`, run, p.Sequence, body, x.Now.UnixMilli(), processText)
 		return Outcome{ProjectionOnly: projectionOnly, Result: map[string]any{"ack": p.Sequence}}, err
 	}
 	return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown manager transport operation")

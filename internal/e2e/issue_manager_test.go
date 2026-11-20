@@ -180,8 +180,22 @@ func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
 	runRunnerManager(t, false, false, false, "urgent")
 }
 
+func TestEndToEndWorkerTextOnlyPublishesNativeCompletedItems(t *testing.T) {
+	for _, mode := range []string{"worker_text_complete", "worker_text_interrupted"} {
+		t.Run(mode, func(t *testing.T) {
+			runRunnerManager(t, false, false, false, mode)
+		})
+	}
+}
+
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archiveMode string) {
 	urgent := archiveMode == "urgent"
+	workerText := strings.HasPrefix(archiveMode, "worker_text_")
+	textInterrupted := archiveMode == "worker_text_interrupted"
+	const processFragment = "worker fragment 🙂"
+	const completeText = "完整 Worker 回复。"
+	fragmentSent := make(chan struct{})
+	finishText := make(chan struct{})
 	var recoveryPausedAt atomic.Int64
 	now := func() time.Time {
 		if frozen := recoveryPausedAt.Load(); frozen != 0 {
@@ -473,6 +487,27 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		if !mutate("issues_turn_commit", commit, nil, nil) {
 			return "failed"
 		}
+		if workerText && attempts.Load() == 1 {
+			for _, part := range []string{"worker ", "fragment ", "🙂"} {
+				th.Emit(harness.Event{Kind: harness.EventAgentMessageDelta, ItemType: harness.ItemAgentMessage, TurnID: turn, ItemID: "worker-text", Text: part})
+			}
+			// The real callback must still reach the Issue while the item is open.
+			if !invoke("issues_read", map[string]any{}, nil) {
+				return "failed"
+			}
+			close(fragmentSent)
+			select {
+			case <-finishText:
+			case <-ctx.Done():
+				return "interrupted"
+			}
+			if textInterrupted {
+				return "interrupted"
+			}
+			th.Say(turn, "worker-text", completeText)
+			th.Say(turn, "worker-text", completeText)
+			return "completed"
+		}
 		released := true
 		if delivery && len(item.Tasks) > 0 {
 			var task protocol.TaskDetail
@@ -636,6 +671,24 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	admitted := execute("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
 	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
+	}
+	var textCLI *ownerCLI
+	if workerText {
+		select {
+		case <-fragmentSent:
+		case failure := <-failures:
+			t.Fatal(failure)
+		case <-time.After(30 * time.Second):
+			t.Fatal("worker did not reach its original read after emitting text")
+		}
+		textCLI = newOwnerCLI(t, filepath.Join(t.TempDir(), "tend"))
+		textCLI.run("", "login", "--server", s.startAPI())
+		visible := textCLI.run("", "conversation", "show", "issue:"+issue.IssueID)
+		if strings.Contains(visible, "worker fragment") || strings.Contains(visible, completeText) ||
+			s.count(`SELECT COUNT(*) FROM manager_native_events WHERE json_extract(body_json,'$.native.Kind')='agent_message_delta'`) != 0 {
+			t.Fatal("in-progress text entered the ordinary conversation or the Run sequence")
+		}
+		close(finishText)
 	}
 	if urgent {
 		defer close(releaseUrgent)
@@ -974,6 +1027,26 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	}
 	if s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager' AND (observed_state='finished' OR (? AND observed_state='failed'))`, loseStart) < 1 || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 || (!delivery && s.count(`SELECT COUNT(*) FROM workspaces`) != 0) {
 		t.Fatal("manager did not release its execution resources")
+	}
+	if workerText {
+		visible := textCLI.run("", "conversation", "show", "issue:"+issue.IssueID)
+		if strings.Contains(visible, "worker fragment") {
+			t.Fatal("partial worker reply leaked into the ordinary conversation")
+		}
+		var run string
+		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+			return tx.Q().QueryRowContext(ctx, `SELECT run_id FROM runs WHERE role='issue_manager'`).Scan(&run)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		logs := textCLI.run("", "run", "rollout", run, "--json")
+		if textInterrupted {
+			if !strings.Contains(visible, "interrupted") || !strings.Contains(logs, processFragment) || strings.Contains(visible, completeText) {
+				t.Fatal("interruption state or the process-only fragment is missing", visible, logs)
+			}
+		} else if strings.Count(visible, completeText) != 1 || strings.Contains(logs, processFragment) {
+			t.Fatal("complete item was not published exactly once", visible, logs)
+		}
 	}
 	if archiveMode != "" && (s.count(`SELECT COUNT(*) FROM issue_manager_tasks WHERE issue_id=?`, issue.IssueID) != 1 || s.count(`SELECT COUNT(*) FROM runs WHERE role='issue_manager'`) != 1) {
 		t.Fatal("archive recovery replaced or repeated the original manager responsibility")

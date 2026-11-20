@@ -28,6 +28,9 @@ func (t *databaseReplyThread) AcknowledgeRepairPrefix(ctx context.Context, event
 }
 
 func (p *BackgroundPool) startDatabaseReplyReplay(ctx context.Context, id string, wg *sync.WaitGroup) (bool, error) {
+	if id != "main" {
+		return false, nil
+	}
 	replay, err := p.App.ClosingManagerReplyReplay(ctx, id)
 	if err != nil || replay == nil {
 		return false, err

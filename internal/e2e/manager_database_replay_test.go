@@ -1,41 +1,34 @@
 package e2e
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
 	"github.com/GhostFlying/tend/internal/app"
-	"github.com/GhostFlying/tend/internal/contextbuilder"
-	"github.com/GhostFlying/tend/internal/harness"
-	"github.com/GhostFlying/tend/internal/hostedconfig"
-	"github.com/GhostFlying/tend/internal/mainthread"
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/store"
-	"github.com/GhostFlying/tend/internal/tools"
 )
 
-func TestFault_LapsedManagerDatabaseReplayCommitsItsOriginalClose(t *testing.T) {
+func TestFault_LapsedManagerLegacyTextAllowsOriginalClose(t *testing.T) {
 	lapsedManagerReplayCommitsOriginalClose(t, false)
 }
 
-func TestFault_LapsedManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
+func TestFault_LapsedManagerLegacyRepairTextAllowsOriginalClose(t *testing.T) {
 	lapsedManagerReplayCommitsOriginalClose(t, true)
 }
 
-func TestFault_ActiveClosingManagerRepairReplayCommitsItsOriginalClose(t *testing.T) {
+func TestFault_ActiveManagerLegacyRepairTextAllowsOriginalClose(t *testing.T) {
 	managerReplayCommitsOriginalClose(t, true, managerReplayOptions{active: true})
 }
 
-func TestFault_ActiveClosingManagerEmptyRepairReplayCommitsItsOriginalClose(t *testing.T) {
+func TestFault_ActiveManagerLegacyEmptyTextAllowsOriginalClose(t *testing.T) {
 	managerReplayCommitsOriginalClose(t, true, managerReplayOptions{active: true, empty: true})
 }
 
@@ -167,9 +160,10 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	}
 	native(protocol.OpManagerNativeClaim, map[string]any{})
 	native(protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: resume, Result: json.RawMessage(`{"ID":"original-native"}`)})
-	for sequence := int64(1); sequence <= 19; sequence++ {
+	const lastSequence = 60
+	for sequence := int64(1); sequence <= lastSequence; sequence++ {
 		body := json.RawMessage(`{"thread_id":"original-native","native":{"Kind":"request_usage"}}`)
-		if sequence >= 17 {
+		if sequence >= 47 {
 			text := fmt.Sprintf("part%d", sequence)
 			if options.empty {
 				text = ""
@@ -177,7 +171,7 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 			body = json.RawMessage(fmt.Sprintf(`{"thread_id":"original-native","native":{"Kind":"agent_message_delta","TurnID":"original-turn","ItemID":"original-item","Text":%q}}`, text))
 		}
 		native(protocol.OpManagerNativeEvent, protocol.ManagerNativeEvent{Sequence: sequence, Body: body})
-		if sequence < 17 {
+		if sequence < 46 {
 			if err := s.app.AcknowledgeManagerEvent(ctx, as.RunID, sequence, "original-native", "", "", false); err != nil {
 				t.Fatal(err)
 			}
@@ -188,14 +182,12 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 		t.Fatal(err)
 	}
 	native(protocol.OpManagerNativeClaim, map[string]any{})
-	closeBody, _ := json.Marshal(protocol.ManagerNativeReply{ID: close, Result: json.RawMessage(`null`), LastSequence: 19})
+	closeBody, _ := json.Marshal(protocol.ManagerNativeReply{ID: close, Result: json.RawMessage(`null`), LastSequence: lastSequence})
 	frozenClose := &protocol.Envelope{RequestID: s.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeReply, Target: protocol.Target{Type: "run", ID: as.RunID}, Payload: closeBody}
 	if _, err := s.app.Execute(ctx, principal, frozenClose, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
-		t.Fatal("original frozen close bypassed unapplied deltas", err)
+		t.Fatal("original close bypassed an independent unapplied observation", err)
 	}
-	leaseStatus := "active"
 	if !options.active {
-		leaseStatus = "lapsed"
 		if err := s.store.Write(ctx, func(tx *store.Tx) error {
 			if err := tx.UpdateRunObserved(ctx, as.RunID, protocol.RunUnknown, s.now().UnixMilli()); err != nil {
 				return err
@@ -215,49 +207,23 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	if err := s.app.SetMainThread(ctx, instance+"/named/"+hex.EncodeToString(sum[:]), "original-native"); err != nil {
 		t.Fatal(err)
 	}
-	cb := contextbuilder.New(s.app, s.store, s.ids, contextbuilder.Config{})
-	var pool *mainthread.BackgroundPool
-	pool = &mainthread.BackgroundPool{App: s.app, New: func(id string) (*mainthread.Manager, error) {
-		if drained, err := pool.UpgradeDrainStatus(ctx); err != nil || drained {
-			t.Error("database replay admission was not serialized with drain", drained, err)
-		}
-		return mainthread.New(s.app, cb, tools.New(s.app, s.store, cb, quiet()), mainthread.Config{Instance: "database-replay/" + id, ConversationID: id, Log: quiet(), OpenNamed: func(context.Context, hostedconfig.Selection) (harness.Session, error) {
-			t.Error("closing database replay opened a native session or queried models")
-			return nil, fmt.Errorf("native execution is forbidden")
-		}}), nil
-	}}
-	run, cancel := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	wg.Go(func() { pool.Run(run) })
-	defer func() { cancel(); wg.Wait() }()
-	deadline := time.NewTimer(15 * time.Second)
-	defer deadline.Stop()
-	for s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND applied=0`, as.RunID) != 0 {
-		select {
-		case <-deadline.C:
-			t.Fatal("original closing deltas have no database consumer")
-		case <-time.After(10 * time.Millisecond):
-		}
+	// After the original non-text event is applied, the same close can settle.
+	// The 14 legacy fragments have their immutable original sequences and no
+	// application dependency on a visible or buffered conversation item.
+	if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=? AND seq BETWEEN 47 AND 60 AND applied=1`, as.RunID) != 14 {
+		t.Fatal("legacy fragments still required a conversation acknowledgement")
 	}
-	if s.count(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=?`, as.RunID) != 2 || s.count(`SELECT COUNT(*) FROM runs`) != 1 || s.count(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status=?`, as.RunID, leaseStatus) != 1 {
-		t.Fatal("database replay queued native work, created a run or renewed the lease")
+	if err := s.app.AcknowledgeManagerEvent(ctx, as.RunID, 46, "original-native", "", "", false); err != nil {
+		t.Fatal(err)
 	}
-	if repair {
-		if s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 || s.count(`SELECT COUNT(*) FROM background_replies WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
-			t.Fatal("internal repair text was published as a user reply")
-		}
-		if s.count(`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='run.manager_repair_prefix_consumed'`, as.RunID) != 1 {
-			t.Fatal("repair prefix has no durable internal consumption evidence")
-		}
-	} else if s.count(`SELECT COUNT(*) FROM conversation_agent_messages a JOIN conversation_messages m USING(message_id) WHERE a.thread_id='original-native' AND a.turn_id='original-turn' AND a.item_id='original-item' AND a.status='interrupted' AND m.body='part17part18part19'`) != 1 {
-		t.Fatal("ordinary database replay lost original text")
+	if s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native'`) != 0 ||
+		s.count(`SELECT COUNT(*) FROM background_replies WHERE thread_id='original-native'`) != 0 ||
+		s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 ||
+		s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != lastSequence {
+		t.Fatal("fragment compatibility published text, settled an unrelated receipt or changed the cursor")
 	}
-	if s.count(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, business) != 1 || s.count(`SELECT COUNT(*) FROM main_turns WHERE request_id=? AND status='interrupted'`, business) != 1 || s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, as.RunID) != 19 {
-		t.Fatal("prefix replay fabricated business completion or changed raw native events")
-	}
+
 	if options.retained {
-		cancel()
-		wg.Wait()
 		prepare, err := s.app.ChangeArchivePreparation(ctx, protocol.ArchiveControlRequest{RequestID: s.ids.New(protocol.PrefixRequest)}, true)
 		if err != nil {
 			t.Fatal(err)
@@ -286,7 +252,7 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 		t.Fatal("same original close envelope could not commit after consumption", result, err)
 	}
 	if options.retained {
-		native(protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original physical process exited", LastSequence: 19})
+		native(protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original physical process exited", LastSequence: lastSequence})
 	}
 	return databaseReplayFixture{server: s, assignment: as, runtime: runtime, business: business, instance: instance}
 }

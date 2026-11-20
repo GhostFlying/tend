@@ -165,6 +165,11 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 			}
 			continue
 		}
+		// A non-completed turn's history can contain the last partial text.
+		// An independently delivered item/completed has its own publish path.
+		if !m.streamAssistantText() && receipt.Status != "completed" {
+			continue
+		}
 		itemReplyTo, itemSources := replyTo, sources
 		if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), receipt.ID, message.ItemID); err != nil {
 			return err
