@@ -22,6 +22,10 @@ type MountBaseline struct {
 
 // WorkerSpec describes one run's work.
 type WorkerSpec struct {
+	// Delegated lets this executor continue the frozen agreement across native turns.
+	Delegated bool
+	// AttachOriginal limits local crash recovery to observing the original native process.
+	AttachOriginal           bool
 	SessionContinuation      *protocol.SessionContinuation
 	ExternalWaitContinuation *protocol.ExternalWait
 	WaitExternal             func(context.Context, protocol.WaitExternalPayload) (protocol.ExternalWait, error)
@@ -131,6 +135,11 @@ type WorkerEvent struct {
 	NativeID string
 	Kind     string
 	Body     json.RawMessage
+}
+
+// AttachmentOnly requires proof of the original process without a launch or a new input.
+func (s WorkerSpec) AttachmentOnly() bool {
+	return s.AttachOriginal || s.RetainedResume != nil
 }
 
 // WorkerResult is how a worker ended.

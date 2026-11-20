@@ -281,6 +281,7 @@ func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
 		return failed(reasonFor(err, "workspace_prepare_failed"), err)
 	}
 	cred := runCredential(as)
+	var reports []protocol.Envelope
 	if as.Role == protocol.RoleImplement {
 		report := p.Report
 		if !as.MountDirectories || !as.MountOriginIdentity {
@@ -300,13 +301,22 @@ func (r *Runner) prepare(ctx context.Context, as protocol.Assignment) error {
 		if err != nil {
 			return err
 		}
-		if _, err := r.send(ctx, cred, env); err != nil {
+		if protocol.RunnerOwnsExecution(as.Protocol) {
+			reports = append(reports, *env)
+		} else if _, err := r.send(ctx, cred, env); err != nil {
 			return failed("workspace_report_rejected", err)
 		}
 	}
 	env, err := r.newEnvelope(protocol.OpRunsReportStarted, runTarget(as), nil)
 	if err != nil {
 		return err
+	}
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		if err := r.cfg.Journal.BeginDelegatedRun(ctx, as.RunID, append(reports, *env)); err != nil {
+			return err
+		}
+		r.wakeEventSync()
+		return nil
 	}
 	// A start already recorded, for example before a restart, is fine.
 	if _, err := r.send(ctx, cred, env); err != nil && protocol.CodeOf(err) != protocol.CodeInvalidTransition {
@@ -399,16 +409,18 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
+	attachOriginal := protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && !run.StoppedConfirmed && !run.Held
+	attachmentOnly := strictResume != nil || attachOriginal
 	defer func() {
 		// Setup, observation and local persistence failures do not prove the
 		// original worker stopped. Preserve it instead of fabricating a new
 		// business failure and entering the ordinary terminal finalizer.
-		if strictResume != nil && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !isExternalWaitYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
+		if attachmentOnly && workErr != nil && context.Cause(runCtx) == nil && !isCompletionPending(workErr) && !isQuestionYield(workErr) && !isExternalWaitYield(workErr) && !errors.Is(workErr, errPaused) && !errors.Is(workErr, errHeld) {
 			workErr = &completionPending{workErr}
 		}
 	}()
 	var p Prepared
-	if strictResume != nil {
+	if attachmentOnly {
 		if run.Held || run.Thread == "" {
 			return &completionPending{harness.ErrRetainedResumePending}
 		}
@@ -531,9 +543,12 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	// Reset stop proof only when another native attempt is actually about to
 	// start. Recovering a durable question must preserve the predecessor exit.
-	attempt, err := r.cfg.Journal.NextAttempt(ctx, as.RunID)
-	if err != nil {
-		return err
+	attempt := run.Attempts
+	if !attachOriginal {
+		attempt, err = r.cfg.Journal.NextAttempt(ctx, as.RunID)
+		if err != nil {
+			return err
+		}
 	}
 	if attempt > 1 {
 		// The run resumes after a fence or a restart.
@@ -564,7 +579,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		if locator, ok := execution.Workspaces.(interface{ RunStateDirectory(string) (string, error) }); ok {
 			predecessorState, err = locator.RunStateDirectory(previousRun)
 			if err != nil {
-				if !optionalHistory || strictResume != nil || runCtx.Err() != nil {
+				if !optionalHistory || attachmentOnly || runCtx.Err() != nil {
 					return err
 				}
 				predecessorState, run.Thread = "", ""
@@ -576,7 +591,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
-	w, err := startWorker(runCtx, harness.WorkerSpec{SessionContinuation: as.SessionContinuation, WaitExternal: waitExternal, ExternalWaitContinuation: as.ExternalWaitContinuation, PredecessorStateDir: predecessorState, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
+	w, err := startWorker(runCtx, harness.WorkerSpec{SessionContinuation: as.SessionContinuation, WaitExternal: waitExternal, ExternalWaitContinuation: as.ExternalWaitContinuation, PredecessorStateDir: predecessorState, Delegated: protocol.RunnerOwnsExecution(as.Protocol), AttachOriginal: attachOriginal, RetainedResume: strictResume, ConcurrencyFeedback: as.ConcurrencyFeedback, AcceptanceEvidenceFiles: as.AcceptanceEvidenceFiles, ValidateVerdictFiles: evidence.validate, SealVerdictFiles: evidence.seal, VerdictFilesIdentity: evidence.identity, LegacyRawUsage: !r.supportsNativeUsage(),
 		Lifetime: nativeLifetime, NativeDial: func(ctx context.Context, channel string) (io.ReadWriteCloser, error) {
 			return remote.Dial(ctx, r.cfg.HTTPClient, r.cfg.ServerURL, as.RunID, as.RunToken, channel)
 		},
@@ -628,7 +643,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 				return stopped(errPaused)
 			}
 		}
-		if strictResume != nil && context.Cause(runCtx) == nil {
+		if attachmentOnly && context.Cause(runCtx) == nil {
 			return &completionPending{err}
 		}
 		if native, ok := errors.AsType[*orca.Error](err); ok && as.Execution != nil && (native.Code == "invalid_argument" || native.Code == "capability_unsupported" || native.Code == "incompatible_runtime") {
@@ -734,7 +749,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if errors.Is(werr, harness.ErrRetainedResumePending) {
 		return &completionPending{werr}
 	}
-	if strictResume != nil && context.Cause(runCtx) == nil {
+	if attachmentOnly && context.Cause(runCtx) == nil {
 		if appendErr != nil {
 			return &completionPending{appendErr}
 		}
@@ -1065,6 +1080,11 @@ func outcome(env protocol.Envelope) []any {
 }
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		if err := r.flushStartReports(ctx, as); err != nil {
+			return &completionPending{err}
+		}
+	}
 	strictResume, err := r.cfg.Journal.RetainedResume(ctx, as.RunID)
 	if err != nil {
 		return &completionPending{err}
@@ -1386,6 +1406,11 @@ func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error 
 }
 
 func (r *Runner) flushEventBatch(ctx context.Context, as protocol.Assignment) (bool, error) {
+	if protocol.RunnerOwnsExecution(as.Protocol) {
+		if err := r.flushStartReports(ctx, as); err != nil {
+			return false, err
+		}
+	}
 	r.wakeRolloutArchive()
 	pending, err := r.cfg.Journal.PendingEventBatch(ctx, as.RunID, 200, maxBatchBody-256)
 	if err != nil || len(pending) == 0 {

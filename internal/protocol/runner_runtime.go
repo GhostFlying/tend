@@ -2,10 +2,10 @@ package protocol
 
 // CurrentRunnerProtocol is the current server/runner communication generation.
 // Version zero denotes runners predating explicit negotiation.
-const CurrentRunnerProtocol int64 = 6
+const CurrentRunnerProtocol int64 = 7
 
 // MinimumRunnerProtocol is the oldest supported wire generation (D258).
-const MinimumRunnerProtocol int64 = 5
+const MinimumRunnerProtocol int64 = 6
 
 const (
 	RunnerNormal                      = "normal"

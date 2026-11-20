@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/codexenv"
@@ -72,6 +73,7 @@ func NewWorkers(opts WorkerOptions) *Workers {
 
 // worker is a running traex worker.
 type worker struct {
+	turnMu sync.RWMutex
 	thread *thread
 	turnID string
 	events chan harness.WorkerEvent
@@ -90,7 +92,11 @@ func (w *restoredVerdictWorker) Wait() (harness.WorkerResult, error) { return w.
 
 var _ harness.LiveMessenger = (*worker)(nil)
 
-func (w *worker) MessageTarget() (string, string) { return w.thread.ID(), w.turnID }
+func (w *worker) MessageTarget() (string, string) {
+	w.turnMu.RLock()
+	defer w.turnMu.RUnlock()
+	return w.thread.ID(), w.turnID
+}
 
 func (w *worker) SendMessage(ctx context.Context, text string) (protocol.RunMessageStatus, string) {
 	select {
@@ -101,7 +107,8 @@ func (w *worker) SendMessage(ctx context.Context, text string) (protocol.RunMess
 	if ctx.Err() != nil {
 		return protocol.RunMessageFailed, "run_control_changed"
 	}
-	err := w.thread.Steer(ctx, w.turnID, text)
+	_, turnID := w.MessageTarget()
+	err := w.thread.Steer(ctx, turnID, text)
 	switch {
 	case err == nil:
 		return protocol.RunMessageAccepted, ""
@@ -432,6 +439,19 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 							w.err = err
 							return
 						}
+					}
+					if spec.Delegated && ev.TurnStatus == "completed" && ctx.Err() == nil &&
+						((spec.Role == protocol.RoleImplement && results.Result() == nil) || (spec.Role == protocol.RoleAccept && verdicts.Verdict() == nil)) {
+						next, err := th.StartTurn(ctx, harness.TurnInput{Text: harness.Continuation(spec), Model: profile.Model, Effort: profile.Effort})
+						if err != nil {
+							w.err = fmt.Errorf("continue delegated Run: %w", err)
+							return
+						}
+						turnID = next
+						w.turnMu.Lock()
+						w.turnID = next
+						w.turnMu.Unlock()
+						continue
 					}
 					w.res = harness.WorkerResult{Verdict: verdicts.Verdict(), Result: results.Result(), Summary: summary}
 					if ev.TurnStatus != "completed" {

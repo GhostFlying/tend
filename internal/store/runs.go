@@ -310,7 +310,7 @@ func (t *Tx) SetLease(ctx context.Context, leaseID, from, to string, expiresAt, 
 // ListExpiredLeases returns active leases that expired before now.
 func ListExpiredLeases(ctx context.Context, q Querier, now int64) ([]LeaseRow, error) {
 	rows, err := q.QueryContext(ctx, `SELECT lease_id, run_id, host_id, expires_at, status FROM leases
-		WHERE status = 'active' AND expires_at < ? ORDER BY expires_at`, now)
+		WHERE status = 'active' AND expires_at < ? AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.run_id=leases.run_id AND protocol>=7) ORDER BY expires_at`, now)
 	if err != nil {
 		return nil, fmt.Errorf("store: list expired leases: %w", err)
 	}

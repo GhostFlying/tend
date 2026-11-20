@@ -12,7 +12,8 @@ func (*Workers) StrictRetainedResume() {}
 
 func (w *worker) beginRetained(ctx context.Context) error {
 	saved := w.st
-	if w.spec.RetainedResume == nil || w.spec.RetainedResume.RequestID == "" || w.spec.RetainedResume.Mode != "attach" || w.spec.HandBack || saved.Terminal == "" || saved.Pane == "" || saved.Worktree == "" || saved.Worktree != w.wt || saved.SessionID == "" || saved.RootRuntimeID == "" || saved.RootLaunchID == "" || saved.RootObservedTurnID == "" || !saved.RootObservationRequired || saved.RootRebindPending || saved.Send != "" || saved.Launch != "" {
+	authorized := w.spec.AttachOriginal || (w.spec.RetainedResume != nil && w.spec.RetainedResume.RequestID != "" && w.spec.RetainedResume.Mode == "attach")
+	if !authorized || w.spec.HandBack || saved.Terminal == "" || saved.Pane == "" || saved.Worktree == "" || saved.Worktree != w.wt || saved.SessionID == "" || saved.RootRuntimeID == "" || saved.RootLaunchID == "" || saved.RootObservedTurnID == "" || !saved.RootObservationRequired || saved.RootRebindPending || saved.Send != "" || saved.Launch != "" {
 		return fmt.Errorf("%w: complete original native identity is unavailable", harness.ErrRetainedResumePending)
 	}
 	a, alive, err := w.agent(ctx)

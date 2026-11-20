@@ -58,7 +58,7 @@ func (w *worker) recoveryBrief() string {
 }
 
 func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
-	if w.spec.RetainedResume != nil {
+	if w.spec.AttachmentOnly() {
 		return harness.ErrRetainedResumePending
 	}
 	if err := ctx.Err(); err != nil {
