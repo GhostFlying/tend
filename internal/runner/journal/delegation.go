@@ -30,7 +30,13 @@ func (j *Journal) BeginDelegatedRun(ctx context.Context, run string, reports []p
 }
 
 func (j *Journal) StartReports(ctx context.Context, run string) ([]protocol.Envelope, error) {
-	rows, err := j.db.QueryContext(ctx, `SELECT operation,request_id,payload_json FROM run_start_reports WHERE run_id=? ORDER BY rowid`, run)
+	rows, err := j.db.QueryContext(ctx, startReportQuery+" ORDER BY rowid", run)
+	return scanStartReports(run, rows, err)
+}
+
+const startReportQuery = `SELECT operation,request_id,payload_json FROM run_start_reports WHERE run_id=?1`
+
+func scanStartReports(run string, rows *sql.Rows, err error) ([]protocol.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +57,37 @@ func (j *Journal) StartReports(ctx context.Context, run string) ([]protocol.Enve
 	}
 	return reports, rows.Err()
 }
+
+// ArchiveRetiredStartReports prepares facts from a physically retired journal.
+// Its successor may transmit observations but cannot replay startup commands.
+func (j *Journal) ArchiveRetiredStartReports(ctx context.Context, run string) error {
+	return j.tx(ctx, func(tx *sql.Tx) error { return j.archiveClosedStartReports(ctx, tx, run) })
+}
+
+// Once a Run settles, its live startup commands can no longer change server
+// state. Preserve undelivered envelopes as observations under the original Run.
+func (j *Journal) archiveClosedStartReports(ctx context.Context, tx *sql.Tx, run string) error {
+	rows, err := tx.QueryContext(ctx, startReportQuery+` AND EXISTS(
+ SELECT 1 FROM runs WHERE run_id=?1 AND json_extract(assignment_json,'$.event_sync')=1) ORDER BY rowid`, run)
+	reports, err := scanStartReports(run, rows, err)
+	if err != nil {
+		return err
+	}
+	for _, env := range reports {
+		raw, err := json.Marshal(env)
+		if err != nil {
+			return err
+		}
+		if err := j.appendEvent(ctx, tx, run, protocol.RunEvent{NativeID: env.RequestID, Kind: "runner.startup_observation", Body: raw}); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM run_start_reports WHERE run_id=? AND request_id=?`, run, env.RequestID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (j *Journal) AckStartReport(ctx context.Context, run, request string) error {
 	return j.exec(ctx, `DELETE FROM run_start_reports WHERE run_id=? AND request_id=?`, run, request)
 }

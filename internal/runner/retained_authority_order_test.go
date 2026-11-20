@@ -304,18 +304,41 @@ func TestRetainedAuthorityRevocationWinsBeforeCleanup(t *testing.T) {
 }
 
 func TestRetainedStopSettlesDespiteUndeliveredStartup(t *testing.T) {
-	r, as, path, _, _ := retainedAuthorityStopFixture(t)
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
+	r, as, _ := retainedStrictFixture(t)
+	as.RunID, as.EventSync = "sync-retained-run", true
+	j := r.cfg.Journal
+	if err := j.AcceptAssignmentFromWorker(t.Context(), as, "", protocol.WorkerOrca); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO run_start_reports(run_id,operation,request_id,payload_json) VALUES(?,?,?,'{}')`, as.RunID, protocol.OpRunsReportWorkspace, "original-startup"); err != nil {
+	start := protocol.Envelope{RequestID: "original-startup", Operation: protocol.OpRunsReportWorkspace, Target: runTarget(as), Payload: json.RawMessage(`{}`)}
+	if err := j.BeginDelegatedRun(t.Context(), as.RunID, []protocol.Envelope{start}); err != nil {
 		t.Fatal(err)
 	}
+	retainedStrictOriginalEvent(t, r, as.RunID)
+	if err := j.SetRetainedResume(t.Context(), as.RunID, protocol.RetainedRunResume{RequestID: "original-attachment", Mode: "attach"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.ConfirmStopped(t.Context(), as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.AuthorizeRetainedStop(t.Context(), as.RunID, "original-host-stop"); err != nil {
+		t.Fatal(err)
+	}
+	posted := make(chan []protocol.RunEvent, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		t.Error("startup delivery attempted after authoritative Stop")
-		w.WriteHeader(http.StatusServiceUnavailable)
+		var env protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&env); err != nil || env.Operation != protocol.OpRunnerSyncEvents {
+			t.Error("unexpected live operation after Stop", env.Operation, err)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		var batch protocol.EventsPayload
+		if err := json.Unmarshal(env.Payload, &batch); err != nil {
+			t.Error(err)
+			return
+		}
+		posted <- batch.Events
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{Status: protocol.OpSucceeded}})
 	}))
 	defer server.Close()
 	r.c.base, r.c.http = server.URL, server.Client()
@@ -327,5 +350,21 @@ func TestRetainedStopSettlesDespiteUndeliveredStartup(t *testing.T) {
 	run, err := r.cfg.Journal.HistoricalRun(ctx, as.RunID)
 	if err != nil || run.Phase != journal.PhaseDone {
 		t.Fatal(run, err)
+	}
+	if err := r.flushEvents(ctx, as); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case events := <-posted:
+		var fact protocol.Envelope
+		if len(events) != 3 || events[0].NativeID != "original-native-event" || events[1].Kind != protocol.EventWorkerStopped || events[2].Kind != "runner.startup_observation" || json.Unmarshal(events[2].Body, &fact) != nil || fact.RequestID != "original-startup" || fact.Operation != protocol.OpRunsReportWorkspace || fact.Target.ID != as.RunID {
+			t.Fatal("lost original facts after Stop", events)
+		}
+	default:
+		t.Fatal("no historical facts uploaded")
+	}
+	queued, err := r.cfg.Journal.PendingEventRuns(ctx)
+	if err != nil || len(queued) != 0 {
+		t.Fatal("settled facts still require a live credential", queued, err)
 	}
 }

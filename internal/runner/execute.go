@@ -1421,11 +1421,6 @@ func (r *Runner) flushEvents(ctx context.Context, as protocol.Assignment) error 
 }
 
 func (r *Runner) flushEventBatch(ctx context.Context, as protocol.Assignment) (bool, error) {
-	if protocol.RunnerOwnsExecution(as.Protocol) {
-		if err := r.flushStartReports(ctx, as); err != nil {
-			return false, err
-		}
-	}
 	r.wakeRolloutArchive()
 	pending, err := r.cfg.Journal.PendingEventBatch(ctx, as.RunID, 200, maxBatchBody-256)
 	if err != nil || len(pending) == 0 {

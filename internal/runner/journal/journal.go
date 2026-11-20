@@ -643,6 +643,9 @@ func (j *Journal) done(ctx context.Context, runID string, stop *RetainedStop) er
 				return errors.New("journal: original Stop no longer authorizes completion")
 			}
 		}
+		if err := j.archiveClosedStartReports(ctx, tx, runID); err != nil {
+			return err
+		}
 		if err := archiveRetainedStop(ctx, tx, runID); err != nil {
 			return fmt.Errorf("journal: preserve stopped strict facts: %w", err)
 		}
