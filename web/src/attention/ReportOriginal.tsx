@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { ArtifactDetail } from "../api/generated/api.ts";
 import { useServices } from "../app/services.tsx";
 import { useStore } from "../state/store.ts";
@@ -10,6 +10,7 @@ export function ReportOriginal({ id }: { id: string }) {
   const { client } = useServices();
   const read = useMemo(() => new WorkItemRead<ArtifactDetail>(client), [client]);
   const state = useStore(read.state);
+  useEffect(() => () => read.close(), [read]);
   const open = () => void read.open(`/api/v1/artifacts/${encodeURIComponent(id)}`);
   return (
     <section aria-label="本次决定关联的报告">
