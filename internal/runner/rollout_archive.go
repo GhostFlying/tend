@@ -62,7 +62,7 @@ func (r *Runner) syncJournalArchive(ctx context.Context, sourceJournal *journal.
 }
 
 func (r *Runner) syncRolloutSource(ctx context.Context, sourceJournal *journal.Journal, deployment string, as protocol.Assignment, source protocol.RolloutPreviewSource) error {
-	unlock, err := r.lockArchiveSource(ctx, deployment+"/"+source.SessionID)
+	unlock, err := r.archiveTransfers.acquire(ctx, deployment+"/"+source.SessionID)
 	if err != nil {
 		return err
 	}

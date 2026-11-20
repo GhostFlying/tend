@@ -8,32 +8,36 @@ import (
 	"github.com/GhostFlying/tend/internal/runner/journal"
 )
 
-type archiveSourceLock struct {
+type transferLocks struct {
+	mu   sync.Mutex
+	keys map[string]*transferLock
+}
+type transferLock struct {
 	gate chan struct{}
 	refs int
 }
 
 // Shared native sessions may be bound to successive Runs. Serialize only that
 // source, not all Runs, and preserve the original pending upload under its key.
-func (r *Runner) lockArchiveSource(ctx context.Context, key string) (func(), error) {
-	r.archiveMu.Lock()
-	if r.archiveLocks == nil {
-		r.archiveLocks = map[string]*archiveSourceLock{}
+func (r *transferLocks) acquire(ctx context.Context, key string) (func(), error) {
+	r.mu.Lock()
+	if r.keys == nil {
+		r.keys = map[string]*transferLock{}
 	}
-	l := r.archiveLocks[key]
+	l := r.keys[key]
 	if l == nil {
-		l = &archiveSourceLock{gate: make(chan struct{}, 1)}
-		r.archiveLocks[key] = l
+		l = &transferLock{gate: make(chan struct{}, 1)}
+		r.keys[key] = l
 	}
 	l.refs++
-	r.archiveMu.Unlock()
+	r.mu.Unlock()
 	drop := func() {
-		r.archiveMu.Lock()
+		r.mu.Lock()
 		l.refs--
 		if l.refs == 0 {
-			delete(r.archiveLocks, key)
+			delete(r.keys, key)
 		}
-		r.archiveMu.Unlock()
+		r.mu.Unlock()
 	}
 	select {
 	case l.gate <- struct{}{}:

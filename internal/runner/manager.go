@@ -711,6 +711,11 @@ func (r *Runner) sendManagerReceipt(ctx context.Context, as protocol.Assignment,
 }
 
 func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment) error {
+	release, err := r.managerTransfers.acquire(ctx, as.RunID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	r.wakeRolloutArchive()
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
 	defer cancel()

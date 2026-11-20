@@ -180,8 +180,8 @@ type Runner struct {
 	previewDeployment   string
 	previewWake         chan struct{}
 	archiveWake         chan struct{}
-	archiveMu           sync.Mutex
-	archiveLocks        map[string]*archiveSourceLock
+	archiveTransfers    transferLocks
+	managerTransfers    transferLocks
 
 	runnerProtocol int64
 	cfg            Config
@@ -272,7 +272,7 @@ func New(cfg Config) *Runner {
 	if cfg.JournalID != "" {
 		initialProtocol = max(initialProtocol, 6)
 	}
-	return &Runner{previewWake: make(chan struct{}, 1), archiveWake: make(chan struct{}, 1), archiveLocks: map[string]*archiveSourceLock{},
+	return &Runner{previewWake: make(chan struct{}, 1), archiveWake: make(chan struct{}, 1),
 		cfg:                  cfg,
 		runnerProtocol:       initialProtocol,
 		bootstrapMaintenance: cfg.InitialMaintenance,
