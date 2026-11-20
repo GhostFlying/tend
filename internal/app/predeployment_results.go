@@ -80,7 +80,7 @@ func validatePredeploymentResult(ctx context.Context, q store.Querier, task stor
 	if err != nil {
 		return err
 	}
-	if lease.Status != store.LeaseActive || lease.ExpiresAt <= now || run.DesiredState != protocol.DesiredRun || (run.ObservedState != protocol.RunRunning && run.ObservedState != protocol.RunStarting) || task.ControlMode != protocol.ControlManaged {
+	if !lease.Current(now) || run.DesiredState != protocol.DesiredRun || (run.ObservedState != protocol.RunRunning && run.ObservedState != protocol.RunStarting) || task.ControlMode != protocol.ControlManaged {
 		return protocol.Errorf(protocol.CodeForbidden, "predeployment requires a current active execution lease")
 	}
 	var issueID, source, raw, upgrade string

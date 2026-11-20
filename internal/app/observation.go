@@ -45,7 +45,7 @@ func observationRun(ctx context.Context, q store.Querier, p protocol.Principal, 
 	// Recovery hello renews authority before the resumed worker's running event
 	// is flushed. Read-only facts accept the same live states as reconciliation;
 	// the current desired state, spec and unexpired active lease remain mandatory.
-	if p.Role != rc.run.Role || !p.Role.Valid() || lease.Status != store.LeaseActive || lease.ExpiresAt <= now || desiredFor(rc.run, rc.action, rc.task) != protocol.DesiredRun || rc.run.DesiredState != protocol.DesiredRun || !slices.Contains(reconcilable, rc.run.ObservedState) || rc.action.TargetSpecVersion != rc.task.SpecVersion {
+	if p.Role != rc.run.Role || !p.Role.Valid() || !lease.Current(now) || desiredFor(rc.run, rc.action, rc.task) != protocol.DesiredRun || rc.run.DesiredState != protocol.DesiredRun || !slices.Contains(reconcilable, rc.run.ObservedState) || rc.action.TargetSpecVersion != rc.task.SpecVersion {
 		return rc, nil, protocol.Errorf(protocol.CodeForbidden, "observation requires a current running task and active lease")
 	}
 	body, err := store.GetSpec(ctx, q, rc.run.TaskID, rc.action.TargetSpecVersion)

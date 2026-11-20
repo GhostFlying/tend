@@ -1919,6 +1919,7 @@ export interface RunView {
   capability_binding?: RunCapabilityBinding;
   generation: number;
   host: string;
+  observation?: RunSyncObservation;
   observed: RunObserved;
   preparation?: RunPreparationFailure;
   role: RunRole;
@@ -1936,6 +1937,19 @@ export interface RunCapabilityBinding {
   pin: RunExecutionPin;
   required: CapabilityReference[] | null;
   required_sha256: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunSyncObservation".
+ */
+export interface RunSyncObservation {
+  announced_sequence?: number;
+  last_contact_at?: number;
+  last_progress?: string;
+  last_progress_at?: number;
+  received_sequence?: number;
+  stop_requested_at?: number;
+  stopped_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3159,6 +3173,7 @@ export interface UpgradeWindowStop {
  * via the `definition` "LeaseRef".
  */
 export interface LeaseRef {
+  event_sequence?: number;
   lease_id: string;
   run_id: string;
 }

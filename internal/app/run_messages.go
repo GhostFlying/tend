@@ -195,7 +195,7 @@ func (ClaimRunMessage) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	}
 	if reason := obsoleteMessageReason(m, rc); reason != "" {
 		m.Status, m.Reason = protocol.RunMessageFailed, reason
-	} else if lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() || (rc.run.ObservedState != protocol.RunRunning && rc.run.ObservedState != protocol.RunWaiting) {
+	} else if !lease.Current(x.Now.UnixMilli()) || (rc.run.ObservedState != protocol.RunRunning && rc.run.ObservedState != protocol.RunWaiting) {
 		m.Status, m.Reason = protocol.RunMessageFailed, "run_unavailable"
 	} else {
 		m.Status = protocol.RunMessageDispatching

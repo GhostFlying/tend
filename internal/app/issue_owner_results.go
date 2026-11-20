@@ -70,7 +70,7 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if err != nil {
 		return Outcome{}, err
 	}
-	if !allowed || lease.Status != store.LeaseActive || lease.ExpiresAt <= x.Now.UnixMilli() {
+	if !allowed || !lease.Current(x.Now.UnixMilli()) {
 		return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "result requires the current active responsibility and lease")
 	}
 	// These mounts are result facts from the real producer, not a new workspace

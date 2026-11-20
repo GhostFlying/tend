@@ -62,3 +62,10 @@ func (j *Journal) ReceivedDesired(ctx context.Context, run string) (protocol.Run
 	err := j.db.QueryRowContext(ctx, `SELECT received_desired FROM runs WHERE run_id=?`, run).Scan(&desired)
 	return desired, err
 }
+
+// LastEventSequence returns the highest locally committed fact, including acknowledged events.
+func (j *Journal) LastEventSequence(ctx context.Context, run string) (int64, error) {
+	var seq int64
+	err := j.db.QueryRowContext(ctx, `SELECT MAX(next_seq-1,COALESCE((SELECT next_seq-1 FROM manager_event_sequences m WHERE m.run_id=r.run_id),0)) FROM runs r WHERE run_id=?`, run).Scan(&seq)
+	return seq, err
+}

@@ -33,6 +33,19 @@ const maxTasks = 200
 
 // Tasks lists tasks, unfinished first, leaving out finished ones unless
 // asked for. A project limits the listing to its tasks; empty lists every
+func runSyncObservation(ctx context.Context, q store.Querier, run string) (*protocol.RunSyncObservation, error) {
+	var o protocol.RunSyncObservation
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(h.last_seen_at,0), MAX(COALESCE(r.last_confirmed_at,0), COALESCE(l.created_at,0),COALESCE(m.received_at,0)),
+ CASE WHEN COALESCE(m.received_at,0)>0 AND m.received_at>=COALESCE(r.last_confirmed_at,0) THEN 'manager.event'
+      WHEN COALESCE(l.created_at,0)>0 AND l.created_at>=COALESCE(r.last_confirmed_at,0) THEN l.kind ELSE r.observed_state END,
+ r.stop_requested_at,MAX(r.runner_stopped_at,CASE WHEN r.native_close_activity=r.native_activity THEN r.native_closed_at ELSE 0 END),r.announced_event_sequence,MAX(COALESCE(l.seq,0),COALESCE(m.seq,0))
+ FROM runs r LEFT JOIN hosts h ON h.host_id=r.host_id
+ LEFT JOIN run_logs l ON l.run_id=r.run_id AND l.seq=(SELECT MAX(seq) FROM run_logs WHERE run_id=r.run_id)
+ LEFT JOIN manager_native_events m ON m.run_id=r.run_id AND m.seq=(SELECT MAX(seq) FROM manager_native_events WHERE run_id=r.run_id)
+ WHERE r.run_id=?`, run).Scan(&o.LastContactAt, &o.LastProgressAt, &o.LastProgress, &o.StopRequestedAt, &o.StoppedAt, &o.AnnouncedSequence, &o.ReceivedSequence)
+	return &o, err
+}
+
 // project.
 func Tasks(ctx context.Context, q store.Querier, includeFinished bool, project string) ([]protocol.TaskSummary, error) {
 	rows, err := store.ListTasks(ctx, q, project, maxTasks)
@@ -119,7 +132,11 @@ func Task(ctx context.Context, q store.Querier, taskID string) (protocol.TaskDet
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return d, err
 		}
-		d.Runs = append(d.Runs, protocol.RunView{CapabilityBinding: capabilityBinding, Preparation: failure, RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
+		observation, err := runSyncObservation(ctx, q, r.RunID)
+		if err != nil {
+			return d, err
+		}
+		d.Runs = append(d.Runs, protocol.RunView{Observation: observation, CapabilityBinding: capabilityBinding, Preparation: failure, RunID: r.RunID, Role: r.Role, Generation: r.Generation, SpecVersion: versions[r.ActionID], Host: r.HostID, Observed: r.ObservedState})
 	}
 	arts, err := store.ListArtifactsByTask(ctx, q, row.TaskID)
 	if err != nil {

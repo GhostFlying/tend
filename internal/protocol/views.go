@@ -101,6 +101,8 @@ type ActionView struct {
 
 // RunView is a run of a task.
 type RunView struct {
+	// Observation carries server-confirmed facts and the last advertised journal watermark.
+	Observation       *RunSyncObservation    `json:"observation,omitempty"`
 	CapabilityBinding *RunCapabilityBinding  `json:"capability_binding,omitempty"`
 	Preparation       *RunPreparationFailure `json:"preparation,omitempty"`
 	RunID             string                 `json:"run_id"`
@@ -111,6 +113,17 @@ type RunView struct {
 	SpecVersion int64       `json:"spec_version,omitempty"`
 	Host        string      `json:"host"`
 	Observed    RunObserved `json:"observed"`
+}
+
+// RunSyncObservation keeps machine contact, Run progress, control and upload independent.
+type RunSyncObservation struct {
+	LastContactAt     int64  `json:"last_contact_at,omitempty"`
+	LastProgressAt    int64  `json:"last_progress_at,omitempty"`
+	LastProgress      string `json:"last_progress,omitempty"`
+	StopRequestedAt   int64  `json:"stop_requested_at,omitempty"`
+	StoppedAt         int64  `json:"stopped_at,omitempty"`
+	AnnouncedSequence int64  `json:"announced_sequence,omitempty"`
+	ReceivedSequence  int64  `json:"received_sequence,omitempty"`
 }
 
 // ArtifactView is an artifact a run submitted.
