@@ -487,8 +487,10 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			if err = json.Unmarshal(op.Result, &claim); err != nil {
 				return err
 			}
+			// A retained command stores only its original identity and
+			// payload. Only an actual claim response can change capabilities.
+			acceptsDisconnectProcessText.Store(claim.AcceptsDisconnectProcessText)
 		}
-		acceptsDisconnectProcessText.Store(claim.AcceptsDisconnectProcessText)
 		command := claim.ManagerNativeRequest
 		if command.ID == "" {
 			if err = r.cfg.Journal.DeleteRequest(ctx, request.RequestID); err != nil {
