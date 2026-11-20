@@ -302,3 +302,30 @@ func TestRetainedAuthorityRevocationWinsBeforeCleanup(t *testing.T) {
 		})
 	}
 }
+
+func TestRetainedStopSettlesDespiteUndeliveredStartup(t *testing.T) {
+	r, as, path, _, _ := retainedAuthorityStopFixture(t)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO run_start_reports(run_id,operation,request_id,payload_json) VALUES(?,?,?,'{}')`, as.RunID, protocol.OpRunsReportWorkspace, "original-startup"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		t.Error("startup delivery attempted after authoritative Stop")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := r.report(ctx, as); err != nil {
+		t.Fatal(err)
+	}
+	run, err := r.cfg.Journal.HistoricalRun(ctx, as.RunID)
+	if err != nil || run.Phase != journal.PhaseDone {
+		t.Fatal(run, err)
+	}
+}

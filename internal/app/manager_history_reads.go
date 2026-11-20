@@ -171,7 +171,16 @@ func (a *App) managerHistoryExchange(ctx context.Context, q store.Querier, host,
 		}
 		// The reader gets exactly the admitted original request, not arbitrary host history.
 		var original bool
-		err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_turns t JOIN hosted_executions h ON h.execution_id=t.request_id JOIN native_turn_receipts_pending p ON p.request_id=t.request_id WHERE json_extract(h.private_snapshot,'$.runner_run_id')=? AND t.thread_id=? AND CASE WHEN EXISTS(SELECT 1 FROM logical_turn_executions e WHERE e.request_id=t.request_id AND e.repair=1) THEN t.request_id ELSE t.message_id END=? AND COALESCE(t.turn_id,'')=?)`, call.run, input.ThreadID, input.MessageID, input.TurnID).Scan(&original)
+		err = q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM main_turns t
+ JOIN hosted_executions h ON h.execution_id=t.request_id
+ JOIN native_turn_receipts_pending p ON p.request_id=t.request_id
+ LEFT JOIN manager_continued_turns c ON c.run_id=?1 AND c.thread_id=t.thread_id AND c.root_turn=t.turn_id
+ WHERE json_extract(h.private_snapshot,'$.runner_run_id')=?1 AND t.thread_id=?2
+ AND CASE WHEN EXISTS(SELECT 1 FROM logical_turn_executions e WHERE e.request_id=t.request_id AND e.repair=1)
+          THEN t.request_id ELSE t.message_id END=?3
+ AND COALESCE(c.awaiting_start,0)=0 AND COALESCE(c.native_turn,t.turn_id,'')=?4)`,
+			call.run, input.ThreadID, input.MessageID, input.TurnID).Scan(&original)
 		if err != nil {
 			return nil, nil, err
 		}

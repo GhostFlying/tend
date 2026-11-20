@@ -209,11 +209,12 @@ func TestManagerReceiptReaderRetainsAllFences(t *testing.T) {
 
 // Repeated reads keep the original business pending set and never acquire a Run.
 func TestManagerHistoryReadsUseOriginalRunAcrossLostReplies(t *testing.T) {
-	t.Run("runner history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, false) })
-	t.Run("local history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, true) })
+	t.Run("runner history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, false, false) })
+	t.Run("local history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, true, false) })
+	t.Run("continued history", func(t *testing.T) { testManagerHistoryReadsUseOriginalRun(t, false, true) })
 }
 
-func testManagerHistoryReadsUseOriginalRun(t *testing.T, local bool) {
+func testManagerHistoryReadsUseOriginalRun(t *testing.T, local, continued bool) {
 	t.Helper()
 	h, original, pending := stoppedRetainedManager(t)
 	p := receiptReaderPayload(t, h, original)
@@ -264,7 +265,17 @@ func testManagerHistoryReadsUseOriginalRun(t *testing.T, local bool) {
 	} else if repair {
 		identity = pending
 	}
-	payload, _ := json.Marshal(map[string]string{"thread_id": turn.ThreadID, "message_id": identity, "turn_id": turn.TurnID})
+	native := turn.TurnID
+	if continued {
+		native = "recorded-child"
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO manager_continued_turns(run_id,thread_id,root_turn,native_turn,awaiting_start) VALUES(?,?,?,?,0)`, original.RunID, turn.ThreadID, turn.TurnID, native)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	payload, _ := json.Marshal(map[string]string{"thread_id": turn.ThreadID, "message_id": identity, "turn_id": native})
 	id, err := h.app.QueueManagerNative(t.Context(), original.RunID, "find", payload)
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +283,7 @@ func testManagerHistoryReadsUseOriginalRun(t *testing.T, local bool) {
 	for range 2 {
 		runtime.Sequence++
 		response, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &runtime})
-		if err != nil || len(response.HistoryReads) != 1 || response.HistoryReads[0].ID != id || response.HistoryReads[0].RunID != original.RunID {
+		if err != nil || len(response.HistoryReads) != 1 || response.HistoryReads[0].ID != id || response.HistoryReads[0].RunID != original.RunID || response.HistoryReads[0].TurnID != native {
 			t.Fatal(response, err)
 		}
 	}
@@ -288,6 +299,16 @@ func testManagerHistoryReadsUseOriginalRun(t *testing.T, local bool) {
 	}
 	if h.count("runs") != runs || h.countWhere(`SELECT COUNT(*) FROM native_turn_receipts_pending WHERE request_id=?`, pending) != 1 {
 		t.Fatal("read changed original business facts")
+	}
+	if continued {
+		old, _ := json.Marshal(map[string]string{"thread_id": turn.ThreadID, "message_id": identity, "turn_id": turn.TurnID})
+		if _, err := h.app.QueueManagerNative(t.Context(), original.RunID, "find", old); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Sequence++
+		if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &runtime}); protocol.CodeOf(err) != protocol.CodeForbidden {
+			t.Fatal("closed history authorized the superseded turn", err)
+		}
 	}
 	resolveRetainedBusinessReceipt(t, h, pending)
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
