@@ -106,7 +106,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/sources/{id}` | `source show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/tasks` | `task list` | all finished project lifecycle sort before limit | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/tasks/{id}` | `task show` | --fields 选择 CLI 输出键 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/tasks/{id}/external-waits` | `task waits` | --run=run_id、--status，组合精确匹配，无分页 | API | CLI/HTTP；只读原等待 |
+| `GET /api/v1/tasks/{id}/external-waits` | `task waits` | --run=run_id、--status，组合精确匹配，无分页；CLI 兼容返回全列表的旧服务端 | API | CLI/HTTP；只读原等待 |
 | `GET /api/v1/token-usage` | `usage` | window offset model subject before | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/upgrades/{id}` | `upgrade show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/work-item-choices/{id}` | `choice show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |

@@ -247,8 +247,8 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 	if cmd.Name == "conversation settings set" {
 		conversation = fs.String("conversation", "", "exact conversation; default main")
 	}
-	if cmd.Name == "task waits" {
-		fs.Usage = func() { fmt.Fprint(e.Stderr, auditReadHelp(cmd.Name)) }
+	if help := auditReadHelp(cmd.Name); help != "" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
 	}
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -359,6 +359,11 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 				return usagef("%s", err)
 			}
 		}
+		if cmd.Name == "task waits" {
+			if err := validateWaitSelection(query); err != nil {
+				return err
+			}
+		}
 		u.RawQuery = query.Encode()
 		route = u.String()
 		if cmd.Download {
@@ -380,6 +385,12 @@ func runCapabilityCommand(ctx context.Context, e *Env, cmd capabilityCommand, ar
 				return err
 			}
 			return printTaskPage(e, page)
+		}
+		if cmd.Name == "task waits" && (query.Has("run_id") || query.Has("status")) {
+			value, err = selectWaits(value, query.Get("run_id"), query.Get("status"))
+			if err != nil {
+				return err
+			}
 		}
 		return printCapabilityValue(e, value, *asJSON)
 	}

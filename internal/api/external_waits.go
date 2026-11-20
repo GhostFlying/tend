@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -12,7 +13,10 @@ import (
 
 func (s *Server) externalWaits(w http.ResponseWriter, r *http.Request) {
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		query := r.URL.Query()
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "invalid external wait query encoding")
+		}
 		runID, status := query.Get("run_id"), query.Get("status")
 		if query.Has("run_id") && (len(query["run_id"]) != 1 || runID == "" || strings.TrimSpace(runID) != runID) {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "run_id must be one nonempty original Run ID")

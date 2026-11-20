@@ -118,6 +118,9 @@ func TestAuditLedgerQueriesThroughOwnerCLI(t *testing.T) {
 	oldIssue := c.run("issue", "show", issue.IssueID, "--revision", "1", "--json")
 	narrowOldIssue := c.run("issue", "show", issue.IssueID, "--revision", "1", "--fields", "issue_id,revision,historical,manager")
 	assertAuditFields(t, oldIssue, narrowOldIssue, "issue_id", "revision", "historical", "manager")
+	if help := c.run("issue", "show", "--help"); strings.Contains(string(help), "--limit") {
+		t.Fatal("issue show help lists an unused --limit")
+	}
 	if code, _ := c.call("issue", "show", issue.IssueID, "--limit", "4"); code == 0 {
 		t.Fatal("issue show accepted ignored --limit")
 	}
@@ -131,6 +134,15 @@ func TestAuditLedgerQueriesThroughOwnerCLI(t *testing.T) {
 		{[]string{"task", "waits"}, []string{"--run", "--status", "cancelled", "no pagination"}},
 		{[]string{"issue", "activity"}, []string{"--before", "--notification", "--after", "next_before"}},
 		{[]string{"issue", "deliveries"}, []string{"--json", "issue refresh-delivery"}},
+		{[]string{"issue", "context"}, []string{"--after-source", "--view", "--cursor", "next_cursor", "--limit"}},
+		{[]string{"task", "manager-reconciliation"}, []string{"--run", "unresolved requests"}},
+		{[]string{"run", "maintenance-reconciliation"}, []string{"--json", "protections"}},
+		{[]string{"task", "ci-continuation"}, []string{"latest", "source/wake"}},
+		{[]string{"run", "logs"}, []string{"--after", "next sequence", "--wait"}},
+		{[]string{"issue", "materials"}, []string{"--kind", "--id", "--after", "--limit"}},
+		{[]string{"message", "original"}, []string{"<message-id>", "--json"}},
+		{[]string{"artifact", "show"}, []string{"<artifact-id>", "file_id"}},
+		{[]string{"file", "download"}, []string{"<file-id>", "--out"}},
 	} {
 		help := string(c.run(append(check.command, "--help")...))
 		for _, flag := range check.flags {
@@ -138,7 +150,7 @@ func TestAuditLedgerQueriesThroughOwnerCLI(t *testing.T) {
 				t.Errorf("%v help missing %q", check.command, flag)
 			}
 		}
-		for _, flag := range []string{"--limit", "--data", "--request-id", "--dry-run"} {
+		for _, flag := range []string{"--data", "--request-id", "--dry-run", "--reason", "--file"} {
 			if strings.Contains(help, flag) {
 				t.Errorf("%v help lists unsupported %q", check.command, flag)
 			}
@@ -181,10 +193,15 @@ func TestAuditLedgerQueriesThroughOwnerCLI(t *testing.T) {
 	if got := e.do("GET", path+"?run_id="+normalRun, "", nil, nil); got != http.StatusUnauthorized {
 		t.Fatalf("wait authentication changed: HTTP %d", got)
 	}
-	for _, query := range []string{"run_id=", "status=bogus", "status=waiting&status=waiting"} {
-		if got := e.do("GET", path+"?"+query, token, nil, nil); got != http.StatusBadRequest {
-			t.Fatalf("invalid query %s: HTTP %d", query, got)
+	for _, query := range []string{"run_id=", "status=bogus", "status=waiting&status=waiting", "status=%zz", "run_id=%zz", "status=waiting&status=%zz"} {
+		var response protocol.APIResponse
+		got := e.do("GET", path+"?"+query, token, nil, &response)
+		if got != http.StatusBadRequest || response.Error == nil || response.Error.Code != protocol.CodeInvalidRequest {
+			t.Fatalf("invalid query %s: HTTP %d, error %v", query, got, response.Error)
 		}
+	}
+	if got := e.do("GET", path+"?status=%zz", "", nil, nil); got != http.StatusUnauthorized {
+		t.Fatalf("query parsing bypassed wait authentication: HTTP %d", got)
 	}
 	if after := e.count("SELECT COUNT(*) FROM events"); after != before {
 		t.Fatalf("audit reads appended events: %d to %d", before, after)
