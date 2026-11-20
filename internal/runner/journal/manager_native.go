@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -220,4 +221,25 @@ func (j *Journal) CompletedManagerClose(ctx context.Context, run string) (*proto
 // or mutate work. These RPCs have no durable execution command or result cache.
 func ManagerReadOnly(method string) bool {
 	return method == "models" || method == "find" || method == "usage"
+}
+
+// ReceivedManagerOperation returns a delivered command whose native dispatch
+// has not started. There is one outstanding command per manager Run.
+func (j *Journal) ReceivedManagerOperation(ctx context.Context, run string) (protocol.ManagerNativeRequest, error) {
+	j.spoolMu.RLock()
+	defer j.spoolMu.RUnlock()
+	var p protocol.ManagerNativeRequest
+	var raw string
+	err := j.db.QueryRowContext(ctx, `SELECT request_json FROM manager_native_operations WHERE run_id=? AND status='received' ORDER BY rowid LIMIT 1`, run).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, nil
+	}
+	if err != nil {
+		return p, err
+	}
+	raw, err = j.readNativeBody(ctx, raw, true)
+	if err == nil {
+		err = json.Unmarshal([]byte(raw), &p)
+	}
+	return p, err
 }

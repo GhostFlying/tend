@@ -28,6 +28,8 @@ type nativeIdentityCLI struct {
 	prompt          string
 	started         int64
 	launched, sends int
+	runtimeID       string
+	probes          int
 	exists          bool
 	transcript      string
 	turn            int
@@ -84,6 +86,7 @@ func (n *nativeIdentityCLI) exec(_ context.Context, _ string, args []string) ([]
 	case "worktree show":
 		result = map[string]any{"worktree": map[string]any{"id": "actual-worktree"}}
 	case "worktree ps":
+		n.probes++
 		var agents []orca.Agent
 		if n.exists {
 			agents = append(agents, orca.Agent{PaneKey: "actual-tab:actual-pane", AgentType: "codex", State: "working", Prompt: n.prompt, StateStartedAt: n.started, ProviderSession: &orca.ProviderSession{ID: "actual-provider-session", TranscriptPath: n.transcript}})
@@ -117,7 +120,7 @@ func (n *nativeIdentityCLI) exec(_ context.Context, _ string, args []string) ([]
 	default:
 		return nil, fmt.Errorf("unexpected native CLI command: %v", args)
 	}
-	return json.Marshal(map[string]any{"ok": true, "_meta": map[string]any{"runtimeId": "actual-orca-runtime"}, "result": result})
+	return json.Marshal(map[string]any{"ok": true, "_meta": map[string]any{"runtimeId": n.runtimeID}, "result": result})
 }
 func (n *nativeIdentityCLI) counts() (int, int) {
 	n.mu.Lock()
@@ -144,6 +147,18 @@ func (w *nativeIdentityWorkspaces) Prepare(ctx context.Context, as protocol.Assi
 	p.Report.Path = p.Dir
 	return p, nil
 }
+func (w *nativeIdentityWorkspaces) Reattach(ctx context.Context, as protocol.Assignment) (runner.Prepared, error) {
+	p, err := w.workspaces.Prepare(ctx, as)
+	if err != nil {
+		return p, err
+	}
+	if _, err = os.Stat(filepath.Join(p.Dir, ".git")); err != nil {
+		return p, err
+	}
+	p.ProviderID = "actual-worktree"
+	return p, nil
+}
+
 func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	srv := newServer(t, time.Minute)
 	srv.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Repos: []string{"tend"}, Slots: 1, Worker: protocol.WorkerOrca, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
@@ -171,7 +186,7 @@ func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	})
 
 	n := newNode(t, srv, passing)
-	native := &nativeIdentityCLI{transcript: filepath.Join(t.TempDir(), "native.jsonl")}
+	native := &nativeIdentityCLI{runtimeID: "actual-orca-runtime", transcript: filepath.Join(t.TempDir(), "native.jsonl")}
 	sockets, err := os.MkdirTemp("", "p6i")
 	if err != nil {
 		t.Fatal(err)
@@ -243,17 +258,43 @@ func TestNativeIdentityOrcaJournalRestartAndOwnerCLI(t *testing.T) {
 	if afterLaunch, afterSend := native.counts(); afterLaunch != launched || afterSend != sends || ownerFacts() != facts || ownerOutbox() != outbox {
 		t.Fatal("owner navigation sent input/control or launched a session")
 	}
-	stop() // closes the real local journal before opening a new runner instance.
+	stop() // Close the first process and reopen its durable journal with Tend unreachable.
+	n.net.set(true)
+	native.mu.Lock()
+	native.runtimeID = "different-runtime"
+	latestProbe := native.probes
+	native.mu.Unlock()
 	start()
+	eventually(t, "restarted runner inspects the uncertain native execution without Tend", func() bool { native.mu.Lock(); defer native.mu.Unlock(); return native.probes > latestProbe+1 })
+	if afterLaunch, afterSend := native.counts(); afterLaunch != launched || afterSend != sends {
+		t.Fatal("unknown native operation was repeated", afterLaunch, afterSend)
+	}
+	native.mu.Lock()
+	native.runtimeID = "actual-orca-runtime"
+	native.mu.Unlock()
+	eventually(t, "original native turn reattaches before hello", func() bool {
+		events, err := activeJournal.PendingEvents(t.Context(), runID, 100)
+		if err != nil {
+			return false
+		}
+		for _, e := range events {
+			var id protocol.NativeIdentity
+			if e.Seq > original.IdentitySequence && e.Kind == protocol.EventNativeIdentity && json.Unmarshal(e.Body, &id) == nil && id.State == "known" && id.SessionID == original.Identity.SessionID && id.TurnID == original.Identity.TurnID {
+				return true
+			}
+		}
+		return false
+	})
+	n.net.set(false)
 	eventually(t, "same run recovers original native identity after journal reopen", func() bool {
 		record, err := activeJournal.Run(t.Context(), runID)
-		if err != nil || record.Attempts < 2 {
+		if err != nil || record.Attempts != 1 {
 			return false
 		}
 		v, err := srv.app.NativeEntry(t.Context(), owner, runID, "")
 		return err == nil && v.IdentitySequence > original.IdentitySequence && v.SessionRecorded && v.Identity != nil && v.Identity.SessionID == original.Identity.SessionID && v.Identity.Terminal == original.Identity.Terminal
 	})
-	if launches, _ := native.counts(); launches != 1 || srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=? AND role='implement'`, task) != 1 {
+	if launches, afterSends := native.counts(); launches != 1 || afterSends != sends || srv.count(`SELECT COUNT(*) FROM runs WHERE task_id=? AND role='implement'`, task) != 1 {
 		t.Fatal("restart replaced original native session or run", launches)
 	}
 }

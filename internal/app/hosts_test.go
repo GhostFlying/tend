@@ -182,6 +182,7 @@ func TestFault_WorkspaceHostRetiredMidRun(t *testing.T) {
 	// The host goes away mid-run: its lease runs out and nothing is left to
 	// claim, but the run can only be found out on the retired host.
 	h.withHosts("linux-2")
+	renewalBoundFixture(t, h, old)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if _, err := h.app.ExpireLeases(context.Background()); err != nil {
 		t.Fatal(err)

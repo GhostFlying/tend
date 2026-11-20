@@ -22,6 +22,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/traex"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/store"
 	"github.com/GhostFlying/tend/internal/testkit"
 	"github.com/GhostFlying/tend/internal/views"
@@ -80,7 +81,7 @@ func TestDelegatedNativePeer(t *testing.T) {
 			}
 			id := fmt.Sprintf("turn-%d", turn)
 			tool := harness.ResultTool
-			args := map[string]any{}
+			var args map[string]any
 			switch {
 			case accept:
 				tool = harness.VerdictTool
@@ -150,10 +151,13 @@ func (w realWorkerWorkspace) Start(ctx context.Context, s harness.WorkerSpec) (h
 
 func TestFault_DelegatedRunFinishesAcrossPartition(t *testing.T) {
 	for _, stop := range []bool{false, true} {
-		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) { partitionedNativeExecution(t, stop) })
+		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) { partitionedNativeExecution(t, stop, false) })
 	}
 }
-func partitionedNativeExecution(t *testing.T, stop bool) {
+func TestFault_DelegatedResultRestartsOffline(t *testing.T) {
+	partitionedNativeExecution(t, false, true)
+}
+func partitionedNativeExecution(t *testing.T, stop, restart bool) {
 	clock := testkit.NewClock()
 	ttl := time.Second
 	srv := newServer(t, ttl, clock.Now)
@@ -215,6 +219,15 @@ func partitionedNativeExecution(t *testing.T, stop bool) {
 	if got := srv.count(`SELECT COUNT(*) FROM artifacts WHERE task_id=?`, task); got != 0 {
 		t.Fatal("offline result visible prematurely", got)
 	}
+	if restart {
+		eventually(t, "physical exit and the original external result survive locally", func() bool {
+			runs, err := n.runningJournal().Runs(t.Context())
+			return err == nil && len(runs) == 1 && runs[0].StoppedConfirmed && runs[0].Phase == journal.PhaseSubmitting
+		})
+		n.stop()
+		n.start()
+	}
+
 	if stop {
 		eventually(t, "native result receipt is durable in the offline journal", func() bool {
 			runs, err := n.runningJournal().Runs(t.Context())

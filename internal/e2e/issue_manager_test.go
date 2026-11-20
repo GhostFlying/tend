@@ -172,6 +172,10 @@ func TestFault_CompletedManagerEventFailureReportsStoppedOriginalRun(t *testing.
 	runRunnerManager(t, false, false, false, "completion")
 }
 
+func TestFault_ManagerContinuesAdmittedWorkWithoutTend(t *testing.T) {
+	runRunnerManager(t, false, false, false, "offline-turn")
+}
+
 func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
 	runRunnerManager(t, false, false, false, "urgent")
 }
@@ -224,6 +228,10 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	var eventFailure *managerEventFailure
 	var archiveRoots []string
 	var client *http.Client
+	partition := &network{}
+	if archiveMode == "offline-turn" {
+		client = &http.Client{Transport: partition}
+	}
 	log := quiet()
 	archivePending := make(chan struct{}, 1)
 	const originalBody = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"th_1\"}}\n"
@@ -288,6 +296,22 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	releaseUrgent := make(chan struct{})
 	fake.Turn = func(th *testkit.FakeThread, turn string, input harness.TurnInput) string {
 		attempts.Add(1)
+		if archiveMode == "offline-turn" && attempts.Load() == 1 {
+			partition.set(true)
+			result := th.CallTool(ctx, turn, "continue-local", "continue_run", map[string]string{"next_step": "finish the admitted owner work"})
+			if !result.Success {
+				failures <- "owner continuation rejected: " + result.Text
+				partition.set(false)
+				return "failed"
+			}
+			return "completed"
+		}
+		if archiveMode == "offline-turn" && attempts.Load() == 2 {
+			if input.Text != "finish the admitted owner work" || input.UserMessageID == "" {
+				failures <- "owner started a different input after disconnection"
+			}
+			partition.set(false)
+		}
 		if urgent && attempts.Load() == 1 {
 			activeSteer <- nativeSteer{thread: th, turn: turn}
 			select {

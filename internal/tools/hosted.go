@@ -376,7 +376,11 @@ func (s *Service) handleHosted(ctx context.Context, c Call) (harness.ToolResult,
 	if err != nil {
 		return fail(err)
 	}
-	if native.ThreadID != c.Principal.Thread || native.TurnID != c.TurnID || execution.ConversationID != store.ConversationID(c.Principal.ConversationID) {
+	executionTurn := c.TurnID
+	if execution.Selection.RunnerManaged && c.ExecutionTurnID != "" {
+		executionTurn = c.ExecutionTurnID
+	}
+	if native.ThreadID != c.Principal.Thread || native.TurnID != executionTurn || execution.ConversationID != store.ConversationID(c.Principal.ConversationID) {
 		return fail(protocol.Errorf(protocol.CodeForbidden, "caller does not own the admitted execution"))
 	}
 	repair, err := s.app.IsRepairExecution(ctx, execution.ID)

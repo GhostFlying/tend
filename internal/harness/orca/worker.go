@@ -1256,6 +1256,10 @@ func (w *worker) stop(ctx context.Context, cause error) {
 	case errors.Is(cause, harness.ErrHeld), w.holding != "":
 		// The owner works in the agent: leave it alone.
 	default:
+		if w.spec.Delegated && errors.Is(cause, context.Canceled) {
+			// The daemon is shutting down. Leave the journaled native turn available to its successor.
+			return
+		}
 		if w.spec.AttachmentOnly() && (!errors.Is(cause, harness.ErrPaused) || !w.retainedAttached) {
 			// Observation-only attachment grants no implicit terminal input,
 			// including another interrupt during a fence or runner shutdown.

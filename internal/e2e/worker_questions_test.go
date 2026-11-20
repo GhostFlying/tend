@@ -154,6 +154,7 @@ func TestFault_LegacyWorkerQuestionSurvivesHeartbeatLoss(t *testing.T) {
 	n.heartbeat = 20 * time.Millisecond
 	n.log = runnerTestLog(t)
 	legacyQuestionContract(n)
+	n.net.protocolSix = true
 	n.start()
 	task := srv.createTask()
 	n.diagnoseFailure(task)
@@ -307,6 +308,7 @@ func TestFault_LegacyWorkerQuestionSurvivesRunnerRestartAndLostReceipt(t *testin
 	})
 	n.net.lose = map[string]int{protocol.OpRunsAskOwner: 1}
 	legacyQuestionContract(n)
+	n.net.protocolSix = true
 	n.start()
 	task := srv.createTask()
 	var decision protocol.DecisionView

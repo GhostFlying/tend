@@ -143,6 +143,7 @@ func TestAttentionCurrentDeliveryAcceptanceIsProjected(t *testing.T) {
 func TestAttentionContextPreservesUnknownExecution(t *testing.T) {
 	h, assignment, _ := questionRun(t, protocol.RoleImplement)
 	question := askQuestion(t, h, assignment, scopeQuestion)
+	renewalBoundFixture(t, h, assignment)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 		t.Fatalf("expire leases: %d %v", n, err)

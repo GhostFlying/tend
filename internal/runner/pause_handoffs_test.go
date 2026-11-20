@@ -488,7 +488,7 @@ func TestPauseSettlesStopFromPreviousExecutorHeartbeat(t *testing.T) {
 				case protocol.OpRunnerHeartbeat:
 					var hb protocol.HeartbeatPayload
 					if err := json.Unmarshal(env.Payload, &hb); err != nil || len(hb.Runs) != 1 ||
-						hb.Runs[0] != (protocol.LeaseRef{RunID: as.RunID, LeaseID: as.LeaseID}) {
+						hb.Runs[0].RunID != as.RunID || hb.Runs[0].LeaseID != as.LeaseID {
 						t.Error("previous executor heartbeat lost the original lease", hb.Runs, err)
 						return
 					}

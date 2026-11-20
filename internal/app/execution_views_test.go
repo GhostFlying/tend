@@ -136,6 +136,7 @@ func TestExecutionViewCancelledUnknownWorkerRemainsVisible(t *testing.T) {
 		t.Fatal("no claim")
 	}
 	h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{})
+	renewalBoundFixture(t, h, as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 		t.Fatalf("expired %d runs: %v", n, err)
@@ -403,6 +404,7 @@ func TestExecutionViewUnknownWorkerQuestionRemainsUnknown(t *testing.T) {
 			if before.State != protocol.ExecutionWaitingOwner || before.RunID != as.RunID || before.Role != role {
 				t.Fatalf("live worker question: %+v", before)
 			}
+			renewalBoundFixture(t, h, as)
 			h.clock.Advance(DefaultLeaseTTL + time.Second)
 			if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 				t.Fatalf("expired %d runs: %v", n, err)
@@ -446,6 +448,7 @@ func TestExecutionViewControlIntentDoesNotOverrideObservedWorker(t *testing.T) {
 			if running.ControlMode != mode || running.Execution.State != protocol.ExecutionRunning {
 				t.Fatalf("control intent concealed observed execution: %+v", running)
 			}
+			renewalBoundFixture(t, h, as)
 			h.clock.Advance(DefaultLeaseTTL + time.Second)
 			if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 				t.Fatalf("expire %d: %v", n, err)
@@ -496,6 +499,7 @@ func TestExecutionViewSupersededWorkerRemainsVisibleUntilStopped(t *testing.T) {
 	if updated.SpecVersion != 2 || updated.Execution.State != protocol.ExecutionRunning || updated.Execution.RunID != as.RunID {
 		t.Fatalf("old spec still running: %+v", updated)
 	}
+	renewalBoundFixture(t, h, as)
 	h.clock.Advance(DefaultLeaseTTL + time.Second)
 	if n, err := h.app.ExpireLeases(t.Context()); err != nil || n != 1 {
 		t.Fatalf("expire %d: %v", n, err)

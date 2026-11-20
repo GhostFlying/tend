@@ -18046,6 +18046,9 @@
     "SessionStopPayload": {
       "additionalProperties": false,
       "properties": {
+        "event_sequence": {
+          "type": "integer"
+        },
         "physical_exit": {
           "type": "boolean"
         },

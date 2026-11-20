@@ -461,6 +461,7 @@ func (t *thread) FindTurn(ctx context.Context, message, id string) (harness.Turn
 // journals request admission/results and serializes lifecycle operations.
 type Driver struct {
 	LocalTurns           LocalTurns
+	pendingLocal         map[string]string
 	RequireReceiptReader bool
 	NativeOwnerTools     bool
 	OnSource             func(context.Context, protocol.RolloutPreviewSource) error
@@ -557,7 +558,7 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 				cfg.Config[key] = value
 			}
 		}
-		local := d.LocalTurns != nil && nativeOwner && !receiptHistory && !cfg.Ephemeral && cfg.Purpose != "internal_summary"
+		local := d.LocalTurns != nil && !receiptHistory && !cfg.Ephemeral && cfg.Purpose != "internal_summary"
 		if local {
 			cfg.Tools = append(cfg.Tools, continueRunTool)
 		}
@@ -806,7 +807,7 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	d.tools[key] = ch
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); delete(d.tools, key); d.mu.Unlock(); d.wg.Done() }()
-	if call.Tool == continueRunTool.Name && d.LocalTurns != nil && d.NativeOwnerTools {
+	if call.Tool == continueRunTool.Name && d.LocalTurns != nil && !d.RequireReceiptReader {
 		d.mu.Lock()
 		private := d.private[call.ThreadID]
 		d.mu.Unlock()
@@ -835,6 +836,14 @@ func (d *Driver) tool(ctx context.Context, call harness.ToolCall) harness.ToolRe
 	if d.LocalTurns != nil {
 		var err error
 		root, err = d.LocalTurns.Root(ctx, call.ThreadID, call.TurnID)
+		if err == nil && root == "" {
+			d.mu.Lock()
+			root = d.pendingLocal[call.ThreadID]
+			d.mu.Unlock()
+			if root == "" {
+				root, err = d.LocalTurns.Root(ctx, call.ThreadID, call.TurnID)
+			}
+		}
 		if err != nil {
 			return harness.ToolResult{Text: err.Error()}
 		}

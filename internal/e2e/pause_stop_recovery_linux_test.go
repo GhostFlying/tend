@@ -84,7 +84,7 @@ func testPauseStopRecovery(t *testing.T, restart bool) {
 	firstUpload := make(chan struct{})
 	releaseUpload := make(chan struct{})
 	holdReplay.Store(restart)
-	net := &network{before: func(req *http.Request) error {
+	net := &network{protocolSix: true, before: func(req *http.Request) error {
 		if req.Body == nil {
 			return nil
 		}

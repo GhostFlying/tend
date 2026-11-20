@@ -77,6 +77,7 @@ func printIssueView(e *Env, v protocol.IssueView) error {
 	fmt.Fprintf(out, "%s  %s\nState: %s / %s; owner: %s; revision: %d; epoch: %d\n\nGoal: %s\n", v.IssueID, v.Plan.Title, v.State, v.BoardStatus(), v.Assignee.Ref, v.Revision, v.AssignmentEpoch, v.Plan.Intent)
 	if v.Manager != nil {
 		fmt.Fprintf(out, "Owner session: %s; task: %s\n", v.Manager.State, v.Manager.TaskID)
+		printRunObservation(out, v.Manager.Observation)
 	}
 	if v.Children != nil {
 		printIssueChildren(out, v.IssueID, v.Children)

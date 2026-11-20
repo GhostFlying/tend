@@ -7166,6 +7166,7 @@ export interface SessionRequest {
  * via the `definition` "SessionStopPayload".
  */
 export interface SessionStopPayload {
+  event_sequence?: number;
   physical_exit?: boolean;
   thread_id: string;
 }

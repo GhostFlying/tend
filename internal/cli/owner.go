@@ -361,21 +361,7 @@ func (o owner) task(ctx context.Context, id string) error {
 		fmt.Fprintln(out, "runs:")
 		for _, r := range d.Runs {
 			fmt.Fprintf(out, "  %s %s gen %d on %s: %s\n", r.RunID, r.Role, r.Generation, r.Host, r.Observed)
-			if fact := r.Observation; fact != nil {
-				format := func(ms int64) string {
-					if ms == 0 {
-						return "unknown"
-					}
-					return time.UnixMilli(ms).UTC().Format(time.RFC3339)
-				}
-				fmt.Fprintf(out, "    runner contact %s, progress %s at %s\n", format(fact.LastContactAt), fact.LastProgress, format(fact.LastProgressAt))
-				if fact.StopRequestedAt != 0 {
-					fmt.Fprintf(out, "    stop requested %s, physical confirmation %s\n", format(fact.StopRequestedAt), format(fact.StoppedAt))
-				}
-				if fact.AnnouncedSequence > fact.ReceivedSequence {
-					fmt.Fprintf(out, "    events received through %d, runner advertised %d\n", fact.ReceivedSequence, fact.AnnouncedSequence)
-				}
-			}
+			printRunObservation(out, r.Observation)
 		}
 	}
 	if len(d.Artifacts) > 0 {
@@ -692,4 +678,22 @@ func (o owner) sendEnvelope(ctx context.Context, env protocol.Envelope) (protoco
 		err = fmt.Errorf("%w: %w", protocol.Errorf(protocol.CodeUnknownOutcome, "request %s has no confirmed outcome; %s", env.RequestID, businessRecovery(env)), err)
 	}
 	return res, err
+}
+
+func printRunObservation(out io.Writer, fact *protocol.RunSyncObservation) {
+	if fact != nil {
+		format := func(ms int64) string {
+			if ms == 0 {
+				return "unknown"
+			}
+			return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+		}
+		fmt.Fprintf(out, "    runner contact %s, progress %s at %s\n", format(fact.LastContactAt), fact.LastProgress, format(fact.LastProgressAt))
+		if fact.StopRequestedAt != 0 {
+			fmt.Fprintf(out, "    stop requested %s, physical confirmation %s\n", format(fact.StopRequestedAt), format(fact.StoppedAt))
+		}
+		if fact.AnnouncedSequence > fact.ReceivedSequence {
+			fmt.Fprintf(out, "    events received through %d, runner advertised %d\n", fact.ReceivedSequence, fact.AnnouncedSequence)
+		}
+	}
 }
