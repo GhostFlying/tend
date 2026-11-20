@@ -4,6 +4,7 @@ import type {
   IssueStage,
   ExecutionCounts,
 } from "../api/generated/api.ts";
+import { markdownParser } from "../conversation/markdownParser.ts";
 
 export const columns = [
   { id: "unplanned", title: "待安排" },
@@ -127,12 +128,16 @@ export function splitWorkItemIds(
   // token available so a short code inside a path cannot become a link.
   const fileWords = mode === "legacy" ? undefined : text.matchAll(/[\p{L}\p{N}_~.+@%/\\-]+/gu);
   const fileMarker = /[/\\]|[\p{L}\p{N}_-]\.[\p{L}\p{N}_]/u;
+  const urls = mode === "legacy" ? undefined : markdownParser.linkify.match(text)?.values();
+  let url = urls?.next().value;
   let word = fileWords?.next().value;
   let isFileWord = word !== undefined && fileMarker.test(word[0]);
   const out: (string | { workItemId: string })[] = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {
     if (!match[0].startsWith("wi_")) {
+      while (url && url.lastIndex <= match.index) url = urls?.next().value;
+      if (url && url.index <= match.index) continue;
       while (word && word.index + word[0].length <= match.index) {
         word = fileWords?.next().value;
         isFileWord = word !== undefined && fileMarker.test(word[0]);
