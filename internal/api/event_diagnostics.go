@@ -42,9 +42,8 @@ func (o *eventStreamObservation) finish(ctx context.Context, heartbeat time.Dura
 	if reason == "request_ended" {
 		reason = result
 	}
-	expected := reason == "cancelled" || reason == "server_shutdown"
 	attrs := []any{
-		"http_status", o.status, "end_reason", reason, "context_result", result,
+		"http_status", o.status, "context_result", result,
 		"heartbeat_interval_ms", heartbeat.Milliseconds(), "heartbeats_flushed", o.heartbeatCount,
 	}
 	if o.hasRequested {
@@ -62,5 +61,5 @@ func (o *eventStreamObservation) finish(ctx context.Context, heartbeat time.Dura
 	if !o.lastHeartbeat.IsZero() {
 		attrs = append(attrs, "last_heartbeat_age_ms", now.Sub(o.lastHeartbeat).Milliseconds())
 	}
-	httpdiag.StreamEnded(ctx, expected, attrs...)
+	httpdiag.StreamEnded(ctx, reason, attrs...)
 }
