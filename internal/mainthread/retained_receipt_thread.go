@@ -44,18 +44,18 @@ func (m *Manager) retainedReceiptThread(ctx context.Context) (harness.Thread, er
 	}
 	thread := &retainedReceiptThread{id: id, receipts: map[string]harness.TurnReceipt{}}
 	for _, rec := range turns {
-		raw, err := m.app.RetainedNativeReceipt(ctx, m.cfg.ConversationID, rec.RequestID)
+		native, waiting, raw, err := m.app.NativeReceiptSource(ctx, m.cfg.ConversationID, rec.RequestID)
 		if err != nil {
 			return nil, err
 		}
-		if len(raw) == 0 {
+		if waiting || len(raw) == 0 {
 			return nil, nil
 		}
 		receipt, err := m.cfg.DecodeRetainedTurnReceipt(raw)
 		if err != nil {
 			return nil, err
 		}
-		if receipt.ID != rec.TurnID || receipt.ID == "" {
+		if receipt.ID != native || receipt.ID == "" {
 			return nil, fmt.Errorf("%w: retained receipt has a different original turn", harness.ErrRejected)
 		}
 		covered, err := m.nativeReceiptSourcesCovered(ctx, id, receipt)
@@ -66,7 +66,7 @@ func (m *Manager) retainedReceiptThread(ctx context.Context) (harness.Thread, er
 			return nil, nil
 		}
 		receipt.Raw = raw
-		thread.receipts[rec.TurnID] = receipt
+		thread.receipts[native] = receipt
 	}
 	return thread, nil
 }

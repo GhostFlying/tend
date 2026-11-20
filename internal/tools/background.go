@@ -16,7 +16,11 @@ type backgroundSourceArgs struct {
 }
 
 func (s *Service) background(ctx context.Context, c Call, action string, payload any) (any, error) {
-	cmd := app.BackgroundCommand{Action: action, MessageID: c.SourceMessageID, TurnID: c.TurnID, DeliveryID: c.ParentRequestID}
+	turn := c.ExecutionTurnID
+	if turn == "" {
+		turn = c.TurnID
+	}
+	cmd := app.BackgroundCommand{Action: action, MessageID: c.SourceMessageID, TurnID: turn, DeliveryID: c.ParentRequestID}
 	return s.execute(ctx, c, cmd.Operation(), protocol.Target{Type: "background", ID: c.SourceMessageID}, nil, "", payload, cmd)
 }
 func (s *Service) backgroundSources(ctx context.Context, c Call) (any, error) {

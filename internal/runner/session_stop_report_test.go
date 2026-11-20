@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -256,5 +257,53 @@ func TestSessionStopMetadataCannotReplacePhysicalStopProof(t *testing.T) {
 	}
 	if env, err := r.cfg.Journal.SessionStopReport(t.Context(), as.RunID); err != nil || env != nil {
 		t.Fatal("created optional closed-session fact without stop proof", env, err)
+	}
+}
+
+func TestRetiredJournalDeliversOriginalPhysicalStop(t *testing.T) {
+	r := controlRunner(t)
+	r.cfg.JournalID, r.cfg.JournalRoot = "accepting", t.TempDir()
+	old, err := journal.Open(t.Context(), filepath.Join(r.cfg.JournalRoot, "journal.db"), r.cfg.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	as := protocol.Assignment{RunID: "stopped", LeaseID: "old-lease", Protocol: protocol.CurrentRunnerProtocol, SessionStopReports: true}
+	if err := old.AcceptAssignment(t.Context(), as, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.ConfirmStopped(t.Context(), as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	e := protocol.Envelope{RequestID: "original-stop", Operation: protocol.OpRunsRecordSessionStop, Target: runTarget(as), Payload: json.RawMessage(`{"physical_exit":true,"event_sequence":7}`)}
+	if err := old.SaveSessionStopReport(t.Context(), as.RunID, &e); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var received int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(q.Body).Decode(&env); err != nil {
+			t.Error(err)
+			return
+		}
+		if env.Operation != e.Operation || env.RequestID != e.RequestID || env.Target.ID != as.RunID {
+			t.Error("retired runner contacted another operation", env)
+		}
+		received++
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	var cursor retiredCursor
+	for range 2 {
+		cursor, err = r.serviceRetiredJournal(t.Context(), "", cursor, protocol.RetiredJournalWork{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !cursor.stopsDone || received != 1 {
+		t.Fatal("retired stop did not settle with its own receipt", cursor, received)
 	}
 }

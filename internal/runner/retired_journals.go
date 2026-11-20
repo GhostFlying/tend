@@ -15,8 +15,8 @@ import (
 )
 
 type retiredCursor struct {
-	after, lastEventRun                string
-	archiveDone, usageDone, eventsDone bool
+	after, lastEventRun, lastStopRun              string
+	archiveDone, usageDone, eventsDone, stopsDone bool
 }
 
 // An acknowledged physical exit transfers only auxiliary work. Never start a
@@ -45,7 +45,7 @@ func (r *Runner) maintainRetiredJournals(ctx context.Context) {
 		for _, id := range state.RetiredJournals {
 			c := cursors[id]
 			work := pending[id]
-			if id == state.CurrentJournal || c.archiveDone && c.usageDone && c.eventsDone && !work.Workspace && len(work.Usage) == 0 {
+			if id == state.CurrentJournal || c.archiveDone && c.usageDone && c.eventsDone && c.stopsDone && !work.Workspace && len(work.Usage) == 0 {
 				continue
 			}
 			c, err = r.serviceRetiredJournal(ctx, id, c, work)
@@ -100,6 +100,21 @@ func (r *Runner) serviceRetiredJournal(parent context.Context, id string, c reti
 	}
 	if !c.archiveDone && archivesEnabled {
 		c.after, c.archiveDone, err = r.continueRetiredArchive(ctx, j, c.after)
+		failures = append(failures, err)
+	}
+	if !c.stopsDone {
+		// Stop evidence is auxiliary and may outlive both the lease and the
+		// original runner process. Give each retired Run its own turn.
+		stopCtx, cancel := context.WithTimeout(parent, r.cfg.RequestTimeout)
+		runs, err := j.PendingSessionStopRuns(stopCtx)
+		if err == nil && len(runs) > 0 {
+			start := sort.Search(len(runs), func(i int) bool { return runs[i].RunID > c.lastStopRun })
+			as := runs[start%len(runs)]
+			c.lastStopRun = as.RunID
+			err = retained.flushSessionStop(stopCtx, as)
+		}
+		c.stopsDone = err == nil && len(runs) == 0
+		cancel()
 		failures = append(failures, err)
 	}
 	if !c.eventsDone {

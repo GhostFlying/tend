@@ -76,10 +76,10 @@ func TestRolloutPreviewThroughRealOwnerAndRunnerHTTP(t *testing.T) {
 		t.Fatalf("native raw record: %+v", raw)
 	}
 	var collected protocol.RunRolloutPage
-	c.call(http.MethodGet, "/api/v1/runs/"+run.RunID+"/rollout", nil, &collected)
-	if len(collected.Logs) == 0 {
-		t.Fatal("collected logs disappeared")
-	}
+	waitFor(t, ctx, "collected worker events reach the server", func() bool {
+		c.call(http.MethodGet, "/api/v1/runs/"+run.RunID+"/rollout", nil, &collected)
+		return len(collected.Logs) > 0
+	})
 	var failure protocol.RunView
 	waitFor(t, ctx, "failed native history", func() bool {
 		var detail protocol.TaskDetail

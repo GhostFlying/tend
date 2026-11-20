@@ -467,8 +467,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "native events must be contiguous")
 		}
 		var event struct {
-			ThreadID string `json:"thread_id"`
-			Native   *struct {
+			Root      string `json:"root_turn_id"`
+			Continued bool   `json:"continued"`
+			ThreadID  string `json:"thread_id"`
+			Native    *struct {
 				Kind       string
 				TurnID     string
 				TurnStatus string
@@ -477,6 +479,15 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		}
 		parsed := json.Unmarshal(p.Body, &event) == nil
 		if parsed && event.Native != nil && event.ThreadID != "" {
+			if protocol.RunnerOwnsExecution(r.Protocol) && event.Native.TurnID != "" && (event.Native.Kind == "turn_completed" && event.Continued || event.Native.Kind == "turn_started" && event.Root != "") {
+				root := event.Root
+				if root == "" {
+					root = event.Native.TurnID
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO manager_continued_turns(run_id,thread_id,root_turn,native_turn,awaiting_start) VALUES(?,?,?,?,?) ON CONFLICT(run_id,thread_id,root_turn) DO UPDATE SET native_turn=excluded.native_turn,awaiting_start=excluded.awaiting_start`, run, event.ThreadID, root, event.Native.TurnID, event.Continued); err != nil {
+					return Outcome{}, err
+				}
+			}
 			f := protocol.ConcurrencyFeedback{SessionID: event.ThreadID, TurnID: event.Native.TurnID, Attempt: "run", Failure: event.Native.Failure}
 			switch event.Native.Kind {
 			case "turn_error":

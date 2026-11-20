@@ -147,11 +147,12 @@ var (
 
 // active is a run with a live executor.
 type active struct {
-	as       protocol.Assignment
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	deadline time.Time
-	desired  protocol.RunDesired
+	pausedAttempt int // Original worker returned to this executor after explicit pause.
+	as            protocol.Assignment
+	ctx           context.Context
+	cancel        context.CancelCauseFunc
+	deadline      time.Time
+	desired       protocol.RunDesired
 	// heldAt is when the runner itself learned of a takeover; a desired
 	// state tend sent before then does not undo it.
 	heldAt time.Time

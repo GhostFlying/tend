@@ -59,3 +59,9 @@ func (m LocalTurns) Started(ctx context.Context, thread, previous, native string
 	}
 	return nil
 }
+
+func (m LocalTurns) HasNext(ctx context.Context, thread, previous string) (bool, error) {
+	var exists bool
+	err := m.Journal.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM manager_local_turns WHERE run_id=? AND thread_id=? AND previous_turn=?)`, m.RunID, thread, previous).Scan(&exists)
+	return exists, err
+}

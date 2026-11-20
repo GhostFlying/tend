@@ -43,9 +43,12 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			}
 			continue
 		}
-		raw, err := m.app.RetainedNativeReceipt(ctx, m.cfg.ConversationID, rec.RequestID)
+		native, waiting, raw, err := m.app.NativeReceiptSource(ctx, m.cfg.ConversationID, rec.RequestID)
 		if err != nil {
 			return err
+		}
+		if waiting {
+			continue
 		}
 		var receipt harness.TurnReceipt
 		found := len(raw) != 0 && m.cfg.DecodeRetainedTurnReceipt != nil
@@ -54,7 +57,7 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			if err != nil {
 				return err
 			}
-			if receipt.ID != rec.TurnID {
+			if receipt.ID != native {
 				return fmt.Errorf("%w: retained receipt has a different original turn", harness.ErrRejected)
 			}
 			receipt.Raw = raw
@@ -65,12 +68,12 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 			found = covered
 		}
 		if !found {
-			receipt, found, err = reader.FindTurn(ctx, identity, rec.TurnID)
+			receipt, found, err = reader.FindTurn(ctx, identity, native)
 			if err != nil {
 				return err
 			}
 		}
-		if !found || (receipt.Status != "completed" && receipt.Status != "interrupted" && receipt.Status != "failed") {
+		if !found || native != "" && receipt.ID != native || (receipt.Status != "completed" && receipt.Status != "interrupted" && receipt.Status != "failed") {
 			if source != "" {
 				if err := m.app.BlockAgentRecovery(ctx, rec.RequestID, "Native continuation has no confirmed terminal receipt; reconciliation is required."); err != nil {
 					return err
@@ -86,8 +89,11 @@ func (m *Manager) reconcileNativeReceipts(ctx context.Context, th harness.Thread
 }
 
 func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, rec store.MainTurn, receipt harness.TurnReceipt, repair bool, source string) error {
-	rec.TurnID, rec.Status, rec.Failure = receipt.ID, receipt.Status, receipt.Failure
-	if err := m.app.ObserveNativeTurnTerminal(ctx, rec); err != nil {
+	if rec.TurnID == "" {
+		rec.TurnID = receipt.ID
+	}
+	rec.Status, rec.Failure = receipt.Status, receipt.Failure
+	if err := m.app.ObserveContinuationTerminal(ctx, rec, receipt.ID); err != nil {
 		return err
 	}
 	covered, err := m.nativeReceiptSourcesCovered(ctx, th.ID(), receipt)
@@ -98,7 +104,7 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 		return nil
 	}
 
-	if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), rec.TurnID, "", "native_receipt", receipt.Raw); err != nil {
+	if err := m.app.RecordRolloutEvent(ctx, m.cfg.ConversationID, th.ID(), receipt.ID, "", "native_receipt", receipt.Raw); err != nil {
 		return err
 	}
 	state := protocol.AssistantCompleted
@@ -160,7 +166,7 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 			continue
 		}
 		itemReplyTo, itemSources := replyTo, sources
-		if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), rec.TurnID, message.ItemID); err != nil {
+		if prior, refs, found, err := m.app.NativeItemSources(ctx, th.ID(), receipt.ID, message.ItemID); err != nil {
 			return err
 		} else if found {
 			itemReplyTo, itemSources = prior, refs
@@ -170,11 +176,11 @@ func (m *Manager) projectNativeReceipt(ctx context.Context, th harness.Thread, r
 			// reply must retain its authoritative empty terminal update.
 			continue
 		}
-		payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": rec.TurnID, "item_id": message.ItemID, "status": string(state)}
+		payload := map[string]any{"body": message.Text, "reply_to": itemReplyTo, "turn_id": receipt.ID, "item_id": message.ItemID, "status": string(state)}
 		if len(itemSources) > 1 {
 			payload["reply_sources"] = itemSources
 		}
-		if err := m.record(ctx, th, "native-receipt/"+rec.TurnID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true}); err != nil {
+		if err := m.record(ctx, th, "native-receipt/"+receipt.ID+"/"+message.ItemID, "conversation.record_agent_message", payload, app.RecordAgentMessage{Reconciled: true, DeliveryTurn: rec.TurnID}); err != nil {
 			return fmt.Errorf("mainthread: reconcile reply request=%s thread=%s turn=%s item=%s: %w", rec.RequestID, th.ID(), rec.TurnID, message.ItemID, err)
 		}
 	}

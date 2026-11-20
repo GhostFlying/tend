@@ -778,8 +778,14 @@ func (d *Driver) Handle(ctx context.Context, method string, raw json.RawMessage)
 			return nil, s.Compact(ctx)
 		}
 	case "find":
-		if s, ok := t.(harness.TurnReader); ok {
-			receipt, found, err := s.FindTurn(ctx, r.MessageID, r.TurnID)
+		if reader, ok := t.(harness.TurnReader); ok {
+			receipt, found, err := reader.FindTurn(ctx, r.MessageID, r.TurnID)
+			if err == nil && found && receipt.Status == "completed" && d.LocalTurns != nil {
+				continued, err := d.LocalTurns.HasNext(ctx, t.ID(), receipt.ID)
+				if err != nil || continued {
+					return FindResult{}, err
+				}
+			}
 			return FindResult{Receipt: receipt, Found: found}, err
 		}
 	}

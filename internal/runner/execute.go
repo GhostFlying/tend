@@ -409,7 +409,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	if err != nil {
 		return &completionPending{err}
 	}
-	attachOriginal := protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && !run.StoppedConfirmed && !run.Held
+	attachOriginal := strictResume == nil && protocol.RunnerOwnsExecution(as.Protocol) && run.Attempts > 0 && run.Attempts != a.pausedAttempt && !run.StoppedConfirmed && !run.Held
 	attachmentOnly := strictResume != nil || attachOriginal
 	defer func() {
 		// Setup, observation and local persistence failures do not prove the
@@ -776,6 +776,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		return &completionPending{err}
 	}
 	if cause := context.Cause(runCtx); cause != nil {
+		if errors.Is(cause, errPaused) && (werr == nil || errors.Is(werr, errPaused) || errors.Is(werr, context.Canceled)) {
+			a.pausedAttempt = attempt
+		}
 		// errFenced or errStopped from the run, or errPaused or errHeld
 		// from this attempt. What the worker said as it stopped, such as
 		// that the owner took over, would otherwise wait for the run's
@@ -1085,7 +1088,7 @@ func outcome(env protocol.Envelope) []any {
 
 func (r *Runner) report(ctx context.Context, as protocol.Assignment) error {
 	if protocol.RunnerOwnsExecution(as.Protocol) {
-		if err := r.flushStartReports(ctx, as); err != nil {
+		if err := r.retry(ctx, func() error { return r.flushStartReports(ctx, as) }); err != nil {
 			return &completionPending{err}
 		}
 	}
