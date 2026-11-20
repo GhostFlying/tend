@@ -332,6 +332,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.wg.Go(func() { r.finalMessageReceipts(ctx) })
 		r.wg.Go(func() { r.syncJournalEvents(ctx) })
 		r.wg.Go(func() { r.nativeUsageLoop(ctx) })
+		if err := r.resumeDelegated(ctx); err != nil {
+			return err
+		}
 		if err := r.resendClaims(ctx); err != nil {
 			return err
 		}
@@ -934,7 +937,7 @@ func (r *Runner) startWithControl(ctx context.Context, as protocol.Assignment, o
 		return
 	}
 	deadline := r.authorizedDeadline(as.RunID, r.fenceDeadline(observedAt))
-	if !r.cfg.Now().Before(deadline) {
+	if !protocol.RunnerOwnsExecution(as.Protocol) && !r.cfg.Now().Before(deadline) {
 		// The renewal is already too old to write on; reconcile first.
 		r.cfg.Log.WarnContext(ctx, "lease too old to start a run; reconciling", "run_id", runID)
 		r.requestReconcile()
@@ -1056,6 +1059,14 @@ func (r *Runner) applyDesired(ctx context.Context, a *active, desired protocol.R
 		// Sent before the takeover this runner reported was recorded.
 		r.mu.Unlock()
 		return
+	}
+	if desired != "" && desired != a.desired && protocol.RunnerOwnsExecution(a.as.Protocol) {
+		if err := r.cfg.Journal.SetReceivedDesired(ctx, a.as.RunID, desired); err != nil {
+			r.mu.Unlock()
+			a.cancel(errFenced)
+			r.cfg.Log.ErrorContext(ctx, "cannot retain run control", "run_id", a.as.RunID, "err", err)
+			return
+		}
 	}
 	prev := a.desired
 	a.desired = desired
@@ -1221,7 +1232,7 @@ func (r *Runner) watchdog(ctx context.Context) {
 		r.mu.Lock()
 		var late []string
 		for id, a := range r.active {
-			if !a.reporting && now.After(a.deadline) {
+			if !a.reporting && now.After(a.deadline) && (!protocol.RunnerOwnsExecution(a.as.Protocol) || !r.grantDeadlines[id].IsZero()) {
 				late = append(late, id)
 			}
 		}

@@ -153,8 +153,10 @@ func (q *ownerQuestions) ask(ctx context.Context, payload protocol.AskOwnerPaylo
 
 func (q *ownerQuestions) recover(ctx context.Context) ([]protocol.WorkerQuestion, error) {
 	var questions []protocol.WorkerQuestion
-	if err := q.read(ctx, "", &questions); err != nil {
-		return nil, err
+	if !protocol.RunnerOwnsExecution(q.as.Protocol) {
+		if err := q.read(ctx, "", &questions); err != nil {
+			return nil, err
+		}
 	}
 	known := make(map[string]bool, len(questions))
 	for _, question := range questions {

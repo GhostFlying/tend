@@ -42,7 +42,7 @@ func (w *worker) startupEvent(ctx context.Context, phase string) error {
 }
 
 func (w *worker) beginStartup(ctx context.Context, agent string) error {
-	if w.spec.RetainedResume != nil {
+	if w.spec.AttachmentOnly() {
 		return w.beginRetained(ctx)
 	}
 	for {

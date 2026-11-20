@@ -293,7 +293,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 	w := &worker{ws: ws, spec: spec, wt: wt.ID, events: make(chan harness.WorkerEvent), done: make(chan struct{})}
 	// A thread from another harness, such as a traex thread ID from
 	// before the host moved to orca, does not decode and starts over.
-	if err := json.Unmarshal([]byte(spec.Thread), &w.st); err != nil && spec.RetainedResume != nil {
+	if err := json.Unmarshal([]byte(spec.Thread), &w.st); err != nil && spec.AttachmentOnly() {
 		return nil, fmt.Errorf("%w: saved native state is invalid", harness.ErrRetainedResumePending)
 	}
 	if err := w.openBridge(ctx); err != nil {
@@ -577,7 +577,7 @@ func (w *worker) promptFor(spec harness.WorkerSpec) string {
 const launchAttempts = 5
 
 func (w *worker) launch(ctx context.Context, agent string) error {
-	if w.spec.RetainedResume != nil {
+	if w.spec.AttachmentOnly() {
 		return harness.ErrRetainedResumePending
 	}
 	if w.st.Marker == "" {
@@ -768,7 +768,7 @@ const sendAttempts = 3
 // it had: orca binds the request to its text, and may have run it
 // already.
 func (w *worker) send(ctx context.Context, text string) error {
-	if w.spec.RetainedResume != nil {
+	if w.spec.AttachmentOnly() {
 		return harness.ErrRetainedResumePending
 	}
 	if w.st.Send != "" {
@@ -922,7 +922,7 @@ func (w *worker) run(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			if w.spec.RetainedResume != nil {
+			if w.spec.AttachmentOnly() {
 				w.err = fmt.Errorf("%w: retained native observation failed: %v", harness.ErrRetainedResumePending, err)
 				return
 			}
@@ -1256,7 +1256,7 @@ func (w *worker) stop(ctx context.Context, cause error) {
 	case errors.Is(cause, harness.ErrHeld), w.holding != "":
 		// The owner works in the agent: leave it alone.
 	default:
-		if w.spec.RetainedResume != nil && (!errors.Is(cause, harness.ErrPaused) || !w.retainedAttached) {
+		if w.spec.AttachmentOnly() && (!errors.Is(cause, harness.ErrPaused) || !w.retainedAttached) {
 			// Observation-only attachment grants no implicit terminal input,
 			// including another interrupt during a fence or runner shutdown.
 			// Explicit pause still interrupts an already verified attachment.

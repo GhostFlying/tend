@@ -44,7 +44,7 @@ func (j *Journal) ManagerAcknowledgementRuns(ctx context.Context) ([]protocol.As
 
 // PendingEventRuns finds only outstanding tails, including after restart.
 func (j *Journal) PendingEventRuns(ctx context.Context) ([]protocol.Assignment, error) {
-	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT DISTINCT run_id FROM events) AND json_extract(assignment_json,'$.event_sync')=1 ORDER BY run_id`)
+	return j.assignmentsFor(ctx, `SELECT assignment_json FROM runs WHERE run_id IN (SELECT run_id FROM events UNION SELECT run_id FROM run_start_reports) AND json_extract(assignment_json,'$.event_sync')=1 ORDER BY run_id`)
 }
 
 func (j *Journal) assignmentsFor(ctx context.Context, query string) ([]protocol.Assignment, error) {

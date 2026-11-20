@@ -1,1 +1,1 @@
-{"current":6,"minimum":5,"adapters":[]}
+{"current":7,"minimum":6,"adapters":[{"id":"renewal-bound-runs","protocol":6,"remove_in":8,"file":"internal/protocol/run_delegation.go","test":"internal/e2e/runner_test.go"}]}
