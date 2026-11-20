@@ -17,6 +17,8 @@
 
 `last_audit` 记录入队时间。系统定时器和 `maintenance audit --scheduled` 对相同 UTC 小时只入队一次，显式手动审计可单独发起。每次审计收到上次已完成后的 Issue 变化（同一 Issue 合并到最新观测，包括 owner Task、状态、修订与任务数）以及待复核的 case ID，各最多 32 项。`more` 标示还有其他项，下次审计继续。只有原生 turn 返回完成才更新 `last_audit_completed` 和 `audited_through`。失败、中断、未知回执与控制器重启都保留原变化。清单带上次成功采集时间和采集错误；采集缺失或服务离线时，空清单不证明业务无变化。离开默认列表只表示超出探针当前可见范围。
 
+定时审计成功后，`history` 保留定时请求 ID、输入 ID、原生 turn ID、冻结的游标和终态。`status.idle_audit_session` 显示可供下一轮复用的线程。下一轮用同一线程开启独立 turn，前提是后端、工作区和维护指令一致，且原生线程可用、空闲。已完成的空闲线程明确失效后，下轮在新线程读取已持久化的审计游标。已发送的输入仍沿原线程对账。清单为空时定时 Agent 仍独立选择证据并查找遗漏。轮询间隔由部署的定时器决定。
+
 维护 Agent 或本机操作者可按原对象登记已核实的同链故障。`subject.json` 包含 `issue_id`、`task_id`、`run_id`、适用时的 `wait_id`、证据定位 `evidence` 和应验证的业务事实 `expected`。诊断 code 与这些原对象身份确定唯一 case。写入回执带回 `case_id`，重复观测或更换会话继续读取该案。
 
 ```sh
@@ -91,9 +93,16 @@ tend maintenance review --base main --head "$CANDIDATE_COMMIT" --json
 额外审核要求仍需完成，不绕过候选变化后的重新验证。
 
 写命令输出 request ID 和预期修订。完整原请求可用 `--dry-run` 保存，重试必须复用
-原 ID、修订和输入；`request --id` 查询持久收据。未知创建只能在核实原生记录后用
-`reconcile --session-id` 绑定原会话，不因超时创建替代执行。暂停只停止新模型调度，
-当前原生工作仍可观察；部署层停止 timer 时保留状态和配置。
+原 ID、修订和输入。`request --id` 查询持久收据。未知创建保留首次可记录的创建错误和收到的线程标识。查到可核实的原线程时，用 `reconcile --session-id` 认领。经本机操作者核实原生日志与原创建的关联、该线程已退出以及从未执行 turn 后，可以沿同一入口结清。
+
+```sh
+tend maintenance reconcile --revision "$CURRENT_REVISION" --request-id "$RECONCILE_REQUEST_ID" \
+  --creation-id "$ORIGINAL_CREATION_ID" --session-id "$ORIGINAL_THREAD_ID" \
+  --reason "$ALLOCATION_CORRELATION" --exit-evidence "$NATIVE_EXIT_EVIDENCE" \
+  --verification "$NO_TURN_EVIDENCE"
+```
+
+`--reason` 记录如何把线程分配关联到原创建。`--exit-evidence` 与 `--verification` 分别引用原生退出和未执行的证据。超时、断开和查无记录均不足以结清。控制器核对当前修订、原创建身份和未提交输入的持久状态，历史及收据一并写入，保留原待办。暂停只停止新模型调度，当前原生工作仍可观察；部署层停止 timer 时保留状态和配置。
 
 原生 turn 失败或被人工中断时，历史保存真实 outcome、原 turn/input 和触发索引，
 `status.failure` 与诊断概览报告故障，待办保留。普通程序检测不再次调用模型；新的

@@ -28,7 +28,7 @@ func TestMaintenancePlanResolvesCallerReleasePath(t *testing.T) {
 	}
 }
 
-func TestMaintenanceCaseAndScheduledAuditKeepOriginalCLIInput(t *testing.T) {
+func TestMaintenanceCommandsKeepOriginalCLIInput(t *testing.T) {
 	subject := protocol.MaintenanceSubject{IssueID: "issue-1", TaskID: "owner-task", RunID: "original", WaitID: "wait", Evidence: "original result event", Expected: "owner disposition"}
 	raw, err := json.Marshal(subject)
 	if err != nil {
@@ -47,6 +47,10 @@ func TestMaintenanceCaseAndScheduledAuditKeepOriginalCLIInput(t *testing.T) {
 		}},
 		{"resolve", []string{"--id", "case-1", "--reason", "complete", "--verification", "owner turn"}, func(r protocol.MaintenanceRequest) bool { return r.Verification == "owner turn" }},
 		{"audit", []string{"--scheduled"}, func(r protocol.MaintenanceRequest) bool { return r.ScheduledAudit }},
+		{"reconcile", []string{"--creation-id", "original-creation", "--session-id", "original-thread", "--reason", "matched allocation", "--exit-evidence", "native exit receipt", "--verification", "no turn submitted"}, func(r protocol.MaintenanceRequest) bool {
+			return r.CreationID == "original-creation" && r.SessionID == "original-thread" &&
+				r.Reason == "matched allocation" && r.ExitEvidence == "native exit receipt" && r.Verification == "no turn submitted"
+		}},
 	} {
 		t.Run(tt.action, func(t *testing.T) {
 			te := newTestEnv(t, "")

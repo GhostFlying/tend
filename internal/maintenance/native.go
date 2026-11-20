@@ -97,6 +97,9 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 			continue
 		}
 		if len(response.Error) > 0 && string(response.Error) != "null" {
+			if nativeThreadUnavailable(method, params, response.Error) {
+				return fmt.Errorf("maintenance: native %s: %w: %w", method, ErrNotSent, ErrThreadUnavailable)
+			}
 			return fmt.Errorf("maintenance: native %s rejected the request: %w", method, ErrNotSent)
 		}
 		if result != nil {
@@ -104,6 +107,29 @@ func (r *nativeRPC) call(ctx context.Context, method string, params any, result 
 		}
 		return nil
 	}
+}
+
+// Only exact provider replies for the addressed thread can retire a completed
+// audit's idle session. In particular, a transport failure has no such meaning.
+func nativeThreadUnavailable(method string, params any, raw json.RawMessage) bool {
+	if method != "thread/read" && method != "thread/resume" && method != "turn/start" {
+		return false
+	}
+	values, ok := params.(map[string]any)
+	if !ok {
+		return false
+	}
+	id, _ := values["threadId"].(string)
+	var rejection struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if id == "" || json.Unmarshal(raw, &rejection) != nil || rejection.Code != -32600 {
+		return false
+	}
+	return rejection.Message == "thread not found: "+id ||
+		method == "thread/read" && rejection.Message == "thread not loaded: "+id ||
+		(method == "thread/read" || method == "thread/resume") && rejection.Message == "no rollout found for thread id "+id
 }
 
 func backendParams(b protocol.MaintenanceBackend) map[string]any {
@@ -166,6 +192,9 @@ func (n *NativeClient) NewThread(ctx context.Context, b protocol.MaintenanceBack
 	params["experimentalRawEvents"] = true
 	params["persistExtendedHistory"] = true
 	err = r.call(ctx, "thread/start", params, &result)
+	if err == nil && result.Thread.ID == "" {
+		err = errors.New("maintenance: native creation response omitted thread identity")
+	}
 	r.sandbox = result.Sandbox
 	if err != nil {
 		_ = r.conn.Close()
@@ -233,7 +262,7 @@ func (n *NativeClient) Read(ctx context.Context, b protocol.MaintenanceBackend, 
 			return NativeState{}, err
 		}
 	}
-	s := NativeState{Busy: result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError"}
+	s := NativeState{Busy: result.Thread.Status.Type != "idle" && result.Thread.Status.Type != "systemError", Unusable: result.Thread.Status.Type == "systemError"}
 	for _, t := range result.Thread.Turns {
 		turn := NativeTurn{ID: t.ID, Status: t.Status}
 		for _, item := range t.Items {
@@ -285,11 +314,24 @@ func (n *NativeClient) threadRPC(ctx context.Context, b protocol.MaintenanceBack
 				_ = r.conn.Close()
 				return nil, fmt.Errorf("%w: %w", ErrNotSent, err)
 			}
+			if thread.RequireIdle {
+				if err := r.call(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": false}, &result); err != nil {
+					_ = r.conn.Close()
+					return nil, fmt.Errorf("%w: %w", ErrNotSent, err)
+				}
+			}
 		} else {
 			r.sandbox = sandbox
 			if r.sandbox == nil {
 				r.sandbox = thread.Sandbox
 			}
+		}
+		if thread.RequireIdle && result.Thread.Status.Type != "idle" {
+			_ = r.conn.Close()
+			if result.Thread.Status.Type == "systemError" {
+				return nil, fmt.Errorf("%w: %w", ErrNotSent, ErrThreadUnavailable)
+			}
+			return nil, fmt.Errorf("%w: maintenance native thread is not idle", ErrNotSent)
 		}
 	}
 	return r, nil

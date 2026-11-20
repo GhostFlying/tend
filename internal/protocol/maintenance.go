@@ -72,7 +72,20 @@ type MaintenancePredecessor struct {
 	SessionID string `json:"session_id"`
 }
 
+// MaintenanceAuditSession is an idle, previously successful scheduled audit thread.
+type MaintenanceAuditSession struct {
+	SessionID     string         `json:"session_id"`
+	RolloutPath   string         `json:"rollout_path,omitempty"`
+	SandboxPolicy map[string]any `json:"sandbox_policy,omitempty"`
+	Profile       string         `json:"profile"`
+}
+
 type MaintenanceSession struct {
+	ScheduledAuditID   string                  `json:"scheduled_audit_id,omitempty"`
+	SessionProfile     string                  `json:"session_profile,omitempty"`
+	CreationError      string                  `json:"creation_error,omitempty"`
+	ObservedSessionID  string                  `json:"observed_session_id,omitempty"`
+	ReconciledBy       string                  `json:"reconciled_by,omitempty"`
 	Audit              *MaintenanceAudit       `json:"audit,omitempty"`
 	Outcome            string                  `json:"outcome,omitempty"`
 	SandboxPolicy      map[string]any          `json:"sandbox_policy,omitempty"`
@@ -92,6 +105,8 @@ type MaintenanceSession struct {
 }
 
 type MaintenanceStatus struct {
+	IdleAuditSession   *MaintenanceAuditSession     `json:"idle_audit_session,omitempty"`
+	PendingAudits      []string                     `json:"pending_audits,omitempty"`
 	LastSnapshotAt     int64                        `json:"last_snapshot_at,omitempty"`
 	ScheduledHour      string                       `json:"scheduled_hour,omitempty"`
 	RecheckedAfter     string                       `json:"rechecked_after,omitempty"`
@@ -147,6 +162,8 @@ type MaintenanceOverview struct {
 }
 
 type MaintenanceRequest struct {
+	CreationID       string              `json:"creation_id,omitempty"`
+	ExitEvidence     string              `json:"exit_evidence,omitempty"`
 	ScheduledAudit   bool                `json:"scheduled_audit,omitempty"`
 	Subject          *MaintenanceSubject `json:"subject,omitempty"`
 	Verification     string              `json:"verification,omitempty"`
