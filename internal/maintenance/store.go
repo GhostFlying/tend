@@ -55,9 +55,10 @@ var ErrNotSent = errors.New("native operation was not accepted")
 var ErrThreadUnavailable = errors.New("native thread is unavailable")
 
 type NativeState struct {
-	Busy     bool
-	Unusable bool
-	Turns    []NativeTurn
+	Busy           bool
+	Unusable       bool
+	BoundedHistory bool
+	Turns          []NativeTurn
 }
 type NativeTurn struct{ ID, InputID, Status string }
 
@@ -161,7 +162,7 @@ func (c *Controller) importLegacyAudit(ctx context.Context) (bool, error) {
 	a := s.Active
 	if a == nil || a.Phase != "creating" || a.SessionProfile != "" ||
 		s.LegacyAuditThrough != 0 || len(s.PendingAudits) != 0 || !slices.Contains(s.Pending, "audit") ||
-		s.ScheduledHour == "" || s.ScheduledHour != time.Unix(s.LastAudit, 0).UTC().Format("2006-01-02T15") {
+		s.ScheduledHour == "" {
 		return false, nil
 	}
 	var count int

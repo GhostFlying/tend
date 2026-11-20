@@ -384,7 +384,7 @@ func (c *Controller) Step(ctx context.Context) error {
 				mode = ReadFullHistory
 			}
 		}
-		native, err := c.opts.Native.Read(ctx, a.Backend, a.SessionID, mode)
+		native, err := c.readActiveThread(ctx, a, mode)
 		if a.Phase == "idle" && a.InputID == "" && a.SessionProfile != "" && len(c.state.PendingAudits) != 0 &&
 			(errors.Is(err, ErrThreadUnavailable) || err == nil && native.Unusable) {
 			return c.retireAuditThread(ctx)
@@ -470,7 +470,8 @@ func (c *Controller) Step(ctx context.Context) error {
 			c.restoreInputs(a, []string{"audit"})
 		}
 		if a.ScheduledAuditID != "" && outcome == "completed" {
-			if c.state.PendingBackend == nil && a.SessionProfile != "" && !native.Unusable {
+			c.clearAuditThread(a.SessionID)
+			if c.state.PendingBackend == nil && a.SessionProfile != "" && native.BoundedHistory && !native.Unusable {
 				c.state.IdleAuditSession = &protocol.MaintenanceAuditSession{
 					SessionID: a.SessionID, RolloutPath: a.RolloutPath,
 					SandboxPolicy: a.SandboxPolicy, Profile: a.SessionProfile,
@@ -526,13 +527,13 @@ func (c *Controller) Step(ctx context.Context) error {
 	// input. Without a recorded profile it will not be kept for later reuse.
 	if scheduled && a != nil && (a.SessionProfile != "" || a.ReconciledBy == "") {
 		_, profile, err := c.auditThreadProfile()
-		if err != nil {
-			return err
-		}
-		if a.SessionProfile != profile {
+		if err != nil || a.SessionProfile != profile {
 			// Let the original inline repair finish without consuming the timer.
 			reasons = withoutAudit(reasons)
 			if len(reasons) == 0 {
+				if err != nil {
+					return err
+				}
 				c.clearAuditThread(a.SessionID)
 				c.finish(false)
 				return c.save(ctx)
@@ -613,6 +614,17 @@ func (c *Controller) Step(ctx context.Context) error {
 	a.TurnID = id
 	a.Phase = "running"
 	return c.save(ctx)
+}
+
+func (c *Controller) readActiveThread(ctx context.Context, a *protocol.MaintenanceSession, mode NativeReadMode) (NativeState, error) {
+	reader, ok := c.opts.Native.(interface {
+		ReadTurn(context.Context, protocol.MaintenanceBackend, string, NativeReadMode, NativeTurn, bool) (NativeState, error)
+	})
+	if !ok || mode == ReadMetadata {
+		return c.opts.Native.Read(ctx, a.Backend, a.SessionID, mode)
+	}
+	review := c.state.Review != nil && c.state.Review.Phase == "running" && c.state.Review.RequestID == a.InputID
+	return reader.ReadTurn(ctx, a.Backend, a.SessionID, mode, NativeTurn{ID: a.TurnID, InputID: a.InputID}, review)
 }
 
 func withoutAudit(reasons []string) []string {
