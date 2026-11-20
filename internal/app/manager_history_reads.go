@@ -13,22 +13,26 @@ import (
 
 // Keep the pending receipts on the outer side of each join. Joining through
 // hosted_executions can scan or materialize both execution history tables.
+// Pin the primary-key indexes so stale small-table statistics cannot turn
+// a point lookup into a scan of a now-large history table.
 // Materialize the Run lookups before filtering their state. Otherwise stale
 // statistics can make SQLite scan runs to build a Bloom filter for the join.
 const pendingManagerReceiptRuns = `WITH pending_receipt_ids(run_id) AS (
  SELECT json_extract(h.private_snapshot,'$.runner_run_id')
  FROM native_turn_receipts_pending p
- CROSS JOIN local_hosted_executions h ON h.execution_id=p.request_id
+ CROSS JOIN local_hosted_executions h INDEXED BY sqlite_autoindex_local_hosted_executions_1 ON h.execution_id=p.request_id
  UNION ALL
  SELECT json_extract(h.private_snapshot,'$.runner_run_id')
  FROM native_turn_receipts_pending p
- CROSS JOIN runner_coordination_executions h ON h.execution_id=p.request_id
+ CROSS JOIN runner_coordination_executions h INDEXED BY sqlite_autoindex_runner_coordination_executions_1 ON h.execution_id=p.request_id
 ), pending_receipt_runs AS MATERIALIZED (
  SELECT r.run_id,r.task_id,r.role,r.observed_state,r.native_closed_at,r.native_close_activity,r.native_activity,r.created_at
  FROM pending_receipt_ids p
- CROSS JOIN runs r ON r.run_id=p.run_id
+ CROSS JOIN runs r INDEXED BY sqlite_autoindex_runs_1 ON r.run_id=p.run_id
 )`
 
+// The scalar subquery keeps the unapplied event check a per-Run index probe.
+// SQLite can rewrite EXISTS into a join that builds a Bloom filter on events.
 const managerHistoryRunQuery = pendingManagerReceiptRuns + `
  SELECT run_id FROM (
   SELECT receipt.run_id,receipt.created_at FROM pending_receipt_runs receipt
@@ -38,7 +42,8 @@ const managerHistoryRunQuery = pendingManagerReceiptRuns + `
   SELECT r.run_id,r.created_at FROM runs r INDEXED BY runs_task
   WHERE r.task_id=?1 AND r.role='issue_manager' AND r.observed_state IN ('finished','failed')
   AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
-  AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
+  AND (SELECT 1 FROM manager_native_events e INDEXED BY manager_native_events_unapplied
+       WHERE e.run_id=r.run_id AND e.applied=0 LIMIT 1)=1
  )
  ORDER BY created_at DESC LIMIT 1`
 
