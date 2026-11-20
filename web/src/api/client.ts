@@ -20,15 +20,25 @@ export type BusinessMessage = IssueConversationItem;
 export type Connection =
   | { status: "connecting" }
   | { status: "online"; login: string }
-  | { status: "offline"; reason: string | undefined }
+  | { status: "offline"; reason: string | undefined; streamTraceID?: string | null }
   | { status: "not-owner"; reason: string };
+
+/** Only display a server trace ID, even if a proxy supplied another value. */
+export function responseTraceID(response: Response): string | undefined {
+  const id = response.headers.get("X-Tend-Trace-ID");
+  return id && /^trc_[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(id) ? id : undefined;
+}
 
 /** A request that reached tend and was refused. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: Code | undefined;
 
-  constructor(status: number, body: ErrorBody | undefined) {
+  constructor(
+    status: number,
+    body: ErrorBody | undefined,
+    readonly traceID?: string,
+  ) {
     super(body?.message ?? `HTTP ${status}`);
     this.name = "ApiError";
     this.status = status;
@@ -396,6 +406,6 @@ export class ApiClient {
     if (res.status === 403 && sessionCheck) {
       this.state.set({ status: "not-owner", reason: error?.message ?? "这台设备不是 owner" });
     }
-    throw new ApiError(res.status, error);
+    throw new ApiError(res.status, error, responseTraceID(res));
   }
 }

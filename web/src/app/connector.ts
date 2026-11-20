@@ -15,7 +15,7 @@ export interface Link {
 }
 
 export function startConnector(client: ApiClient, live: LiveData, onOnline: () => void): Link {
-  let interruption: { reason: string | undefined } | undefined;
+  let interruption: { reason: string | undefined; streamTraceID: string | null } | undefined;
   let owner: string | undefined;
   const stream = new EventStream({
     open: (after, signal) =>
@@ -32,12 +32,12 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
     },
     onEvent: (event) => live.apply(event),
     onAlive: () => client.noteAlive(),
-    onLost: (reason) => {
-      interruption = { reason };
+    onLost: (reason, traceID) => {
+      interruption = { reason, streamTraceID: traceID ?? null };
       client.markOffline(reason);
     },
-    onReset: (reason) => {
-      interruption = { reason };
+    onReset: (reason, traceID) => {
+      interruption = { reason, streamTraceID: traceID ?? null };
       update();
     },
   });
@@ -53,12 +53,12 @@ export function startConnector(client: ApiClient, live: LiveData, onOnline: () =
     } else if (!everLive) {
       shown.set(shown.get().status === "connecting" ? shown.get() : { status: "connecting" });
     } else {
-      let reason = c.status === "offline" ? c.reason : undefined;
-      if (s !== "live" && interruption) reason = interruption.reason;
-      const now = shown.get();
-      if (now.status !== "offline" || now.reason !== reason) {
-        shown.set({ status: "offline", reason });
-      }
+      const observation =
+        s !== "live" && interruption
+          ? interruption
+          : { reason: c.status === "offline" ? c.reason : undefined };
+      const next: Connection = { status: "offline", ...observation };
+      if (!same(shown.get(), next)) shown.set(next);
     }
   };
 

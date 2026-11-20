@@ -25,6 +25,7 @@ const eventBatch = 200
 // stream sends a comment as a heartbeat. Clients read it with fetch, which
 // can send the bearer token, unlike EventSource.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	if _, err := s.owner(r); err != nil {
 		s.writeError(w, r, err)
 		return
@@ -36,42 +37,61 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	ctx := r.Context()
+	observed := httpdiag.SetTraceHeader(ctx, w)
+	diagnostic := eventStreamObservation{started: started}
+	if observed {
+		defer diagnostic.finish(ctx, s.cfg.Heartbeat)
+	}
 	query := r.URL.Query()
+	hasAfter := query.Has("after")
 	after, err := intParam(query.Get("after"))
 	if err != nil {
-		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "after must be an event_seq"))
+		diagnostic.reason = "invalid_cursor"
+		diagnostic.status = s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest, "after must be an event_seq"))
 		return
 	}
+	diagnostic.requested, diagnostic.hasRequested = after, hasAfter
 	_, ok := w.(http.Flusher)
 	if !ok {
-		s.writeError(w, r, fmt.Errorf("api: the response cannot stream"))
+		diagnostic.reason = "stream_unsupported"
+		diagnostic.status = s.writeError(w, r, fmt.Errorf("api: the response cannot stream"))
 		return
 	}
 	response := http.NewResponseController(w)
-	ctx := r.Context()
 	var latest int64
 	var expired bool
 	if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
 		var err error
 		latest, err = store.LatestEventSeq(ctx, tx.Q())
-		if err == nil && query.Has("after") {
+		if err == nil && hasAfter {
 			expired, err = store.RefreshCursorExpired(ctx, tx.Q(), after)
 		}
 		return err
 	}); err != nil {
-		s.writeError(w, r, err)
+		diagnostic.reason = "initial_read_failed"
+		if ctx.Err() != nil {
+			diagnostic.reason = "request_ended"
+		}
+		if observed {
+			err = protocol.Errorf(protocol.CodeInternal, "internal error")
+		}
+		diagnostic.status = s.writeError(w, r, err)
 		return
 	}
+	diagnostic.initialWatermark, diagnostic.hasInitialWatermark = latest, true
 	switch {
-	case !query.Has("after"):
+	case !hasAfter:
 		after = latest
 	case after > latest:
 		// A cursor ahead of current state can belong to a restored ledger.
-		s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest,
+		diagnostic.reason = "cursor_ahead"
+		diagnostic.status = s.writeError(w, r, protocol.Errorf(protocol.CodeInvalidRequest,
 			"after %d is past the ledger's newest event %d; reload and connect without after", after, latest))
 		return
 	case expired:
-		s.writeError(w, r, protocol.Errorf(protocol.CodeStaleRevision,
+		diagnostic.reason = "cursor_expired"
+		diagnostic.status = s.writeError(w, r, protocol.Errorf(protocol.CodeStaleRevision,
 			"refresh cursor expired; reload authoritative views and connect without after"))
 		return
 	}
@@ -79,13 +99,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	if writeEvent(w, "start", 0, protocol.StreamStart{EventSeq: after}) != nil {
+	diagnostic.status = http.StatusOK
+	w.WriteHeader(diagnostic.status)
+	if writeEvent(w, "start", 0, protocol.StreamStart{EventSeq: after}) != nil || response.Flush() != nil {
+		diagnostic.reason = "start_write_failed"
 		return
 	}
-	if err := response.Flush(); err != nil {
-		return
-	}
+	diagnostic.cursorFlushed(after)
 	httpdiag.Waiting(ctx)
 	heartbeat := time.NewTicker(s.cfg.Heartbeat)
 	defer heartbeat.Stop()
@@ -107,7 +127,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			batch, err = views.Events(ctx, tx.Q(), after, eventBatch)
 			return err
 		}); err != nil {
-			if ctx.Err() == nil {
+			diagnostic.reason = "read_failed"
+			if ctx.Err() != nil {
+				diagnostic.reason = "request_ended"
+			} else if !observed {
 				s.log.ErrorContext(ctx, "event stream read failed", "after", after, "err", err)
 			}
 			return
@@ -115,11 +138,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		if resetAt > 0 {
 			// A resync is explicit even after response headers were committed.
 			// Older clients reconnect and receive the same expired-cursor error.
-			_ = writeEvent(w, "reset", 0, protocol.StreamStart{EventSeq: resetAt})
-			_ = response.Flush()
+			diagnostic.reason, diagnostic.reset = "cursor_expired", resetAt
+			writeErr := writeEvent(w, "reset", 0, protocol.StreamStart{EventSeq: resetAt})
+			flushErr := response.Flush()
+			diagnostic.resetWriteFailed = writeErr != nil || flushErr != nil
+			if !diagnostic.resetWriteFailed {
+				diagnostic.frameFlushed()
+			}
 			return
 		}
-		var refreshThrough int64
+		var refreshThrough, writtenThrough int64
 		for _, ev := range batch {
 			after = ev.EventSeq
 			var payload any = ev
@@ -150,8 +178,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				payload = protocol.MessagingEvent{EventSeq: ev.EventSeq, Kind: kind, ObjectType: ev.ObjectType, ObjectID: ev.ObjectID}
 			}
 			if writeEvent(w, "ledger", ev.EventSeq, payload) != nil {
+				diagnostic.reason = "ledger_write_failed"
 				return
 			}
+			writtenThrough = ev.EventSeq
 			if store.RefreshKind(ev.Kind) {
 				refreshThrough = ev.EventSeq
 			}
@@ -159,7 +189,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 		if len(batch) > 0 {
 			if err := response.Flush(); err != nil {
+				diagnostic.reason = "ledger_write_failed"
 				return
+			}
+			if writtenThrough > 0 {
+				diagnostic.cursorFlushed(writtenThrough)
 			}
 			if refreshThrough > 0 {
 				s.refreshAck.offer(refreshThrough)
@@ -170,18 +204,19 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-ctx.Done():
+			diagnostic.reason = "request_ended"
 			return
 		case <-s.ending:
+			diagnostic.reason = "server_shutdown"
 			httpdiag.WaitStopped(ctx)
 			return
 		case <-changed:
 		case <-heartbeat.C:
-			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil {
+			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil || response.Flush() != nil {
+				diagnostic.reason = "heartbeat_write_failed"
 				return
 			}
-			if err := response.Flush(); err != nil {
-				return
-			}
+			diagnostic.heartbeatFlushed()
 		}
 	}
 }

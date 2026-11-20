@@ -111,15 +111,16 @@ var statusOf = map[protocol.Code]int{
 
 // writeError answers with err as a protocol error. Errors that are not
 // protocol errors are logged with attrs and hidden from the caller.
-func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, attrs ...any) {
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, attrs ...any) int {
 	pe, ok := errors.AsType[*protocol.Error](err)
 	if !ok {
-		attrs = append([]any{"path", r.URL.Path, "err", err}, attrs...)
 		if r.Context().Err() != nil {
-			// The caller hung up; nothing failed.
-			s.log.InfoContext(r.Context(), "owner request abandoned", attrs...)
+			// Observed GETs already report cancellation in their bounded summary.
+			if _, observed := w.(*httpdiag.ReadObservation); !observed {
+				s.log.InfoContext(r.Context(), "owner request abandoned", append([]any{"path", r.URL.Path, "err", err}, attrs...)...)
+			}
 		} else {
-			s.log.ErrorContext(r.Context(), "owner request failed", attrs...)
+			s.log.ErrorContext(r.Context(), "owner request failed", append([]any{"path", r.URL.Path, "err", err}, attrs...)...)
 		}
 		pe = protocol.Errorf(protocol.CodeInternal, "internal error")
 	}
@@ -128,6 +129,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error, a
 		status = http.StatusInternalServerError
 	}
 	writeJSON(w, status, protocol.APIResponse{Error: pe})
+	return status
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -211,13 +211,50 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 // called by fn must reuse its Querier rather than acquire another pooled read
 // connection; recursive acquisition can exhaust the bounded pool.
 func (s *Store) Read(ctx context.Context, fn func(*ReadTx) error) error {
+	return s.readTransaction(ctx, fn, nil)
+}
+
+// ReadTimings records the observable boundaries of one read transaction.
+// database/sql does not separate pool wait from transaction start here.
+type ReadTimings struct {
+	Begin, Query, Release time.Duration
+	TransactionStarted    bool
+}
+
+func (s *Store) ReadMeasured(ctx context.Context, fn func(*ReadTx) error) (ReadTimings, error) {
+	var timing ReadTimings
+	err := s.readTransaction(ctx, fn, &timing)
+	return timing, err
+}
+
+func (s *Store) readTransaction(ctx context.Context, fn func(*ReadTx) error, timing *ReadTimings) error {
+	var started time.Time
+	if timing != nil {
+		started = time.Now()
+	}
 	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if timing != nil {
+		timing.Begin = time.Since(started)
+	}
 	if err != nil {
 		return fmt.Errorf("store: begin read: %w", err)
 	}
 	// A read-only transaction has nothing to keep; its rollback error is
 	// irrelevant.
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if timing != nil {
+			timing.Query = time.Since(started)
+			started = time.Now()
+		}
+		_ = tx.Rollback()
+		if timing != nil {
+			timing.Release = time.Since(started)
+		}
+	}()
+	if timing != nil {
+		timing.TransactionStarted = true
+		started = time.Now()
+	}
 	return fn(&ReadTx{tx: tx, files: s.files})
 }
 

@@ -13,6 +13,8 @@ assert(output, "Set an isolated evidence directory");
 await mkdir(output, { recursive: true });
 
 let stream: ServerResponse | undefined;
+let traceSeq = 0;
+let refusalTrace: string | undefined;
 let allowStart = true;
 let cursorRefusal: Promise<void> | undefined;
 const cursorError = "refresh cursor expired; reload authoritative views and connect without after";
@@ -38,8 +40,11 @@ const server = createServer(async (req, res) => {
     }
     const after = url.searchParams.get("after");
     cursors.push(after);
+    const trace = `trc_${String(++traceSeq).padStart(26, "0")}`;
+    res.setHeader("X-Tend-Trace-ID", trace);
     if (cursorRefusal && after !== null) {
       await cursorRefusal;
+      refusalTrace = trace;
       return json({ error: { code: "stale_revision", message: cursorError } }, 409);
     }
     res.setHeader("Content-Type", "text/event-stream");
@@ -77,7 +82,8 @@ function interrupt(reset = false) {
   allowStart = false;
   const previous = stream;
   stream = undefined;
-  previous.end(reset ? "event: reset\ndata: {}\n\n" : undefined);
+  previous.end(reset ? 'event: reset\ndata: {"event_seq":2}\n\n' : undefined);
+  return String(previous.getHeader("X-Tend-Trace-ID"));
 }
 
 function recover() {
@@ -147,7 +153,7 @@ try {
           (res) => new URL(res.url()).pathname === "/api/v1/events",
         );
         void reconnectResponse.catch(() => {});
-        interrupt();
+        let expectedTrace = interrupt();
         await button.waitFor();
         assert.equal((await button.innerText()).trim(), compact ? "" : "正在重连");
         const offline = page.getByRole("status", { name: "正在重连", exact: true });
@@ -156,7 +162,7 @@ try {
         const panel = button.locator("..").locator("[id]");
         const show = async (text = "浏览器观察：事件流已结束") => {
           await panel.getByText(text, { exact: true }).waitFor();
-          assert.equal(await panel.innerText(), text);
+          await panel.getByText(`服务端诊断 ID：${expectedTrace}`, { exact: true }).waitFor();
           assert.equal(await panel.getAttribute("id"), await button.getAttribute("aria-controls"));
           assert.equal(await button.getAttribute("aria-expanded"), "true");
           const box = await panel.boundingBox();
@@ -237,13 +243,15 @@ try {
           });
           void fresh.catch(() => {});
           try {
-            interrupt();
+            expectedTrace = interrupt();
             await button.hover();
             await show();
           } finally {
             releaseRefusal();
           }
           await fresh;
+          assert(refusalTrace);
+          expectedTrace = refusalTrace;
           await show(`浏览器观察：${cursorError}`);
           await page.screenshot({ path: join(output, "desktop-cursor-rejected.png") });
           assert.deepEqual(cursors, [null, "1", "1", null]);
@@ -251,12 +259,12 @@ try {
           await online.waitFor();
           cursorRefusal = undefined;
 
-          interrupt(true);
+          expectedTrace = interrupt(true);
           await button.waitFor();
           await page.mouse.move(width - 10, 210);
           await button.hover();
-          await show("原因未知");
-          await page.screenshot({ path: join(output, "desktop-unknown.png") });
+          await show("浏览器观察：服务端要求重新同步游标");
+          await page.screenshot({ path: join(output, "desktop-reset.png") });
           recover();
           await online.waitFor();
           assert.equal(cursors.at(-1), null);

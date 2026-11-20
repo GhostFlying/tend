@@ -36,12 +36,24 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request, fn func(p protocol
 		s.writeError(w, r, err)
 		return
 	}
+	ctx := r.Context()
+	observation := httpdiag.ObserveRead(w, r)
 	var out any
-	err = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
+	read := func(tx *store.ReadTx) error {
 		var err error
 		out, err = fn(p, tx.Q())
 		return err
-	})
+	}
+	if observation == nil {
+		err = s.store.Read(ctx, read)
+	} else {
+		w = observation
+		defer observation.Finish(ctx)
+		var timing store.ReadTimings
+		timing, err = s.store.ReadMeasured(ctx, read)
+		observation.Begin, observation.Query, observation.Release = timing.Begin, timing.Query, timing.Release
+		observation.TransactionStarted = timing.TransactionStarted
+	}
 	if err != nil {
 		s.writeError(w, r, notFound(err))
 		return

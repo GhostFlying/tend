@@ -1,4 +1,4 @@
-// Package httpdiag keeps bounded shutdown diagnostics for in-flight HTTP work.
+// Package httpdiag keeps bounded HTTP request and shutdown diagnostics.
 // It never stores request bodies, URLs, credentials or business authority.
 package httpdiag
 
@@ -29,6 +29,7 @@ type Tracker struct {
 	id              func() string
 	log             *slog.Logger
 	active          map[*request]struct{}
+	summaries       [summaryClasses]summaryBudget
 	shutdownStarted time.Time
 	stopping        bool
 	completed       int
