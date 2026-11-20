@@ -180,6 +180,10 @@ export class EventStream {
             this.status.set("live");
             if (!this.call(() => this.options.onStart(start.event_seq, fresh)))
               return { kind: "reset", traceID };
+          } else if (m.event === "cursor") {
+            const checkpoint = JSON.parse(m.data) as StreamStart;
+            if (this.cursorSeq !== undefined && checkpoint.event_seq > this.cursorSeq)
+              this.cursorSeq = checkpoint.event_seq;
           } else if (m.event === "ledger") {
             const event = JSON.parse(m.data) as LedgerEvent;
             if (this.cursorSeq !== undefined && event.event_seq <= this.cursorSeq) {

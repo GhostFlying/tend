@@ -68,29 +68,19 @@ export function Composer({
   const reply = latestReply(conversation.items);
   const owner = queueState.pages.owner;
   const issueComposer = presentation === "issue";
-  const pages = issueComposer ? [owner] : Object.values(queueState.pages);
   const active = owner?.active;
-  const busy =
-    active?.status === "processing" && (!issueComposer || active.item.author === "owner")
-      ? active.item
-      : queueState.supported
-        ? pages
-            .flatMap((p) => p?.items ?? [])
-            .find((e) => e.status === "processing" && (!issueComposer || e.item.author === "owner"))
-            ?.item
-        : processing(
-            issueComposer
-              ? conversation.items.filter((item) => item.author === "owner")
-              : conversation.items,
-          );
-
-  const stopMessageID = issueComposer
-    ? (owner?.interruptible_message_id ??
-      (active?.status === "processing" ? active.item.message_id : undefined) ??
-      busy?.message_id ??
-      (!queueState.supported ? processing(conversation.items)?.message_id : undefined))
-    : busy?.message_id;
-  const queued = !!owner?.total || (!issueComposer && !!queueState.pages.background?.total);
+  const stopMessageID =
+    owner?.interruptible_message_id ??
+    (active?.status === "processing" ? active.item.message_id : undefined) ??
+    (!queueState.supported ? processing(conversation.items)?.message_id : undefined);
+  const activeOwnerInput =
+    issueComposer &&
+    conversation.items.some(
+      (item) =>
+        item.message_id === stopMessageID && item.author === "owner" && item.state === "processing",
+    );
+  const busy = !!stopMessageID;
+  const queued = !!owner?.total;
 
   useEffect(() => {
     interrupt.observe(conversation.items);
@@ -210,8 +200,8 @@ export function Composer({
   }
 
   const showStop =
-    busy !== undefined &&
-    stopMessageID === busy.message_id &&
+    busy &&
+    (!issueComposer || activeOwnerInput) &&
     body === "" &&
     !files.length &&
     !attachments.length;

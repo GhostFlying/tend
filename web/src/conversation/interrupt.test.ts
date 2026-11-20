@@ -54,7 +54,7 @@ describe("durable interrupt", () => {
     await interrupt.start("msg_1");
     sender.unreachable = false;
     await Promise.all([interrupt.resume(), interrupt.resume()]);
-    expect(sender.lookups).toEqual(["/api/v1/messages/msg_1"]);
+    expect(sender.lookups).toEqual(["/api/v1/messages/msg_1?projection=state"]);
     expect(sender.submissions).toHaveLength(1);
     expect(interrupt.state.get()?.phase).toBe("unknown");
     interrupt.observe([terminal]);

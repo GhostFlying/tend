@@ -1,309 +1,54 @@
-import type { MessageContent as ConversationItem } from "./eventContent.ts";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type {
   IssueConversationQueueEntry,
-  LedgerEvent,
-  IssueTranscriptBlock as TranscriptBlock,
+  IssueConversationQueuePage,
 } from "../api/generated/api.ts";
 import { ConversationQueue } from "./queueView.ts";
-import { buildTranscriptEntries } from "./transcriptBlocks.ts";
-function item(id: string, seq: number, author = "owner"): ConversationItem {
-  return { message_id: id, seq, author, kind: "message", created_at: "2026-01-01T00:00:00Z" };
-}
-const event = (it: ConversationItem): LedgerEvent => ({
-  event_seq: 2,
-  kind: "conversation.message",
-  object_type: "message",
-  object_id: it.message_id,
-  created_at: "2026-01-01T00:00:00Z",
-  item: it,
-});
-test("the ordinary conversation continues replies without offering unsupported process pages", async () => {
-  const trigger = { ...item("background", 1), state: "processing" as const };
-  const process = {
-    items: Array.from({ length: 50 }, (_, n) => item(`tool${n}`, n + 1, "main_agent")),
-    more: true,
-    next: 50,
-  };
-  let ordinaryMore = false;
-  const calls: string[] = [];
-  const q = new ConversationQueue({
-    async get<T>(path: string): Promise<T> {
-      const block: TranscriptBlock = { position: 1, trigger, items: [], process, more: false };
-      if (path.includes("/blocks/")) {
-        calls.push(path);
-        return { ...block, items: [item("last-reply", 3, "main_agent")] } as T;
-      }
-      if (path.includes("/transcript"))
-        return {
-          blocks: [{ ...block, more: ordinaryMore, next_seq: 2 }],
-          more: false,
-          event_seq: ordinaryMore ? 2 : 1,
-        } as T;
-      return { enabled: true, items: [], total: 0, event_seq: 1 } as T;
-    },
-  });
-  q.start();
-  try {
-    await q.refresh();
-    const continuations = () =>
-      buildTranscriptEntries(q.state.get().blocks).filter((entry) => entry.kind === "block-more");
-    expect(continuations()).toEqual([]);
-    expect(calls).toEqual([]);
-    ordinaryMore = true;
-    await q.refresh();
-    const more = continuations();
-    expect(more).toHaveLength(1);
-    await q.moreBlock(more[0]!.block);
-    expect(calls).toEqual(["/api/v1/conversation/blocks/background?after=2"]);
-    expect(q.state.get().blocks[0]?.items?.map((row) => row.message_id)).toEqual(["last-reply"]);
-    expect(continuations()).toEqual([]);
-  } finally {
-    q.stop();
-  }
-});
-test("queue counts and pagination do not depend on the transcript page", async () => {
-  const all: IssueConversationQueueEntry[] = Array.from({ length: 120 }, (_, n) => ({
-    item: item(`m${n}`, n + 1),
-    position: n + 1,
+
+function entry(position: number): IssueConversationQueueEntry {
+  return {
+    position,
     revision: 1,
     status: "queued",
     can_withdraw: true,
-  }));
-  const q = new ConversationQueue({
-    async get<T>(path: string): Promise<T> {
-      const url = new URL(path, "http://test");
-      if (path.includes("/transcript")) return { blocks: [], more: false, event_seq: 1 } as T;
-      const owner = url.searchParams.get("category") === "owner",
-        after = Number(url.searchParams.get("after") || 0);
-      return {
-        enabled: true,
-        total: owner ? 120 : 0,
-        items: owner ? all.slice(after, after + 50) : [],
-        next: owner && after + 50 < 120 ? after + 50 : 0,
-        event_seq: 1,
-      } as T;
+    item: {
+      message_id: "msg-" + position,
+      kind: "message",
+      seq: position,
+      author: "owner",
+      created_at: "2026-11-20T09:00:00Z",
     },
-  });
-  q.start();
-  await q.refresh();
-  expect(q.state.get().pages.owner?.total).toBe(120);
-  expect(q.state.get().pages.owner?.items).toHaveLength(50);
-  expect(q.state.get().blocks).toEqual([]);
-  await q.moreQueue("owner");
-  expect(q.state.get().pages.owner?.items).toHaveLength(100);
-  await q.refresh();
-  expect(q.state.get().pages.owner?.items).toHaveLength(100);
-  q.stop();
-});
-test("live output fetches its absent parent and survives an older page revision", async () => {
-  const trigger = item("old-parent", 1);
-  trigger.state = "processing";
-  const output = {
-    ...item("reply", 80, "main_agent"),
-    reply_to: trigger.message_id,
-    body: "new stream",
-    assistant_revision: 3,
   };
+}
+
+test("queued inputs keep their loaded pages and the latest server stop identity", async () => {
   const paths: string[] = [];
-  const q = new ConversationQueue({
+  const empty: IssueConversationQueuePage = { items: [], enabled: true, total: 0, event_seq: 1 };
+  let active = "original";
+  const queue = new ConversationQueue({
     async get<T>(path: string): Promise<T> {
       paths.push(path);
-      if (path.includes("/blocks/"))
-        return {
-          position: 1,
-          trigger,
-          items: [{ ...output, body: "old", assistant_revision: 1 }],
-          more: false,
-        } as T;
-      if (path.includes("/transcript")) return { blocks: [], more: false, event_seq: 1 } as T;
-      return { enabled: true, items: [], total: 0, event_seq: 1 } as T;
-    },
-  });
-  q.start();
-  await q.refresh();
-  q.changed(event(output));
-  await q.refresh();
-  expect(paths.some((p) => p.includes("/blocks/old-parent"))).toBe(true);
-  expect(q.state.get().blocks[0]?.items?.[0]?.body).toBe("new stream");
-  q.stop();
-});
-test("refresh refills loaded continuation pages after reconnect", async () => {
-  const trigger = item("a", 1);
-  trigger.state = "processing";
-  const outputs = Array.from({ length: 80 }, (_, n) => ({
-    ...item(`reply${n}`, n + 2, "main_agent"),
-    reply_to: "a",
-    body: "before",
-    assistant_revision: 1,
-  }));
-  let revision = 1;
-  const block = (after: number): TranscriptBlock => {
-    const entries = outputs
-      .filter((it) => it.seq > after)
-      .slice(0, 50)
-      .map((it) => ({
-        ...it,
-        body: revision === 2 ? "after" : "before",
-        assistant_revision: revision,
-      }));
-    return {
-      position: 1,
-      trigger,
-      items: entries,
-      more: after === 0,
-      next_seq: entries.at(-1)?.seq ?? after,
-    };
-  };
-  const q = new ConversationQueue({
-    async get<T>(path: string): Promise<T> {
-      if (path.includes("/blocks/"))
-        return block(Number(new URL(path, "http://test").searchParams.get("after"))) as T;
-      if (path.includes("/transcript"))
-        return { blocks: [block(0)], more: false, event_seq: revision } as T;
-      return { enabled: true, items: [], total: 0, event_seq: revision } as T;
-    },
-  });
-  q.start();
-  await q.refresh();
-  await q.moreBlock(q.state.get().blocks[0]!);
-  expect(q.state.get().blocks[0]?.items).toHaveLength(80);
-  revision = 2;
-  await q.refresh();
-  expect(q.state.get().blocks[0]?.items?.at(-1)?.body).toBe("after");
-  expect(q.state.get().blocks[0]?.more).toBe(false);
-  q.stop();
-});
-
-test("reconnect bridges missing pages before retaining older loaded history", async () => {
-  let newer = false;
-  const q = new ConversationQueue({
-    async get<T>(path: string): Promise<T> {
-      if (!path.includes("transcript"))
-        return { enabled: true, items: [], total: 0, event_seq: newer ? 2 : 1 } as T;
-      const start = !newer ? 1 : path.includes("before=") ? 11 : 31;
+      const params = new URL(path, "https://tend.invalid").searchParams;
+      expect(params.get("projection")).toBe("chat");
+      if (params.get("category") === "withdrawn") return empty as T;
       return {
-        blocks: Array.from({ length: 20 }, (_, i) => ({
-          position: start + i,
-          notice_only: true,
-          trigger: {
-            message_id: `message-${start + i}`,
-            seq: start + i,
-            author: "system",
-            kind: "message",
-            created_at: "2026-01-01T00:00:00Z",
-          },
-          items: [],
-          more: false,
-        })),
-        more: start > 1,
-        next_before: start > 1 ? start : undefined,
-        event_seq: newer ? 2 : 1,
+        ...empty,
+        total: 2,
+        interruptible_message_id: active,
+        ...(params.has("after") ? { items: [entry(2)] } : { items: [entry(1)], next: 1 }),
       } as T;
     },
   });
-  q.start();
-  await q.refresh();
-  newer = true;
-  await q.refresh();
-  expect(q.state.get().blocks.map((b) => b.position)).toEqual(
-    Array.from({ length: 50 }, (_, i) => i + 1),
+  queue.start();
+  await vi.waitFor(() =>
+    expect(queue.state.get().pages.owner?.interruptible_message_id).toBe(active),
   );
-  expect(q.state.get().more).toBe(false);
-  q.stop();
-});
-
-test("a delayed continuation cannot replace a refreshed completed block", async () => {
-  const trigger = { ...item("a", 1), state: "processing" as const };
-  let done = false;
-  let release!: (block: TranscriptBlock) => void;
-  const q = new ConversationQueue({
-    async get<T>(path: string): Promise<T> {
-      if (path.includes("/blocks/"))
-        return new Promise<T>((resolve) => {
-          release = (b) => resolve(b as T);
-        });
-      if (path.includes("transcript"))
-        return {
-          blocks: [
-            {
-              position: 1,
-              trigger: { ...trigger, state: done ? "replied" : "processing" },
-              items: [],
-              more: !done,
-              next_seq: done ? 0 : 50,
-            },
-          ],
-          more: false,
-          event_seq: done ? 2 : 1,
-        } as T;
-      return { items: [], total: 0, enabled: true, event_seq: done ? 2 : 1 } as T;
-    },
-  });
-  q.start();
-  await q.refresh();
-  const old = q.state.get().blocks[0]!;
-  const pending = q.moreBlock(old);
-  done = true;
-  await q.refresh();
-  release(old);
-  await pending;
-  expect(q.state.get().blocks[0]?.trigger.state).toBe("replied");
-  expect(q.state.get().blocks[0]?.more).toBe(false);
-  q.stop();
-});
-
-test("queue readers reopen with a live signal after leaving and returning", async () => {
-  let total = 1;
-  const q = new ConversationQueue({
-    get: async <T>(path: string, signal?: AbortSignal) => {
-      signal?.throwIfAborted();
-      return (
-        path.includes("/transcript")
-          ? { blocks: [], more: false, event_seq: total }
-          : { items: [], total, more: false, event_seq: total }
-      ) as T;
-    },
-  });
-  q.start();
-  await q.refresh();
-  expect(q.state.get().pages.owner?.total).toBe(1);
-  q.stop();
-  total = 2;
-  q.start();
-  await q.refresh();
-  expect(q.state.get().pages.owner?.total).toBe(2);
-  expect(q.state.get().error).toBeUndefined();
-  q.stop();
-});
-
-test("a stop during a queue request does not poison the resumed reader", async () => {
-  let first = true;
-  const q = new ConversationQueue({
-    get: async <T>(path: string, signal?: AbortSignal) => {
-      signal?.throwIfAborted();
-      if (first) {
-        first = false;
-        return await new Promise<T>((_resolve, reject) =>
-          signal?.addEventListener(
-            "abort",
-            () => reject(new DOMException("Stopped", "AbortError")),
-            { once: true },
-          ),
-        );
-      }
-      return (
-        path.includes("/transcript")
-          ? { blocks: [], more: false, event_seq: 2 }
-          : { items: [], total: 2, more: false, event_seq: 2 }
-      ) as T;
-    },
-  });
-  q.start();
-  q.stop();
-  q.start();
-  await q.refresh();
-  expect(q.state.get().pages.owner?.total).toBe(2);
-  expect(q.state.get().error).toBeUndefined();
-  q.stop();
+  await queue.moreQueue("owner");
+  expect(queue.state.get().pages.owner?.items?.map((it) => it.position)).toEqual([1, 2]);
+  active = "new-original";
+  await queue.refresh();
+  expect(queue.state.get().pages.owner?.interruptible_message_id).toBe(active);
+  expect(queue.state.get().pages.owner?.items?.map((it) => it.position)).toEqual([1, 2]);
+  expect(paths.every((path) => path.startsWith("/api/v1/conversation/queue?"))).toBe(true);
+  queue.stop();
 });

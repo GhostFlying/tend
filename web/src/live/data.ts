@@ -21,6 +21,7 @@ import { ConversationSettings } from "../conversation/settings.ts";
 import { ApiError } from "../api/client.ts";
 import type {
   WorkItemChoice,
+  IssueMessageAssociations,
   IssueConversationItem as ConversationItem,
   IssueConversationPage as ConversationPage,
   LedgerEvent,
@@ -96,6 +97,7 @@ export class LiveData {
   private readonly dirtyLookups = new Set<string>();
   private resumeGeneration = 0;
   private historyGeneration = 0;
+  private historyThrough = 0;
   private readonly choiceVersions = new Map<string, WorkItemChoice>();
   private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
   /** Conversation events that arrived while the latest page was being read. */
@@ -116,11 +118,7 @@ export class LiveData {
     api = issueConversationReader(api, conversationID);
     this.api = api;
     this.usage = new UsageData(api);
-    this.queueView = new ConversationQueue(
-      api,
-      (item) => this.currentChoices(item),
-      conversationID.startsWith("issue:") ? ["owner", "withdrawn"] : undefined,
-    );
+    this.queueView = new ConversationQueue(api);
     this.settings = new ConversationSettings(api, conversationID);
     this.handoff = new ConversationHandoff(api);
     this.tasks = new TaskLists(api);
@@ -162,7 +160,6 @@ export class LiveData {
     this.usage.resume();
     this.queueView.start();
     this.settings.start();
-    this.handoff.start();
     void this.reload();
   }
 
@@ -179,14 +176,13 @@ export class LiveData {
       // Snapshots include heartbeat times and live delivery observer status.
       // Runner catalogs also evaluate online status at read time.
       this.agents.refreshRunners();
-      if (this.queueView.state.get().error)
-        void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
+      void this.queueView.refresh();
       this.tasks.retryFailed();
       await this.refreshSnapshot();
       return;
     }
     this.usage.refresh();
-    void this.queueView.refresh().then(() => this.refreshTranscriptChoices());
+    if (this.conversationStore.get().loaded) void this.queueView.refresh();
     void this.repos.refresh();
     this.tasks.refresh();
     this.issues.refresh();
@@ -202,26 +198,12 @@ export class LiveData {
     ]);
   }
 
-  private refreshTranscriptChoices(): void {
-    const ids = new Set(
-      this.queueView.state
-        .get()
-        .blocks.flatMap((block) =>
-          [block.trigger, ...(block.items ?? [])].flatMap(
-            (item) => item.choices?.map((choice) => choice.choice_id) ?? [],
-          ),
-        ),
-    );
-    for (const id of ids) void this.choiceChanged(id);
-  }
-
   /** One coalesced, cancellable read/backoff per choice, shared by both surfaces. */
   choiceRead(id: string): WorkItemRead<WorkItemChoice> {
     let read = this.choiceReads.get(id);
     if (!read) {
       read = new WorkItemRead(this.api, (choice) => {
         this.rememberChoice(choice);
-        this.queueView.refreshChoices();
         const state = this.conversationStore.get();
         this.conversationStore.set({
           ...state,
@@ -270,6 +252,23 @@ export class LiveData {
 
   /** Takes in one ledger event. */
   apply(event: LedgerEvent): void {
+    if (event.object_type === "message" && !event.item && event.conversation_id) {
+      // Issue activity can refresh the original item using the scoped
+      // invalidation. Chat refreshes control only for processing receipts.
+      for (const listener of this.eventListeners) listener(event);
+      if (
+        event.kind === "conversation.message_state" ||
+        event.kind === "messaging.interaction_changed"
+      ) {
+        this.issues.refresh();
+        this.attention.refresh();
+        this.directChats.refresh();
+        if (event.kind === "messaging.interaction_changed") void this.refreshSnapshot();
+      }
+      if (event.conversation_id === this.conversationID) this.queueView.changed(event);
+      return;
+    }
+    if (event.item?.kind === "tool_use" || event.kind === "conversation.process_changed") return;
     if (event.kind === "token_usage.changed") this.usage.refresh();
     if (event.object_type === "repo" || event.object_type === "config") void this.repos.refresh();
     for (const listener of this.eventListeners) listener(event);
@@ -330,15 +329,10 @@ export class LiveData {
       this.directChats.refresh();
     if (event.item && (event.item.conversation_id ?? "main") !== this.conversationID) return;
     if (event.kind === "conversation.associations_changed") {
-      void this.latestReads.run();
-      void this.queueView.refresh();
+      void this.refreshAssociations(event.object_id);
       return;
     }
 
-    if (event.object_type === "work_item") {
-      void this.latestReads.run();
-      void this.queueView.refresh();
-    }
     this.queueView.changed(event);
     if (event.object_type === "work_item_choice") {
       void this.choiceChanged(event.object_id);
@@ -398,6 +392,29 @@ export class LiveData {
     }
   }
 
+  private async refreshAssociations(messageID: string): Promise<void> {
+    if (!this.conversationStore.get().items.some((item) => item.message_id === messageID)) return;
+    try {
+      const associations = await this.api.get<IssueMessageAssociations>(
+        `/api/v1/messages/${encodeURIComponent(messageID)}/associations?projection=issues`,
+      );
+      if (this.stopped) return;
+      const state = this.conversationStore.get();
+      this.conversationStore.set({
+        ...state,
+        items: state.items.map((item) =>
+          item.message_id === messageID &&
+          (item.associations?.revision ?? 0) <= associations.revision
+            ? { ...item, associations }
+            : item,
+        ),
+      });
+    } catch {
+      // The original page remains readable and the association editor
+      // still reads the latest revision when opened.
+    }
+  }
+
   refreshSnapshot(): Promise<void> {
     return this.snapshotReads.run();
   }
@@ -417,7 +434,7 @@ export class LiveData {
     this.conversationStore.set({ ...state, loadingEarlier: true });
     try {
       const page = await this.api.get<ConversationPage>(
-        `/api/v1/conversation?before=${first}&limit=${pageSize}`,
+        `/api/v1/conversation?projection=chat&before=${first}&limit=${pageSize}`,
       );
       if (generation !== this.historyGeneration) return;
       const now = this.conversationStore.get();
@@ -504,36 +521,20 @@ export class LiveData {
     if (this.stopped) return;
     this.historyGeneration++;
     this.held = [];
+    let through = 0;
     try {
-      const page = await this.api.get<ConversationPage>(`/api/v1/conversation?limit=${pageSize}`);
-      let items = page.items ?? [];
-      let more = page.more;
-      // A long active turn or a queue of owner messages can push the owner
-      // whose turn is running out of the latest page. Find the closest
-      // non-queued owner before rendering the stop control.
-      while (
-        more &&
-        items.length &&
-        !items.some((it) => it.author === "owner" && it.state !== "queued")
-      ) {
-        const earlier = await this.api.get<ConversationPage>(
-          `/api/v1/conversation?before=${items[0]!.seq}&limit=${pageSize}`,
-        );
-        const previous = earlier.items ?? [];
-        if (!previous.length) {
-          more = false;
-          break;
-        }
-        items = merge(previous, items);
-        more = earlier.more;
-      }
-      items = items.map((item) => this.currentChoices(item));
+      const page = await this.api.get<ConversationPage>(
+        `/api/v1/conversation?projection=chat&limit=${pageSize}`,
+      );
+      const items = (page.items ?? []).map((item) => this.currentChoices(item));
+      through = page.event_seq ?? 0;
+      this.historyThrough = through;
       this.recovered("conversation");
       // Items before the page's first one are dropped: the page may have
       // moved past them while the stream was down, so they could be stale.
       this.conversationStore.set({
         items,
-        more,
+        more: page.more,
         before: items[0]?.seq,
         loaded: true,
         loadingEarlier: false,
@@ -548,12 +549,13 @@ export class LiveData {
       const held = this.held ?? [];
       this.held = null;
       for (const ev of held) {
-        this.applyItem(ev);
+        if (ev.event_seq > through) this.applyItem(ev);
       }
     }
   }
 
   private applyItem(event: LedgerEvent): void {
+    if (event.event_seq <= this.historyThrough) return;
     const previous = this.conversationStore
       .get()
       .items.find((it) => it.message_id === event.item?.message_id);

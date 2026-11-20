@@ -17,6 +17,7 @@ type ConversationQueueEntry struct {
 
 type ConversationQueuePage struct {
 	InterruptibleMessageID string                   `json:"interruptible_message_id,omitempty"`
+	ProcessingStartedAt    int64                    `json:"processing_started_at,omitempty"`
 	Active                 *ConversationQueueEntry  `json:"active,omitempty"`
 	Enabled                bool                     `json:"enabled"`
 	EventSeq               int64                    `json:"event_seq"`

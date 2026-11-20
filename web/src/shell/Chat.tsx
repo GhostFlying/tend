@@ -5,7 +5,6 @@ import type { AttentionPage } from "../api/generated/api.ts";
 import type { ReadState } from "../workitems/live.ts";
 import { ManualSource } from "../conversation/ManualSource.tsx";
 import { Sheet } from "../ui/Modal.tsx";
-import { Rollout } from "../conversation/Rollout.tsx";
 import { PendingQueue } from "../conversation/PendingQueue.tsx";
 import { UpgradeBanner } from "../upgrades/Banner.tsx";
 // The one conversation with the main agent (D27): the transcript, and the
@@ -39,7 +38,6 @@ export function Chat({
   const { conversation, openAgentDrawer } = useServices();
   const title = conversation?.title ?? "主 Agent";
   const [sourceOpen, setSourceOpen] = useOverlayState(false, visible);
-  const [rolloutOpen, setRolloutOpen] = useOverlayState(false, visible);
 
   return (
     <OverlayVisibility value={visible}>
@@ -78,10 +76,7 @@ export function Chat({
           variant="ghost"
           size="s"
           icon
-          items={[
-            { id: "source", label: "补充来源", onSelect: () => setSourceOpen(true) },
-            { id: "rollout", label: "执行记录", onSelect: () => setRolloutOpen(true) },
-          ]}
+          items={[{ id: "source", label: "补充来源", onSelect: () => setSourceOpen(true) }]}
         >
           <More />
         </Menu>
@@ -103,7 +98,6 @@ export function Chat({
           <ManualSource onBack={() => setSourceOpen(false)} />
         </Sheet>
       )}
-      <Rollout open={rolloutOpen} onClose={() => setRolloutOpen(false)} />
       <UpgradeBanner connection={connection} />
       <div className={styles.body}>
         <Transcript visible={visible} />

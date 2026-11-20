@@ -108,9 +108,10 @@ export function IssueDetails({
         // The activity cursor can be live before the Issue's conversation binding
         // arrives. Until then, let the scoped activity endpoint filter deltas.
         if (
-          !event.item ||
           !detail ||
-          event.item.conversation_id === detail.conversation?.conversation_id
+          (!event.item && !event.conversation_id) ||
+          (event.item?.conversation_id ?? event.conversation_id) ===
+            detail.conversation?.conversation_id
         )
           void reads.activity.refresh();
       } else reads.refresh();

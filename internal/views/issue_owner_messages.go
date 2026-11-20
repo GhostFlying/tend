@@ -70,7 +70,7 @@ func ownerCanonicalIdentity(ctx context.Context, q store.Querier, id string) (bo
 }
 
 func OwnerIssueQueue(ctx context.Context, q store.Querier, v protocol.ConversationQueuePage) (protocol.IssueConversationQueuePage, error) {
-	out := protocol.IssueConversationQueuePage{InterruptibleMessageID: v.InterruptibleMessageID, Enabled: v.Enabled, EventSeq: v.EventSeq, Total: v.Total, Next: v.Next, Items: make([]protocol.IssueConversationQueueEntry, len(v.Items))}
+	out := protocol.IssueConversationQueuePage{InterruptibleMessageID: v.InterruptibleMessageID, ProcessingStartedAt: v.ProcessingStartedAt, Enabled: v.Enabled, EventSeq: v.EventSeq, Total: v.Total, Next: v.Next, Items: make([]protocol.IssueConversationQueueEntry, len(v.Items))}
 	entry := func(value protocol.ConversationQueueEntry) (protocol.IssueConversationQueueEntry, error) {
 		items, err := OwnerIssueMessages(ctx, q, []protocol.ConversationItem{value.Item})
 		if err != nil {

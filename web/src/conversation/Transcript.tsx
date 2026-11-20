@@ -1,5 +1,3 @@
-import { buildTranscriptEntries, type TranscriptEntry } from "./transcriptBlocks.ts";
-import { notify } from "../app/notice.ts";
 // The scrolling conversation. It opens at the latest page and follows new
 // content only while the reader is near the bottom; otherwise it offers a
 // jump to the latest. Scrolling near the top reads the page before, and
@@ -12,14 +10,14 @@ import { LiveStatus } from "../ui/LiveStatus.tsx";
 import { conversationStatus } from "../ui/activityStatus.ts";
 import { useStore } from "../state/store.ts";
 import {
-  AgentTurn,
+  ChatReplies,
   Divider,
   OutgoingRow,
   OwnerMessage,
   UrgentMessage,
   SystemMessage,
 } from "./Messages.tsx";
-import { buildEntries, processing } from "./model.ts";
+import { buildEntries } from "./model.ts";
 import styles from "./Transcript.module.css";
 import { captureAnchor, restoreAnchor, type ScrollAnchor } from "./scrollAnchor.ts";
 
@@ -35,36 +33,32 @@ const emptyNote =
 export function Transcript({ visible }: { visible: boolean }) {
   const { live, queue } = useServices();
   const scroller = useRef<HTMLDivElement>(null);
-  const raw = useStore(live.conversation);
-  const blocks = useStore(live.queueView.state);
-  const conversation = blocks.supported
-    ? {
-        ...raw,
-        loaded: blocks.loaded,
-        more: blocks.more,
-        loadingEarlier: blocks.loadingEarlier,
-        error: blocks.error,
-      }
-    : raw;
+  const conversation = useStore(live.conversation);
+  const queueState = useStore(live.queueView.state);
+  const owner = queueState.pages.owner;
   const outbox = useStore(queue?.list ?? noOutbox);
-  const entries = useMemo<TranscriptEntry[]>(
+  const entries = useMemo(
     () =>
-      blocks.supported === undefined
-        ? []
-        : blocks.supported
-          ? buildTranscriptEntries(blocks.blocks)
-          : buildEntries(conversation.items, outbox),
-    [blocks.supported, blocks.blocks, conversation.items, outbox],
+      buildEntries(
+        conversation.items.filter(
+          (item) =>
+            !item.control?.withdrawn_at &&
+            (item.author !== "system" ||
+              !item.choices?.length ||
+              item.choices.some((choice) => choice.status === "open")),
+        ),
+        outbox,
+      ),
+    [conversation.items, outbox],
   );
-  const active = blocks.pages.owner?.active;
+  const active = owner?.active;
   const busy =
-    active?.status === "processing"
-      ? active.item
-      : blocks.supported
-        ? Object.values(blocks.pages)
-            .flatMap((p) => p.items ?? [])
-            .find((e) => e.status === "processing")?.item
-        : processing(conversation.items);
+    owner?.interruptible_message_id ??
+    (active?.status === "processing" ? active.item.message_id : undefined);
+  const since =
+    owner?.processing_started_at ??
+    (busy && conversation.processingSince.get(busy)) ??
+    (active ? Date.parse(active.item.created_at) : null);
 
   const [atBottom, setAtBottom] = useState(true);
   const following = useRef(true);
@@ -82,7 +76,7 @@ export function Transcript({ visible }: { visible: boolean }) {
       return;
     }
     anchor.current = captureAnchor(el);
-    void (blocks.supported ? live.queueView.earlier() : live.loadEarlier());
+    void live.loadEarlier();
   };
 
   const onScroll = () => {
@@ -247,41 +241,10 @@ export function Transcript({ visible }: { visible: boolean }) {
               case "outgoing":
                 return <OutgoingRow key={e.key} message={e.message} queue={queue} />;
               case "agent":
-                return (
-                  <AgentTurn
-                    key={e.key}
-                    entry={
-                      conversation.processingSince.has(e.replyTo)
-                        ? { ...e, startedAt: conversation.processingSince.get(e.replyTo)! }
-                        : e
-                    }
-                  />
-                );
-              case "block-more":
-                return (
-                  <button
-                    key={e.key}
-                    onClick={() =>
-                      void live.queueView
-                        .moreBlock(e.block)
-                        .catch((error) => notify(String(error), "warn"))
-                    }
-                  >
-                    继续读取本轮消息
-                  </button>
-                );
+                return <ChatReplies key={e.key} items={e.items} />;
             }
           })}
-          {busy &&
-            !entries.some(
-              (entry) => entry.kind === "agent" && entry.replyTo === busy.message_id,
-            ) && (
-              <Working
-                since={
-                  conversation.processingSince.get(busy.message_id) ?? Date.parse(busy.created_at)
-                }
-              />
-            )}
+          {busy && <Working since={typeof since === "number" ? since : null} />}
         </div>
       </div>
       {!atBottom && (
@@ -294,6 +257,6 @@ export function Transcript({ visible }: { visible: boolean }) {
   );
 }
 
-function Working({ since }: { since: number }) {
+function Working({ since }: { since: number | null }) {
   return <LiveStatus status={conversationStatus([], "processing", since)} />;
 }

@@ -103,6 +103,21 @@ afterEach(async () => {
 });
 
 describe("EventStream", () => {
+  test("a skipped event checkpoint resumes without emitting a view update", async () => {
+    stream.start();
+    await tick();
+    tend.last.push(start(5) + ledger(6) + 'id: 9\nevent: cursor\ndata: {"event_seq":9}\n\n');
+    await tick();
+    expect(events).toEqual([6]);
+    expect(stream.cursor).toBe(9);
+    tend.last.end();
+    await tick(10_000);
+    expect(tend.last.after).toBe(9);
+    tend.last.push(start(9) + ledger(9) + ledger(10));
+    await tick();
+    expect(events).toEqual([6, 10]);
+  });
+
   test("an expired refresh position rebuilds views from a fresh start", async () => {
     stream.start();
     await tick();

@@ -18,44 +18,38 @@ let issueTitle = "Initial board state";
 const missedEvent = () =>
   `id: ${ledgerSeq}\nevent: ledger\ndata: ${JSON.stringify({ event_seq: ledgerSeq, object_type: "issue", object_id: "reconnect", kind: "issue.updated", created_at: "2026-01-01T00:00:00Z" })}\n\n`;
 let holdUsage = false;
-let ordinaryMore = false;
-const backgroundBlock = {
-  position: 1,
-  trigger: {
-    seq: 1,
-    message_id: "background",
-    author: "owner",
-    kind: "message",
-    body: "Public process pagination boundary",
-    state: "processing",
-    created_at: "2026-01-01T00:00:00Z",
-  },
-  items: [],
-  more: false,
-  process: {
-    items: Array.from({ length: 50 }, (_, n) => ({
-      seq: n + 1,
-      message_id: `process-${n}`,
-      author: "main_agent",
-      kind: "tool_use",
-      created_at: "2026-01-01T00:00:00Z",
-      tool: {
-        name: `fixture public tool ${n}`,
-        status: "running",
-        turn_id: "original-turn",
-        updated_at: "2026-01-01T00:00:00Z",
-      },
-    })),
-    more: true,
-    next: 50,
-  },
+const createdAt = "2026-01-01T00:00:00Z";
+const original = {
+  seq: 1,
+  message_id: "original",
+  author: "owner",
+  kind: "message",
+  body: "Original input outside the newest Chat page",
+  created_at: createdAt,
 };
+const visibleHistory = [
+  original,
+  ...Array.from({ length: 60 }, (_, index) => ({
+    seq: index + 2,
+    message_id: "visible-" + (index + 1),
+    author: "main_agent",
+    kind: "message",
+    body: "Visible reply " + (index + 1),
+    created_at: createdAt,
+    reply_to: original.message_id,
+  })),
+];
+let active = true;
+const writes: {
+  operation: string;
+  target: { id: string };
+  payload: { message_id: string };
+  request_id: string;
+}[] = [];
 let usageAborted = 0;
 let heldUsage: (() => void) | undefined;
 const viewOnly = (path: string) =>
   path.startsWith("/api/v1/conversation/queue?") ||
-  path.startsWith("/api/v1/conversation/transcript?") ||
-  path.startsWith("/api/v1/conversation/blocks/") ||
   path.startsWith("/api/v1/conversation/settings?") ||
   path === "/api/v1/agent-conversations/main/usage" ||
   path === "/api/v1/agent-conversations/main/compactions";
@@ -68,10 +62,22 @@ const server = createServer(async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify(value));
   };
+  if (path === "/api/v1/ops" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += String(chunk);
+    const envelope = JSON.parse(body);
+    writes.push(envelope);
+    assert.equal(envelope.operation, "conversation.interrupt_reply");
+    active = false;
+    return json({ operation: { request_id: envelope.request_id, status: "accepted" } });
+  }
+  if (path === "/api/v1/messages/original")
+    return json({ message_id: "original", state: active ? "processing" : "interrupted" });
   if (req.method !== "GET") return res.writeHead(405).end();
   if (path === "/api/v1/session")
     return json({ login: "Fixture owner", scope: "owner", deployment_id: "visibility" });
   if (path === "/api/v1/events") {
+    assert.equal(url.searchParams.get("projection"), "chat");
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     const after = Number(url.searchParams.get("after") ?? ledgerSeq);
     res.write(`event: start\ndata: {"event_seq":${after}}\n\n`);
@@ -113,27 +119,20 @@ const server = createServer(async (req, res) => {
     });
   if (path === "/api/v1/conversation/settings") return json({ enabled: false, revision: 1 });
   if (path === "/api/v1/conversation/queue")
-    return json({ category: url.searchParams.get("category"), items: [], total: 0, more: false });
-  if (path === "/api/v1/conversation/transcript")
-    return json({ blocks: [{ ...backgroundBlock, more: ordinaryMore, next_seq: 2 }], more: false });
-  if (path === "/api/v1/conversation/blocks/background") {
-    ordinaryMore = false;
     return json({
-      ...backgroundBlock,
-      items: [
-        {
-          seq: 3,
-          message_id: "last-reply",
-          reply_to: "background",
-          author: "main_agent",
-          kind: "message",
-          body: "Ordinary reply continuation completed",
-          assistant_state: "completed",
-          assistant_revision: 1,
-          created_at: "2026-01-01T00:00:03Z",
-        },
-      ],
+      enabled: true,
+      event_seq: ledgerSeq,
+      items: [],
+      total: 0,
+      ...(active && url.searchParams.get("category") === "owner"
+        ? { interruptible_message_id: "original", processing_started_at: Date.parse(createdAt) }
+        : {}),
     });
+  if (path === "/api/v1/conversation") {
+    assert.equal(url.searchParams.get("projection"), "chat");
+    const before = Number(url.searchParams.get("before") ?? Infinity);
+    const items = visibleHistory.filter((item) => item.seq < before);
+    return json({ items: items.slice(-50), more: items.length > 50, event_seq: ledgerSeq });
   }
   if (path === "/api/v1/agent-conversations/main/usage") {
     if (holdUsage) {
@@ -191,7 +190,7 @@ try {
   const board = page.locator('[data-issue-id="reconnect"]');
   await board.getByRole("button", { name: issueTitle, exact: true }).waitFor();
   const boardPath = "/api/v1/issues?board=true";
-  const historyPath = "/api/v1/conversation?limit=";
+  const historyPath = "/api/v1/conversation?projection=chat&limit=";
   const quietReads = [count(boardPath), count(historyPath)] as const;
   assert(
     quietReads.every((n) => n > 0),
@@ -199,7 +198,9 @@ try {
   );
   const disconnect = async (change?: string) => {
     const requestedAfter = ledgerSeq;
-    const resumed = page.waitForResponse(origin + `/api/v1/events?after=${requestedAfter}`);
+    const resumed = page.waitForResponse(
+      origin + `/api/v1/events?projection=chat&after=${requestedAfter}`,
+    );
     const snapshot = page.waitForResponse(origin + "/api/v1/snapshot");
     assert.equal(streams.size, 1);
     for (const stream of streams) stream.end();
@@ -224,7 +225,7 @@ try {
   // Expired coalesced notifications require a new, cursor-free baseline.
   ledgerSeq++;
   issueTitle = "Issue rebuilt after reset";
-  const fresh = page.waitForResponse(origin + "/api/v1/events");
+  const fresh = page.waitForResponse(origin + "/api/v1/events?projection=chat");
   const history = page.waitForResponse((response) =>
     response.url().startsWith(origin + historyPath),
   );
@@ -239,42 +240,55 @@ try {
   await input.waitFor();
   assert.equal(new URL(page.url()).pathname, "/diagnostics/main");
   assert.match(await page.title(), /tend/i);
-  await page.getByText("Public process pagination boundary", { exact: true }).waitFor();
+  const transcript = page.getByRole("region", { name: "对话记录" });
+  await transcript.getByText("Visible reply 60", { exact: true }).waitFor();
+  assert.equal(await transcript.getByText(original.body, { exact: true }).count(), 0);
+  assert.equal(count("/api/v1/conversation?projection=chat&before="), 0);
   assert.equal(await page.locator("vite-error-overlay").count(), 0);
-  const more = page.getByRole("button", { name: "继续读取本轮消息", exact: true });
+  const stop = page.getByRole("button", { name: "停止回复", exact: true });
+  await stop.waitFor();
+  await page.screenshot({ path: join(output, "original-stop-target.png") });
+  await stop.click();
+  await stop.waitFor({ state: "hidden" });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.target.id, original.message_id);
+  assert.equal(writes[0]?.payload.message_id, original.message_id);
   for (const [name, width, height] of [
     ["desktop", 1280, 720],
     ["mobile", 390, 844],
   ] as const) {
     await page.setViewportSize({ width, height });
-    assert.equal(
-      await more.count(),
-      0,
-      "ordinary Chat must not offer an unsupported process cursor",
-    );
-    await page.screenshot({ path: join(output, `process-only-${name}.png`) });
+    assert.equal(await transcript.getByRole("button", { name: /查看过程/ }).count(), 0);
+    await page.screenshot({ path: join(output, "visible-first-page-" + name + ".png") });
   }
-  assert.equal(count("/api/v1/conversation/blocks/background"), 0);
-  await page.setViewportSize({ width: 1280, height: 720 });
-  ordinaryMore = true;
-  await page.reload();
-  await more.click();
-  await page.getByText("Ordinary reply continuation completed", { exact: true }).waitFor();
-  assert.equal(await more.count(), 0);
-  const continuations = calls.filter(
-    (call) => new URL(call, origin).pathname === "/api/v1/conversation/blocks/background",
-  );
-  await writeFile(join(output, "pagination-result.json"), JSON.stringify({ continuations }));
-  assert.equal(new URL(continuations[0]!, origin).searchParams.get("after"), "2");
-  assert.equal(count("/api/v1/conversation/blocks/background"), 1);
-  await page.screenshot({ path: join(output, "ordinary-continuation-completed.png") });
+  const chatReads = () =>
+    calls.filter(
+      (path) =>
+        path.startsWith("/api/v1/conversation?") || path.startsWith("/api/v1/conversation/queue?"),
+    ).length;
+  const beforeTool = chatReads();
+  ledgerSeq++;
+  for (const stream of streams)
+    stream.write("event: cursor\ndata: " + JSON.stringify({ event_seq: ledgerSeq }) + "\n\n");
+  await page.clock.runFor(500);
+  assert.equal(chatReads(), beforeTool, "skipped events do not reread Chat");
+  await transcript.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await transcript.getByText(original.body, { exact: true }).waitFor({ state: "attached" });
+  assert.equal(count("/api/v1/conversation?projection=chat&before="), 1);
+  assert.equal(count("/api/v1/conversation/transcript"), 0);
+  assert.equal(count("/api/v1/conversation/blocks/"), 0);
+  assert.equal(count("/api/v1/agent-conversations/main/rollout"), 0);
+  await page.screenshot({ path: join(output, "earlier-visible-page.png") });
   await input.fill("Retained fixture draft");
   await input.evaluate((element) => element.setAttribute("data-retained-fixture", "main"));
   await page.getByRole("button", { name: "上下文用量 42%", exact: true }).waitFor();
-  for (const category of ["owner", "background", "withdrawn"])
+  for (const category of ["owner", "withdrawn"])
     assert(count(`/api/v1/conversation/queue?category=${category}`) > 0);
   assert(count("/api/v1/conversation/settings?") > 0);
-  assert(count("/api/v1/conversation/transcript?") > 0);
+  assert.equal(count("/api/v1/conversation/transcript?"), 0);
   assert(count("/api/v1/agent-conversations/main/compactions") > 0);
 
   holdUsage = true;
@@ -308,7 +322,7 @@ try {
   assert.deepEqual(appConsoleErrors, []);
   await writeFile(
     join(output, "result.json"),
-    JSON.stringify({ calls, usageAborted, errors, consoleErrors, appConsoleErrors }),
+    JSON.stringify({ calls, writes, usageAborted, errors, consoleErrors, appConsoleErrors }),
   );
   console.log("PASS hidden conversation reads, abort, retained draft and global summaries");
   await context.close();

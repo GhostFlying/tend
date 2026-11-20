@@ -13,8 +13,23 @@ import (
 )
 
 func ConversationQueue(ctx context.Context, q store.Querier, category string, after int64, limit int, session ...string) (protocol.ConversationQueuePage, error) {
+	return conversationQueue(ctx, q, category, after, limit, false, session...)
+}
+
+func ChatQueue(ctx context.Context, q store.Querier, category string, after int64, limit int, session string) (protocol.ConversationQueuePage, error) {
+	return conversationQueue(ctx, q, category, after, limit, true, session)
+}
+
+func conversationQueue(ctx context.Context, q store.Querier, category string, after int64, limit int, chat bool, session ...string) (protocol.ConversationQueuePage, error) {
 	out := protocol.ConversationQueuePage{Items: []protocol.ConversationQueueEntry{}}
-	rows, total, err := store.ConversationQueue(ctx, q, category, after, limit+1, session...)
+	var rows []store.ConversationQueueRow
+	var total int64
+	var err error
+	if chat {
+		rows, total, err = store.ChatQueue(ctx, q, category, after, limit+1, session[0])
+	} else {
+		rows, total, err = store.ConversationQueue(ctx, q, category, after, limit+1, session...)
+	}
 	if err != nil {
 		return out, err
 	}
@@ -31,25 +46,30 @@ func ConversationQueue(ctx context.Context, q store.Querier, category string, af
 		}
 		out.Items = append(out.Items, entry)
 	}
-	active, err := store.ConversationActive(ctx, q, category, session...)
-	if err != nil {
-		return out, err
-	}
-	if active != nil {
-		entry, err := conversationQueueEntry(ctx, q, *active, "owner")
+	if !chat {
+		active, err := store.ConversationActive(ctx, q, category, session...)
 		if err != nil {
 			return out, err
 		}
-		out.Active = &entry
+		if active != nil {
+			entry, err := conversationQueueEntry(ctx, q, *active, "owner")
+			if err != nil {
+				return out, err
+			}
+			out.Active = &entry
+		}
 	}
-	if category == "owner" && len(session) > 0 && strings.HasPrefix(session[0], "issue:") {
-		// The native stop target is independent of the owner input queue.
+	if category == "owner" && (chat || len(session) > 0 && strings.HasPrefix(session[0], "issue:")) {
+		// The processing turn can be outside the owner queue and history page.
 		turn, err := store.ConversationActive(ctx, q, "background", session...)
 		if err != nil {
 			return out, err
 		}
 		if turn != nil && turn.Turn == store.TurnStarted {
 			out.InterruptibleMessageID = turn.ID
+			if chat {
+				out.ProcessingStartedAt = turn.StartedAt
+			}
 		}
 	}
 	out.EventSeq, err = store.LatestEventSeq(ctx, q)

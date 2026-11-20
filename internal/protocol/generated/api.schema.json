@@ -9417,6 +9417,9 @@
     "IssueConversationPage": {
       "additionalProperties": false,
       "properties": {
+        "event_seq": {
+          "type": "integer"
+        },
         "items": {
           "anyOf": [
             {
@@ -9499,6 +9502,9 @@
           ]
         },
         "next": {
+          "type": "integer"
+        },
+        "processing_started_at": {
           "type": "integer"
         },
         "total": {
@@ -12355,6 +12361,9 @@
     "LedgerEvent": {
       "additionalProperties": false,
       "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
         "created_at": {
           "format": "date-time",
           "type": "string"

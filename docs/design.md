@@ -2728,3 +2728,10 @@ Main Chat 继续直播正文。其他协调会话依据真实 conversation 和 R
 正文片段免除会话正文投影确认。工具、steer、原 close 游标、租约和物理停止沿现有守卫
 结清。原生历史中完成的全文只能用于发布正文，工具和命令继续沿各自原身份对账。
 参见[实施计划](plans/worker-complete-text.md)。
+
+## D263：Web Chat 可见消息与原账本游标
+
+Web Chat 按消息可见性查询原消息序号。按回合读取工具原件继续走 Issue 活动和诊断入口。
+Web 账本流沿原事件序号重放，并用 cursor 帧跨过被省略的事件。Issue 活动可按会话标识收到原件刷新提示。
+停止与队列处理从活动回合取原消息标识，与首屏消息的范围无关。
+详见 [Web Chat 实施计划](plans/web-chat-visible-history.md)。

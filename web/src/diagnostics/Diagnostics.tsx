@@ -19,6 +19,7 @@ import {
 } from "./model.ts";
 import styles from "./Diagnostics.module.css";
 import { Maintenance } from "./Maintenance.tsx";
+import { Rollout } from "../conversation/Rollout.tsx";
 
 export function Diagnostics({
   filters,
@@ -35,6 +36,7 @@ export function Diagnostics({
   } | null>(null);
   const [selectedID, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<TriggerEvent | null>(null);
+  const [rolloutOpen, setRolloutOpen] = useState(false);
   const [error, setError] = useState("");
   const query = new URLSearchParams({
     issue_id: filters.issue ?? "",
@@ -148,7 +150,11 @@ export function Diagnostics({
         >
           事件记录
         </button>
+        <button type="button" onClick={() => setRolloutOpen(true)}>
+          主 Agent 执行记录
+        </button>
       </nav>
+      <Rollout open={rolloutOpen} onClose={() => setRolloutOpen(false)} />
       <div className={styles.filters}>
         <Input
           aria-label="搜索记录"
