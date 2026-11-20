@@ -58,14 +58,22 @@ func (t *Tx) PutExternalWait(ctx context.Context, v protocol.ExternalWait, next 
 	return err
 }
 
-// Capture only the first observation invalidating each open wait. A different
-// wait on the same delivery keeps its own original head and first evidence.
-func (t *Tx) recordChecksWaitBoardEvidence(ctx context.Context, ref protocol.IssueDelivery, observation protocol.DeliveryObservation, revision int64) error {
+// RecordChecksWaitBoardEvidence runs in the provider result transaction after
+// settling the query. Read through the same refresh fence as the wake check.
+func (t *Tx) RecordChecksWaitBoardEvidence(ctx context.Context, ref protocol.IssueDelivery) error {
+	fact, err := GetDeliveryObservationFact(ctx, t.Q(), ref)
+	if err != nil {
+		return err
+	}
+	observation := fact.Observation
 	reason, _ := checksWaitTerminal(observation)
 	if observation.HeadSHA == "" && reason == "" {
 		return nil
 	}
-	_, err := t.Exec(ctx, `
+	// A failed read can retain a prior snapshot and settle the refresh that
+	// fenced it. The condition becomes effective when that query settles.
+	observedAt := max(observation.CheckedAt, observation.AttemptedAt)
+	_, err = t.Exec(ctx, `
 WITH relevant AS (
  SELECT w.run_id,COALESCE(json_extract(w.body_json,'$.board_checks.head'),'') AS head
  FROM run_external_waits w JOIN server_delivery_references r
@@ -84,8 +92,8 @@ UPDATE run_external_waits AS w SET body_json=json_set(w.body_json,'$.board_check
   'fact_revision',CASE WHEN u.invalidated THEN :fact_revision END))
 FROM updates u WHERE w.run_id=u.run_id`,
 		sql.Named("provider", ref.Provider), sql.Named("repository", ref.Repository), sql.Named("number", ref.Number),
-		sql.Named("head", observation.HeadSHA), sql.Named("terminal", reason != ""), sql.Named("observed_at", observation.CheckedAt),
-		sql.Named("fact_revision", revision))
+		sql.Named("head", observation.HeadSHA), sql.Named("terminal", reason != ""), sql.Named("observed_at", observedAt),
+		sql.Named("fact_revision", fact.FactRevision))
 	if err != nil {
 		return fmt.Errorf("store: record checks wait board evidence: %w", err)
 	}

@@ -218,7 +218,10 @@ func TestIssueBoardKeepsOwnerExecutionUntilTerminalStop(t *testing.T) {
 }
 
 func TestIssueExecutionBoardWaitsForCISlotReleaseAndOwnerRestart(t *testing.T) {
-	for _, order := range []string{"owner only", "parallel run stops before CI", "CI ends before parallel run stops", "head changes before parallel run stops"} {
+	for _, order := range []string{
+		"owner only", "older query reports while refresh is pending",
+		"parallel run stops before CI", "CI ends before parallel run stops", "head changes before parallel run stops",
+	} {
 		t.Run(order, func(t *testing.T) { testIssueExecutionBoardCI(t, order) })
 	}
 }
@@ -260,22 +263,39 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 	startBoardManager(t, h, assignment)
 	check("owner running", protocol.IssueColumnWIP, "")
 
-	providerHead := "candidate"
-	snapshot := func(state string) {
+	h.app.serverDeliveryObservations = true
+	refresh := func() {
 		t.Helper()
-		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-			observation := protocol.DeliveryObservation{
-				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: providerHead, BaseSHA: "base", TargetSHA: "target"},
-				CheckedAt:        h.clock.Now().UnixMilli(),
-			}
-			if state != "" {
-				observation.CI = &protocol.DeliveryCI{HeadSHA: providerHead, State: state}
-			}
-			_, err := tx.PutDeliveryObservationFact(t.Context(), delivery, observation)
-			return err
-		}); err != nil {
+		current := canonicalTaskIssue(t, h, issue.IssueID)
+		p := protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, DeliveryID: delivery.DeliveryID}
+		cmd := IssueRefreshDelivery{}
+		if op := h.exec(owner, h.env(cmd.Operation(), protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(current.Revision)), cmd); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	claimQuery := func() string {
+		t.Helper()
+		query, err := h.app.ClaimServerDelivery(t.Context())
+		if err != nil || query == nil {
+			t.Fatal(query, err)
+		}
+		return query.ID
+	}
+	providerHead := "candidate"
+	report := func(queryID, state string) {
+		t.Helper()
+		s := &protocol.DeliverySnapshot{State: "open", HeadSHA: providerHead, BaseSHA: "base", TargetSHA: "target"}
+		if state != "" {
+			s.CI = &protocol.DeliveryCI{HeadSHA: providerHead, State: state}
+		}
+		if err := h.app.RecordServerDelivery(t.Context(), queryID, s, ""); err != nil {
 			t.Fatal(err)
 		}
+	}
+	snapshot := func(state string) {
+		t.Helper()
+		refresh()
+		report(claimQuery(), state)
 	}
 	snapshot("pending")
 	p := protocol.WaitExternalPayload{WaitKey: "ci", Kind: "checks", IssueID: issue.IssueID, TargetID: delivery.DeliveryID, Reason: "Await provider result", Recovery: "Inspect the check result"}
@@ -293,7 +313,27 @@ func testIssueExecutionBoardCI(t *testing.T, order string) {
 		t.Fatal("the original stop receipt did not release the lease")
 	}
 
-	if order != "owner only" {
+	switch order {
+	case "owner only":
+	case "older query reports while refresh is pending":
+		refresh()
+		old := claimQuery()
+		refresh()
+		h.clock.Advance(time.Millisecond)
+		report(old, "success")
+		check("older success under a pending refresh", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)
+		fresh := claimQuery()
+		if fresh == old {
+			t.Fatal("the refresh did not allocate a new query")
+		}
+		h.clock.Advance(time.Millisecond)
+		report(fresh, "pending")
+		h.clock.Advance(6 * time.Second)
+		if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		check("fresh pending after older success", protocol.IssueColumnWaiting, protocol.IssueBoardWaitCI)
+	default:
 		h.clock.Advance(time.Millisecond)
 		current := canonicalTaskIssue(t, h, issue.IssueID)
 		cmd := CanonicalOwnerTaskCreate{}

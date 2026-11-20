@@ -246,9 +246,6 @@ func (t *Tx) PutDeliveryObservationFact(ctx context.Context, ref protocol.IssueD
 	if err != nil {
 		return fact, fmt.Errorf("store: put delivery fact: %w", err)
 	}
-	if err := t.recordChecksWaitBoardEvidence(ctx, ref, observation, fact.FactRevision); err != nil {
-		return fact, err
-	}
 	return fact, nil
 }
 
