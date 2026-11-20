@@ -172,6 +172,7 @@ type active struct {
 	// reconcileOnExit asks Hello to recheck control after this executor exits.
 	reconcileOnExit bool
 	settlement      chan struct{}
+	processText     workerProcessText
 }
 
 // Runner pulls and executes runs for one host.

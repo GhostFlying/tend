@@ -16966,6 +16966,12 @@
         "generation": {
           "type": "string"
         },
+        "live_text": {
+          "items": {
+            "$ref": "#/definitions/WorkerProcessText"
+          },
+          "type": "array"
+        },
         "origin": {
           "type": "string"
         },
@@ -23152,6 +23158,34 @@
       ],
       "title": "WorkerKind",
       "type": "string"
+    },
+    "WorkerProcessText": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "turn_id",
+        "item_id",
+        "text"
+      ],
+      "title": "WorkerProcessText",
+      "type": "object"
     },
     "WorkerQuestionSource": {
       "additionalProperties": false,

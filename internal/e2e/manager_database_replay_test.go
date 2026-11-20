@@ -46,6 +46,8 @@ func lapsedManagerReplayCommitsOriginalClose(t *testing.T, repair bool, retained
 
 type managerReplayOptions struct{ active, empty, retained bool }
 
+const legacyWorkerCloseSequence = 60
+
 func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options managerReplayOptions) databaseReplayFixture {
 	t.Helper()
 	s := newServer(t, time.Hour)
@@ -160,7 +162,7 @@ func managerReplayCommitsOriginalClose(t *testing.T, repair bool, options manage
 	}
 	native(protocol.OpManagerNativeClaim, map[string]any{})
 	native(protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: resume, Result: json.RawMessage(`{"ID":"original-native"}`)})
-	const lastSequence = 60
+	const lastSequence = legacyWorkerCloseSequence
 	for sequence := int64(1); sequence <= lastSequence; sequence++ {
 		body := json.RawMessage(`{"thread_id":"original-native","native":{"Kind":"request_usage"}}`)
 		if sequence >= 47 {

@@ -198,13 +198,18 @@ func (r *Runner) rolloutPreviews(ctx context.Context) {
 	}
 }
 
-func (r *Runner) readRollout(ctx context.Context, reader *rollout.Reader, work protocol.RolloutPreviewWork) protocol.RolloutPreview {
+func (r *Runner) readRollout(ctx context.Context, reader *rollout.Reader, work protocol.RolloutPreviewWork) (result protocol.RolloutPreview) {
 	unavailable := protocol.RolloutPreview{State: "source_unknown"}
 	r.controlMu.Lock()
 	deployment := r.previewDeployment
 	r.controlMu.Unlock()
 	if work.DeploymentID != deployment {
 		return unavailable
+	}
+	if active := r.lookup(work.RunID); work.RequireTurn && work.Query.Record == 0 && active != nil {
+		// The file window keeps its native cursor. Live fragments come from
+		// this Run's bounded memory and have no stable record number.
+		defer func() { result.LiveText = active.processText.live() }()
 	}
 	sources, err := r.cfg.Journal.RolloutSources(ctx, work.DeploymentID, work.RunID)
 	if err != nil {

@@ -127,7 +127,7 @@ func TestRunRolloutWindowsPreserveIdentityAndSequence(t *testing.T) {
 		var v protocol.RunRolloutPage
 		err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 			var err error
-			v, err = views.RunRollout(t.Context(), tx.Q(), as.RunID, before, after)
+			v, err = views.RunRollout(t.Context(), tx.Q(), as.RunID, before, after, false)
 			return err
 		})
 		if err != nil {

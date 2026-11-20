@@ -10,6 +10,7 @@ export function useRunWindow(
   preferNative = false,
   record?: string,
   resume?: { after: number; generation: string },
+  processText = false,
 ) {
   const target = Number(record);
   const focus = Number.isSafeInteger(target) && target > 0 && target < Number.MAX_SAFE_INTEGER;
@@ -56,7 +57,7 @@ export function useRunWindow(
             mode = "replace";
           }
           if (abort.signal.aborted) return;
-          setPreview((old) => ({ ...old, ...result }));
+          setPreview(result);
           if (!result.page || !["ready", "empty"].includes(result.state)) {
             setLoading(false);
             setError(["runner_unreachable", "timeout", "unavailable"].includes(result.state));
@@ -65,11 +66,13 @@ export function useRunWindow(
           }
           generation.current = result.generation ?? "";
           next = result.page;
-        } else
+        } else {
+          if (processText) params.set("process_text", "true");
           next = await client.get<RunRolloutPage>(
             `/api/v1/runs/${encodeURIComponent(id)}/rollout?${params}`,
             abort.signal,
           );
+        }
         if (abort.signal.aborted) return;
         const value = mergePage(current.current, next, mode);
         loaded.current = request.version;
@@ -83,11 +86,10 @@ export function useRunWindow(
         setLoading(false);
         setError(true);
         if (native)
-          setPreview((old) => ({
-            ...old,
+          setPreview({
             state:
               cause instanceof ApiError && cause.status === 404 ? "unsupported" : "unavailable",
-          }));
+          });
         if (live) timer = setTimeout(() => void poll(first), 3000);
       }
     };
@@ -97,7 +99,7 @@ export function useRunWindow(
       abort.abort();
       clearTimeout(timer);
     };
-  }, [client, id, native, live, request]);
+  }, [client, id, native, live, request, processText]);
   const load = (mode: "before" | "after") => {
     if (!current.current || loading) return;
     setLive(false);

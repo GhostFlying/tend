@@ -525,9 +525,7 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			(len(event.Native.RequestUsage) == 0 || string(event.Native.RequestUsage) == "null") &&
 			(len(event.Native.ContextUsage) == 0 || string(event.Native.ContextUsage) == "null") &&
 			event.Native.TurnStatus == "" && event.Native.Failure == nil {
-			var err error
-			err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main'))`, r.TaskID).Scan(&processText)
-			if err != nil {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main'))`, r.TaskID).Scan(&processText); err != nil {
 				return Outcome{}, err
 			}
 		}

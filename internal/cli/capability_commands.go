@@ -72,7 +72,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "run continue-retained", Operation: protocol.OpContinueRetainedRun, Target: "run", RevisionRoute: "-", JSONDefault: true},
 	{Name: "run logs", Route: "/api/v1/runs/{id}/logs", Queries: "after wait"},
 	{Name: "run preview", Route: "/api/v1/runs/{id}/preview", Queries: "before after generation record field reference offset", JSONDefault: true},
-	{Name: "run rollout", Route: "/api/v1/runs/{id}/rollout", Queries: "after before"},
+	{Name: "run rollout", Route: "/api/v1/runs/{id}/rollout", Queries: "after before process-text=process_text"},
 	{Name: "artifact show", Route: "/api/v1/artifacts/{id}"},
 	{Name: "choice show", Route: "/api/v1/work-item-choices/{id}"},
 	{Name: "conversation list", Route: "/api/v1/agent-conversations", Queries: "search status after", JSONDefault: true},

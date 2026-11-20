@@ -11,7 +11,7 @@ import (
 )
 
 // RunRollout returns either the newest window, its predecessor or its successor.
-func RunRollout(ctx context.Context, q store.Querier, id string, before, after int64) (protocol.RunRolloutPage, error) {
+func RunRollout(ctx context.Context, q store.Querier, id string, before, after int64, includeProcessText bool) (protocol.RunRolloutPage, error) {
 	v := protocol.RunRolloutPage{RunID: id, Logs: []protocol.RunLogView{}}
 	run, err := store.GetRun(ctx, q, id)
 	if err != nil {
@@ -21,7 +21,7 @@ func RunRollout(ctx context.Context, q store.Querier, id string, before, after i
 	source := "run_logs"
 	fields := "seq,COALESCE(native_id,''),kind,body_json,created_at"
 	process := false
-	if run.Role == protocol.RoleIssueManager {
+	if includeProcessText && run.Role == protocol.RoleIssueManager {
 		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_manager_tasks WHERE task_id=? AND conversation_id NOT IN ('','main')) AND NOT EXISTS(SELECT 1 FROM run_logs WHERE run_id=?)`, run.TaskID, id).Scan(&process); err != nil {
 			return v, err
 		}

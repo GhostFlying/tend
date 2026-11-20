@@ -113,7 +113,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 			if s.count(`SELECT COUNT(*) FROM runs`) != beforeRuns || s.count(`SELECT COUNT(*) FROM leases WHERE status='active'`) != 0 {
 				t.Fatal("history reading allocated a business Run or lease")
 			}
-			if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, old.RunID) != 19 || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
+			if s.count(`SELECT COUNT(*) FROM manager_native_events WHERE run_id=?`, old.RunID) != legacyWorkerCloseSequence || s.count(`SELECT COUNT(*) FROM conversation_agent_messages WHERE thread_id='original-native' AND turn_id='original-turn'`) != 0 {
 				t.Fatal("receipt reading changed the old cursor or published repair output")
 			}
 			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -125,7 +125,7 @@ func TestFault_ProvedCloseReaderReconcilesOnlyRealTerminalHistory(t *testing.T) 
 				if err := json.Unmarshal([]byte(raw), &close); err != nil {
 					return err
 				}
-				if close.ID != proof.CloseRequestID || close.LastSequence != 19 || close.Error != "" {
+				if close.ID != proof.CloseRequestID || close.LastSequence != legacyWorkerCloseSequence || close.Error != "" {
 					t.Fatal("reader changed the original frozen close", close)
 				}
 				return nil
