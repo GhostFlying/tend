@@ -145,9 +145,6 @@ func (a *App) nativeObservation(ctx context.Context, x *Exec, cmd Command, sourc
 		}
 		if protocol.ValidID(protocol.PrefixRequest, reply.ID) {
 			source.NativeRequestID = reply.ID
-			if reply.Method == "close" {
-				source.CloseRequestID = reply.ID
-			}
 		}
 		if !a.nativeCalls.observation(x.Env.Target.ID, reply.ID) && !managerNativeObservationMethod(reply.Method) {
 			return protocol.Operation{}, false, nil

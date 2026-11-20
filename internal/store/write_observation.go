@@ -29,14 +29,6 @@ func WithWriteSource(ctx context.Context, source WriteSource) context.Context {
 	return context.WithValue(ctx, writeSourceKey{}, source)
 }
 
-type writeCloseRequestKey struct{}
-
-// WithWriteCloseRequest carries the coordinator's generated close request ID
-// through the transport envelope's write metadata.
-func WithWriteCloseRequest(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, writeCloseRequestKey{}, id)
-}
-
 type writeEventKey struct{}
 type writeEvent struct {
 	run         string
@@ -205,9 +197,6 @@ func (s *Store) startWriteObservation(ctx context.Context) *writeCall {
 	}
 	started := s.observer.now()
 	source, _ := ctx.Value(writeSourceKey{}).(WriteSource)
-	if closeID, ok := ctx.Value(writeCloseRequestKey{}).(string); ok {
-		source.CloseRequestID = closeID
-	}
 	if event, ok := ctx.Value(writeEventKey{}).(writeEvent); ok {
 		source.RunID, source.EventSequence = event.run, event.sequence
 		source.AttachmentRunID, source.CoordinatorSequence = event.attachment, event.coordinator
@@ -410,6 +399,22 @@ func WithWriteObserver(now func() time.Time, slow time.Duration, observe func(Wr
 			s.observer = &writeObserver{now: now, slow: slow, observe: observe}
 		}
 	}
+}
+
+// ObserveCloseRequest attaches a validated native close identity obtained
+// inside the transaction. It remains separate from the transport request ID.
+func (t *Tx) ObserveCloseRequest(id string) {
+	c := t.observation
+	if c == nil {
+		return
+	}
+	c.observation.Source.CloseRequestID = id
+	d := c.diagnostics
+	d.mu.Lock()
+	if d.active.id == c.observation.ID {
+		d.active.source.CloseRequestID = id
+	}
+	d.mu.Unlock()
 }
 
 // ObservePhase ends an inclusive fixed stage. Calling the returned function
