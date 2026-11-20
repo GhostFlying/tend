@@ -329,7 +329,8 @@ func (a *App) nativePausePredecessor(ctx context.Context, run string) (string, e
 
 // consumeStoppedManagerDisconnect applies only the connection end of a proved
 // stopped original process. There is no native thread to deliver this marker
-// to, and there is no business event or receipt to reconstruct.
+// to. Worker diagnostics stay on the original event for process readers.
+// Business events and receipts require independent evidence.
 func consumeStoppedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, m store.IssueManagerTask, auditKind string) error {
 	if (r.ObservedState != protocol.RunFinished && r.ObservedState != protocol.RunFailed) || m.Pin == nil || m.HostID != r.HostID {
 		return nil
@@ -374,6 +375,14 @@ func consumeStoppedManagerDisconnect(ctx context.Context, x *Exec, tx *store.Tx,
 	}
 	if string(fields["thread_id"]) == `""` {
 		delete(fields, "thread_id")
+	}
+	if rawText, attached := fields["process_text"]; attached {
+		var parts []protocol.WorkerProcessText
+		if m.ConversationID == "" || m.ConversationID == "main" ||
+			json.Unmarshal(rawText, &parts) != nil || !validWorkerProcessText(parts) {
+			return nil
+		}
+		delete(fields, "process_text")
 	}
 	if len(fields) != 0 {
 		return nil
