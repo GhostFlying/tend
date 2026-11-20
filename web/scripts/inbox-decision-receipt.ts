@@ -5,13 +5,24 @@ import { readFile, mkdir } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { fixtureRoot } from "./navigation.ts";
-import type { Envelope, RespondAttentionPayload } from "../src/api/generated/api.ts";
+import type {
+  Envelope,
+  ReportFollowOn,
+  RespondAttentionPayload,
+} from "../src/api/generated/api.ts";
 
 const output = process.env.TEND_LAYOUT_OUTPUT;
 if (output) await mkdir(output, { recursive: true });
 const id = "attn_fixture_original";
 const question = "是否批准这次交付？";
 const options = ["approve", "defer", "end_delivery"];
+const reportFollowOn: ReportFollowOn = {
+  artifact_id: "art_fixture_report",
+  assignment_epoch: 1,
+  implementation_scope: "验证报告后续事项",
+  run_id: "run_fixture_report",
+};
+const reportBody = "这是本次决定关联的原始报告。";
 const open = {
   attention_id: id,
   title: question,
@@ -44,7 +55,7 @@ function resolved(option: string, text = "") {
     decision: { ...open.decision, version: 3, status: "answered", answer: { option, text } },
   };
 }
-let current = open;
+let current: typeof open & { report_follow_on?: ReportFollowOn } = open;
 let staleList = false;
 let refuse = false;
 let lose = false;
@@ -108,6 +119,7 @@ const server = createServer(async (req, res) => {
         !["approve", "end_delivery"].includes(answer.option ?? "") ||
         !answer.text,
     );
+    if (current.report_follow_on) assert(!answer.text);
     current = resolved(answer.option ?? "", answer.text);
     return json({ operation: { request_id: e.request_id, status: "succeeded", result: current } });
   }
@@ -115,6 +127,8 @@ const server = createServer(async (req, res) => {
     detailReads++;
     return json(current);
   }
+  if (path === `/api/v1/artifacts/${reportFollowOn.artifact_id}`)
+    return json({ artifact: { ref: { report: { body: reportBody } } } });
   if (path === "/api/v1/inbox") {
     const pending = url.searchParams.get("status") === "open";
     if (pending && current.responsibility.recipient_kind !== "owner")
@@ -193,14 +207,29 @@ try {
       note: "",
       crossDevice: true,
     },
+    {
+      width: 390,
+      name: "report-follow-on",
+      local: "仅报告结案",
+      actual: "答复已记录",
+      note: "",
+      report: true,
+    },
   ]) {
-    current = scenario.recipient
+    current = scenario.report
       ? {
           ...open,
           delivery_decision: false,
-          responsibility: { recipient_kind: scenario.recipient },
+          question_options: ["继续实现", "仅报告结案"],
+          report_follow_on: reportFollowOn,
         }
-      : open;
+      : scenario.recipient
+        ? {
+            ...open,
+            delivery_decision: false,
+            responsibility: { recipient_kind: scenario.recipient },
+          }
+        : open;
     staleList = false;
     refuse = scenario.name === "failure";
     lose = !!scenario.crossDevice;
@@ -228,6 +257,11 @@ try {
       assert.equal(await page.title(), "tend");
       const submit = page.getByRole("button", { name: "提交决定", exact: true });
       const explanation = page.getByRole("textbox", { name: /说明/ });
+      if (scenario.report) {
+        await page.getByRole("button", { name: "查看原报告" }).click();
+        await page.getByText(reportBody, { exact: true }).waitFor();
+        assert.equal(await explanation.count(), 0);
+      }
       const radio = page.getByRole("radio", { name: scenario.local, exact: true });
       const badge = page
         .getByRole("navigation", {
@@ -248,7 +282,7 @@ try {
       await page.getByText("正在提交决定…", { exact: true }).waitFor();
       assert(
         (await submit.isDisabled()) &&
-          (await explanation.isDisabled()) &&
+          (scenario.report || (await explanation.isDisabled())) &&
           (await radio.isDisabled()),
       );
       await submit.evaluate((button: HTMLButtonElement) => button.click());
@@ -282,6 +316,7 @@ try {
       }
       const receipt = page.getByRole("status").filter({ hasText: scenario.actual });
       await receipt.waitFor();
+      if (scenario.report) await page.getByText(reportBody, { exact: true }).waitFor();
       await page.waitForFunction(
         (title) =>
           document.activeElement?.getAttribute("role") === "status" &&
