@@ -33,23 +33,15 @@ const deliveryLabels: Record<string, string> = {
   end_delivery: "结束交付",
 };
 
-export function isDeliveryDecision(item: AttentionView) {
-  const options = item.question_options ?? item.decision?.options;
-  return (
-    Array.isArray(options) &&
-    ["approve", "defer", "end_delivery"].every((id) => options.includes(id))
-  );
-}
-
 export function attentionDecisionLabel(item: AttentionView, option: string) {
   return (
-    (isDeliveryDecision(item) && deliveryLabels[option]) ||
+    (item.delivery_decision && deliveryLabels[option]) ||
     (item.decision ? optionLabel(item.decision, option) : option)
   );
 }
 
 export function decisionReceiptTitle(item: AttentionView, option: string) {
-  if (isDeliveryDecision(item)) {
+  if (item.delivery_decision) {
     if (option === "approve") return "批准已记录";
     if (option === "defer") return "延期决定已记录";
     if (option === "end_delivery") return "结束交付决定已记录";

@@ -58,3 +58,12 @@ func (t *Tx) PutIssueDeliveryDuty(ctx context.Context, issue string, d protocol.
 	_, err = t.Exec(ctx, `UPDATE issue_delivery_duties SET revision=?,status=?,body_json=? WHERE issue_id=? AND task_id=?`, d.Revision, d.Status, string(raw), issue, d.TaskID)
 	return err
 }
+
+// DecisionHasDeliveryDuty identifies the original decision governed by a delivery duty.
+func DecisionHasDeliveryDuty(ctx context.Context, q Querier, decisionID string) (bool, error) {
+	var found bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1
+ FROM issue_delivery_duties duty JOIN attentions a ON a.attention_id=json_extract(duty.body_json,'$.attention_id')
+ WHERE a.decision_id=?)`, decisionID).Scan(&found)
+	return found, err
+}

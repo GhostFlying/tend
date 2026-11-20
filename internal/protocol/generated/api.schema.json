@@ -2215,6 +2215,9 @@
         "decision_id": {
           "type": "string"
         },
+        "delivery_decision": {
+          "type": "boolean"
+        },
         "historical": {
           "type": "boolean"
         },

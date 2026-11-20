@@ -91,6 +91,8 @@ type HandleAttentionPayload struct {
 	Reason                  string                      `json:"reason"`
 }
 type AttentionView struct {
+	// DeliveryDecision applies the delivery answer contract to this original decision.
+	DeliveryDecision bool   `json:"delivery_decision,omitempty"`
 	Historical       bool   `json:"historical,omitempty"`
 	HistoricalReason string `json:"historical_reason,omitempty"`
 	Attention
