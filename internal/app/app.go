@@ -237,13 +237,14 @@ func (a *App) Execute(ctx context.Context, p protocol.Principal, env *protocol.E
 		x.TraceID = a.ids.New(protocol.PrefixTrace)
 	}
 	defer func() { a.logExecution(ctx, x, operation, executeErr) }()
-	if op, handled, err := a.nativeObservation(ctx, x, cmd); handled {
+	source := store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID}
+	if op, handled, err := a.nativeObservation(ctx, x, cmd, &source); handled {
 		return op, err
 	}
 	if x.Principal.Kind == protocol.PrincipalOwner {
 		ctx = store.WithBusinessOwner(ctx, x.Principal.Subject)
 	}
-	ctx = store.WithWriteSource(ctx, store.WriteSource{Operation: env.Operation, RequestID: env.RequestID, TraceID: x.TraceID})
+	ctx = store.WithWriteSource(ctx, source)
 
 	if _, claim := cmd.(Claim); claim && p.Kind == protocol.PrincipalRunner {
 		noWork, err := a.preflightClaim(ctx, p, env)

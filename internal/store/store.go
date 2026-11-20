@@ -160,6 +160,7 @@ func (s *Store) Write(ctx context.Context, fn func(*Tx) error) (err error) {
 		return fmt.Errorf("store: begin write: %w", err)
 	}
 	defer func() {
+		s.releasingWrite(observation)
 		conn.Close()
 		s.releasedWrite(observation)
 	}()

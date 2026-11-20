@@ -922,15 +922,34 @@ func (phases writePhaseLogList) String() string {
 	return text.String()
 }
 
+// TextHandler uses String while JSONHandler encodes the fields directly.
+type writerWaitLog store.WriterWaitTimeline
+
+func (w writerWaitLog) String() string {
+	raw, err := json.Marshal(w)
+	if err != nil {
+		return `{"encoding_error":true}`
+	}
+	return string(raw)
+}
+
 func logWriteObservation(log *slog.Logger, o store.WriteObservation) {
+	var timeline any
+	if o.WaitTimeline != nil {
+		timeline = writerWaitLog(*o.WaitTimeline)
+	}
 	log.Warn("slow or cancelled store write",
 		"write_id", o.ID, "write_started_at", o.StartedAt, "write_finished_at", o.FinishedAt, "write_deadline_at", o.DeadlineAt,
 		"operation", o.Source.Operation, "request_id", o.Source.RequestID, "trace_id", o.Source.TraceID,
 		"run_id", o.Source.RunID, "event_sequence", o.Source.EventSequence,
 		"attachment_run_id", o.Source.AttachmentRunID, "coordinator_sequence", o.Source.CoordinatorSequence,
+		"native_request_id", o.Source.NativeRequestID, "close_request_id", o.Source.CloseRequestID,
 		"caller", o.Caller, "stage", o.Stage, "outcome", o.Outcome, "context_state_at_failure", o.ContextState,
 		"caller_stack", o.CallerStack, "wait_failure_sampled_at", o.WaitFailureSampledAt, "active_writer_at_wait_failure", o.ActiveWriter,
+		"writer_wait_timeline", timeline,
 		"total", o.Total, "connection_wait", o.ConnectionWait, "begin_immediate", o.Begin,
+		"connection_acquired_at", o.ConnectionAcquiredAt, "connection_release_started_at", o.ConnectionReleaseStartedAt,
+		"connection_released_by", o.ConnectionReleasedBy, "connection_held", o.ConnectionHeld,
 		"callback_inclusive", o.Callback, "commit", o.Commit, "rollback", o.Rollback,
 		"phases_inclusive", writePhaseLogList(o.Phases),
 		"pool_wait_count_total", o.PoolWaitCountTotal, "pool_wait_duration_total", o.PoolWaitDurationTotal,

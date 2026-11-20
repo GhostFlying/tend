@@ -313,8 +313,8 @@ func TestWriteObservationSuccessfulCommitThenCancel(t *testing.T) {
 	defer cancel()
 	var observation WriteObservation
 	s.observer = &writeObserver{now: stepDiagnosticClock(func(tick int) {
-		// With no nested phases the sixth tick is after commit and release.
-		if tick == 6 {
+		// With no nested phases the eighth tick is after commit and release.
+		if tick == 8 {
 			cancel()
 		}
 	}), slow: time.Millisecond, observe: func(o WriteObservation) { observation = o }}

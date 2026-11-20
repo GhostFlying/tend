@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,56 @@ func TestWriteObservationLogTimeoutSnapshot(t *testing.T) {
 	}
 	if active.ID != 21 || active.Held != int64(500*time.Millisecond) || !active.Sampled.Equal(started.Add(time.Second)) {
 		t.Fatalf("snapshot units/identity=%+v", active)
+	}
+}
+
+func TestWriteObservationLogTimeline(t *testing.T) {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	end := start.Add(time.Second)
+	source := store.WriteSource{Operation: "manager.native_reply", RequestID: "receipt", RunID: "original-run", NativeRequestID: "close", CloseRequestID: "close"}
+	want := store.WriterWaitTimeline{
+		StartedAt: start, EndedAt: end, HistoryFrom: start, MatchedHolders: 1,
+		ObservedHeld: 750 * time.Millisecond, LongestOverlap: 750 * time.Millisecond, Unattributed: 250 * time.Millisecond,
+		Holders: []store.WriterWaitHolder{{
+			ID: 3, Source: source, AcquiredAt: start, ReleaseStartedAt: start.Add(750 * time.Millisecond), ReleasedBy: end, WaitHeld: 750 * time.Millisecond,
+			LastObservedStage: "commit",
+		}},
+	}
+	obs := store.WriteObservation{ID: 4, Source: store.WriteSource{Operation: "manager.event.ack", RunID: "original-run", EventSequence: 268},
+		Stage: "connection_wait", Outcome: "deadline_exceeded", ConnectionWait: time.Second, WaitTimeline: &want}
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var output bytes.Buffer
+			var raw json.RawMessage
+			if format == "text" {
+				logger, err := logging.NewText(&output, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				logWriteObservation(logger, obs)
+				_, after, ok := strings.Cut(output.String(), " writer_wait_timeline=")
+				field, _, closed := strings.Cut(after, " total=")
+				decoded, err := strconv.Unquote(field)
+				if !ok || !closed || err != nil {
+					t.Fatalf("timeline text encoding: %q, %v", field, err)
+				}
+				raw = json.RawMessage(decoded)
+			} else {
+				logWriteObservation(slog.New(slog.NewJSONHandler(&output, nil)), obs)
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(output.Bytes(), &fields); err != nil {
+					t.Fatal(err)
+				}
+				raw = fields["writer_wait_timeline"]
+			}
+			var got store.WriterWaitTimeline
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Holders) != 1 || got.Holders[0] != want.Holders[0] || got.ObservedHeld != want.ObservedHeld ||
+				got.Unattributed != want.Unattributed || !got.EndedAt.Equal(end) {
+				t.Fatalf("timeline = %+v", got)
+			}
+		})
 	}
 }
