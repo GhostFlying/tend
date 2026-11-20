@@ -128,6 +128,9 @@ func printIssueChildren(out io.Writer, id string, children *protocol.IssueChildP
 
 func runIssueReadDetail(ctx context.Context, e *Env, args []string) error {
 	fs := newFlags(e, "issue "+args[0])
+	if help := auditReadHelp("issue " + args[0]); help != "" {
+		fs.Usage = func() { fmt.Fprint(e.Stderr, help) }
+	}
 	after := fs.String("after", "", "result cursor")
 	before := fs.Int64("before", 0, "activity cursor")
 	var notification, since, through, from *int64

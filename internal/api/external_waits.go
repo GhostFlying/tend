@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -9,16 +11,19 @@ import (
 )
 
 func (s *Server) externalWaits(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.owner(r); err != nil {
-		s.writeError(w, r, err)
-		return
-	}
-	value, err := s.app.ExternalWaits(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.writeError(w, r, notFound(err))
-		return
-	}
-	writeJSON(w, http.StatusOK, value)
+	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
+		query := r.URL.Query()
+		runID, status := query.Get("run_id"), query.Get("status")
+		if query.Has("run_id") && (len(query["run_id"]) != 1 || runID == "" || strings.TrimSpace(runID) != runID) {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "run_id must be one nonempty original Run ID")
+		}
+		if query.Has("status") {
+			if len(query["status"]) != 1 || !slices.Contains([]string{"stopping", "waiting", "continued", "cancelled"}, status) {
+				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "status must be one of stopping, waiting, continued or cancelled")
+			}
+		}
+		return store.TaskExternalWaits(r.Context(), q, r.PathValue("id"), runID, status)
+	})
 }
 
 func (s *Server) ciContinuation(w http.ResponseWriter, r *http.Request) {

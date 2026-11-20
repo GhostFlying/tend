@@ -134,6 +134,12 @@ func CapabilityBindings() []CapabilityBinding {
 				args = append(args, "sample")
 			}
 		}
+		if cmd.Name == "task show" {
+			args = append(args, "--fields", "task_id,lifecycle,execution")
+		}
+		if cmd.Name == "task waits" {
+			args = append(args, "--run", "original", "--status", "waiting")
+		}
 		if cmd.Name == "task manager-reconciliation" {
 			args = append(args, "--run", "original")
 		}
@@ -251,7 +257,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("POST /api/v1/ops", "issue create", "--data", `{}`),
 		binding("GET /api/v1/snapshot", "status", "--json"),
 		binding("GET /api/v1/issues", "issue list", "--board", "--group-review", "--waiting-on-me", "--json"),
-		binding("GET /api/v1/issues/{id}", "issue show", "sample", "--json"),
+		binding("GET /api/v1/issues/{id}", "issue show", "sample", "--json", "--fields", "issue_id,effective_work_status,manager"),
 		binding("GET /api/v1/issues/{id}/activity", "issue activity", "sample"),
 		binding("GET /api/v1/issues/{id}/activity/{position}/notification", "issue activity", "sample", "--notification", "42"),
 		binding("GET /api/v1/issues/{id}/results", "issue results", "sample"),
@@ -359,6 +365,9 @@ func commandUsage(prefix []string) string {
 	}
 
 	name := strings.Join(prefix, " ")
+	if help := auditReadHelp(name); help != "" {
+		return help
+	}
 	lines := map[string]bool{}
 	for _, v := range CapabilityBindings() {
 		if name == "" || v.Command == name || strings.HasPrefix(v.Command, name+" ") {
@@ -516,8 +525,11 @@ func commandUsage(prefix []string) string {
 	if name == "task" || name == "task continue" {
 		out.WriteString("\nTask continuation: task continue <id> --revision <current> --data '{\"reason\":\"Continue the same goal\"}' appends a new Run for the unchanged goal, preserving historical spec/results and acceptance. Use a new Task only for an independent goal. --dry-run saves the original Envelope; unknown retries keep request ID and payload. Read task show and issue materials for prior results and unresolved operations.\n")
 	}
+	if name == "issue" || name == "task" {
+		out.WriteString("\nRead-only audit queries: see docs/operations/audit-ledger-queries.md.\n")
+	}
 	if name == "task" || name == "task ci-continuation" || name == "task waits" || name == "task resume-wait" {
-		out.WriteString("\nExternal waits: task waits <id> reads the recorded condition, physical-stop status and recovery action. task resume-wait <id> --revision <current> --data '{\"wait_id\":\"<original wait>\",\"reason\":\"Inspect the existing outcome\"}' resumes judgment without repeating the external operation. Actual stop still precedes slot release. Keep the original Envelope/request ID for an unknown response.\n")
+		out.WriteString("\nExternal waits: task waits <id> [--run <run-id>] [--status <status>] reads the recorded condition, physical-stop status and recovery action. task resume-wait <id> --revision <current> --data '{\"wait_id\":\"<original wait>\",\"reason\":\"Inspect the existing outcome\"}' resumes judgment without repeating the external operation. Actual stop still precedes slot release. Keep the original Envelope/request ID for an unknown response.\n")
 	}
 	if name == "task" || name == "task show" || name == "observation show" {
 		out.WriteString("\nDelivery authorization is a top-level server-read binding, not a field in task spec. Workers use their existing run-scoped read_observation tool to inspect it without owner credentials. A missing legacy field is unknown, not proof that authorization was granted.\n")

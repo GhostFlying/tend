@@ -76,7 +76,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/inbox` | `inbox list` | issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issue-notification-settings` | `issue notifications show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues` | `issue list` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/issues/{id}` | `issue show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/issues/{id}` | `issue show` | --revision 选择历史版本，--fields 选择 CLI 输出键 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/activity` | `issue activity` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/activity/{position}/notification` | `issue activity --notification` | Issue 与活动位置；可用 `--after` 分页 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}/context` | `issue context` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
@@ -105,7 +105,8 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/snapshot` | `status` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/sources/{id}` | `source show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/tasks` | `task list` | all finished project lifecycle sort before limit | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/tasks/{id}` | `task show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/tasks/{id}` | `task show` | --fields 选择 CLI 输出键 | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/tasks/{id}/external-waits` | `task waits` | --run=run_id、--status，组合精确匹配，无分页 | API | CLI/HTTP；只读原等待 |
 | `GET /api/v1/token-usage` | `usage` | window offset model subject before | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/upgrades/{id}` | `upgrade show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/work-item-choices/{id}` | `choice show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
