@@ -13,7 +13,9 @@ import (
 
 // Keep the pending receipts on the outer side of each join. Joining through
 // hosted_executions can scan or materialize both execution history tables.
-const pendingManagerReceiptRuns = `WITH pending_receipt_runs(run_id) AS (
+// Materialize the Run lookups before filtering their state. Otherwise stale
+// statistics can make SQLite scan runs to build a Bloom filter for the join.
+const pendingManagerReceiptRuns = `WITH pending_receipt_ids(run_id) AS (
  SELECT json_extract(h.private_snapshot,'$.runner_run_id')
  FROM native_turn_receipts_pending p
  CROSS JOIN local_hosted_executions h ON h.execution_id=p.request_id
@@ -21,16 +23,19 @@ const pendingManagerReceiptRuns = `WITH pending_receipt_runs(run_id) AS (
  SELECT json_extract(h.private_snapshot,'$.runner_run_id')
  FROM native_turn_receipts_pending p
  CROSS JOIN runner_coordination_executions h ON h.execution_id=p.request_id
+), pending_receipt_runs AS MATERIALIZED (
+ SELECT r.run_id,r.task_id,r.role,r.observed_state,r.native_closed_at,r.native_close_activity,r.native_activity,r.created_at
+ FROM pending_receipt_ids p
+ CROSS JOIN runs r ON r.run_id=p.run_id
 )`
 
 const managerHistoryRunQuery = pendingManagerReceiptRuns + `
  SELECT run_id FROM (
-  SELECT r.run_id,r.created_at FROM pending_receipt_runs p
-  CROSS JOIN runs r ON r.run_id=p.run_id
-  WHERE r.task_id=?1 AND r.role='issue_manager' AND r.observed_state IN ('finished','failed')
-  AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+  SELECT receipt.run_id,receipt.created_at FROM pending_receipt_runs receipt
+  WHERE receipt.task_id=?1 AND receipt.role='issue_manager' AND receipt.observed_state IN ('finished','failed')
+  AND receipt.native_closed_at>0 AND receipt.native_close_activity=receipt.native_activity
   UNION ALL
-  SELECT r.run_id,r.created_at FROM runs r
+  SELECT r.run_id,r.created_at FROM runs r INDEXED BY runs_task
   WHERE r.task_id=?1 AND r.role='issue_manager' AND r.observed_state IN ('finished','failed')
   AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
   AND EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
