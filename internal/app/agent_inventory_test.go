@@ -38,12 +38,15 @@ func inventoryProjection(t *testing.T, host string) (protocol.AgentInventoryProj
 	return d.Public(), hash
 }
 
-func inventorySetup(t *testing.T) (*harness, *protocol.RunnerRuntime, protocol.AgentInventoryProjection, string) {
+func inventorySetup(t *testing.T, versions ...int64) (*harness, *protocol.RunnerRuntime, protocol.AgentInventoryProjection, string) {
 	t.Helper()
 	h := newHarness(t)
 	inventoryCategory(t, h, "implementer", 0, "active")
 	inventoryCategory(t, h, "reviewer", 0, "active")
 	r := testRuntime("inventory-first")
+	if len(versions) != 0 {
+		r.Protocol, r.ProtocolMin, r.ProtocolMax = versions[0], versions[0], versions[0]
+	}
 	r.Capabilities = append(r.Capabilities, protocol.CapabilityAgentInventory)
 	if op := h.versionedHello("linux-1", r); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)

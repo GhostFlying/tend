@@ -612,7 +612,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 					if !ok {
 						return
 					}
-					if err := processEvent(drain, event); err != nil {
+					if err := processEvent(context.WithValue(drain, managerACKDrainKey{}, true), event); err != nil {
 						diagnostics.cleanup(drain, slog.LevelWarn, "final_event", err)
 					}
 				}

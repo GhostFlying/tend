@@ -22,19 +22,23 @@ const managerEventACKAttempt = 5 * time.Second
 // Completing an item/transport flush also covers its previously buffered deltas.
 func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
 	ack := managerEventACK{run: run, sequence: seq, thread: thread, turn: turn, item: item, flush: flush}
-	_, err := a.writeManagerEventACK(ctx, ack, false)
-	return err
+	return a.recoverManagerEventACK(ctx, ack, false)
 }
 
 // RecoverManagerEventACK holds the original receipt while its handler stays
 // finished. Only the live attachment may retry a write that never reached its
-// transaction callback. History draining retains its existing single attempt.
+// transaction callback under current business authority. Historical and close
+// drain ACKs instead use AcknowledgeManagerEvent to settle their original facts.
 func (a *App) RecoverManagerEventACK(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
 	ack := managerEventACK{run: run, sequence: seq, thread: thread, turn: turn, item: item, flush: flush}
+	return a.recoverManagerEventACK(ctx, ack, true)
+}
+
+func (a *App) recoverManagerEventACK(ctx context.Context, ack managerEventACK, live bool) error {
 	const attempts = 3
 	for attempt := 0; ; attempt++ {
 		step, cancel := context.WithTimeout(ctx, managerEventACKAttempt)
-		started, err := a.writeManagerEventACK(step, ack, attempt > 0)
+		started, err := a.writeManagerEventACK(step, ack, live && attempt > 0)
 		cancel()
 		if err == nil {
 			return nil
@@ -152,7 +156,7 @@ func (a *App) requireManagerEventACKLease(ctx context.Context, q store.Querier, 
 	if err != nil {
 		return err
 	}
-	if !allowed || lease.Status != store.LeaseActive || lease.ExpiresAt <= a.now().UnixMilli() {
+	if !allowed || !lease.Current(a.now().UnixMilli()) {
 		return protocol.Errorf(protocol.CodeForbidden, "manager event ACK recovery is fenced")
 	}
 	return nil

@@ -11,9 +11,9 @@ import (
 	"github.com/GhostFlying/tend/internal/views"
 )
 
-func reviewManagerAssignment(t *testing.T) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.Assignment, string) {
+func reviewManagerAssignment(t *testing.T, versions ...int64) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.Assignment, string) {
 	t.Helper()
-	h, runtime := managerClaimHarness(t)
+	h, runtime := managerClaimHarness(t, versions...)
 	issue := createCanonicalOwnerTestIssue(t, h)
 	source := queueMessage(t, h, "Coordinate this intent")
 	result := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{SourceMessageID: source, ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Continuing responsibility"}, rev(issue.Revision)), retainedManagerCommand{})

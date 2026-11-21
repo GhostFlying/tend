@@ -81,9 +81,9 @@ func TestManagerSelectionAndClaimFreezeResponsibilityWithoutWorkspace(t *testing
 	}
 }
 
-func managerClaimHarness(t *testing.T) (*harness, *protocol.RunnerRuntime) {
+func managerClaimHarness(t *testing.T, versions ...int64) (*harness, *protocol.RunnerRuntime) {
 	t.Helper()
-	h, r, p, _ := inventorySetup(t)
+	h, r, p, _ := inventorySetup(t, versions...)
 	inventoryCategory(t, h, protocol.DefaultIssueManagerCategory, 0, "active")
 	p.FormatVersion = 2
 	p.Runtimes[0].DeclaredPurposes = []string{"worker_run", "issue_manager"}

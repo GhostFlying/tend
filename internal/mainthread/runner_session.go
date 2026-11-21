@@ -30,9 +30,12 @@ func RunnerSession(ctx context.Context, a *app.App, run string, shutdown ...cont
 }
 
 type managerEventOrigin struct {
-	run      string
-	sequence int64
+	run        string
+	sequence   int64
+	historical bool
 }
+
+type managerACKDrainKey struct{}
 
 type runnerTransport struct {
 	attachment  context.Context
@@ -218,7 +221,7 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 				if t.origins == nil {
 					t.origins = map[int64]managerEventOrigin{}
 				}
-				t.origins[item.Sequence] = managerEventOrigin{run: e.RunID, sequence: e.Sequence}
+				t.origins[item.Sequence] = managerEventOrigin{run: e.RunID, sequence: e.Sequence, historical: item.Historical}
 				t.mu.Unlock()
 				out = append(out, item)
 			}
@@ -284,13 +287,12 @@ func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event,
 	if !ok {
 		return errors.New("manager event has no original receipt identity")
 	}
-	if origin.run == t.run && !e.Historical && !e.Disconnected &&
+	draining, _ := ctx.Value(managerACKDrainKey{}).(bool)
+	if origin.run == t.run && !origin.historical && !draining && !e.Disconnected &&
 		(e.Native == nil || e.Native.Kind != harness.EventCoordinatorHistoryEnd) {
 		return t.app.RecoverManagerEventACK(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
 	}
-	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	return t.app.AcknowledgeManagerEvent(attempt, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
+	return t.app.AcknowledgeManagerEvent(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
 }
 
 func (t *runnerTransport) ReplayToolResult(ctx context.Context, e coordination.Event) (harness.ToolResult, error) {

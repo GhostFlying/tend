@@ -180,3 +180,105 @@ func TestRunnerTransportQueuedCloseEndRetainsUnknownOutcome(t *testing.T) {
 		t.Fatal("native operation was rewritten or resent")
 	}
 }
+
+func TestFault_RunnerTransportSettlesReleasedRunTailAfterWriterTimeout(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	const run = "receipt-reader-run"
+	seedClosingReceiptMetadata(t, e, "completed", true)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		const host = "tail-fixture-host"
+		if err := tx.UpsertHost(ctx, store.HostRow{HostID: host, OS: "linux", Arch: "amd64", Slots: 1}, time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE runs SET host_id=? WHERE run_id=?`, host, run); err != nil {
+			return err
+		}
+		if err := tx.InsertLease(ctx, store.LeaseRow{LeaseID: "tail-fixture-lease", RunID: run, HostID: host, ExpiresAt: time.Now().Add(time.Minute).UnixMilli()}, time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('receipt-reader-run',1,'{"thread_id":"original-thread","native":{"Kind":"item_started","TurnID":"original-turn","ItemID":"original-tail"}}')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(protocol.ManagerStoppedPayload{Reason: "original process confirmed stopped", LastSequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err := e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{
+		RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeStopped,
+		Target: protocol.Target{Type: "run", ID: run}, Payload: raw,
+	}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
+	if err != nil || op.Status != protocol.OpSucceeded {
+		t.Fatal(op, err)
+	}
+	if ended, err := e.app.ManagerRunEnded(ctx, run); !ended || err != nil {
+		t.Fatal("fixture requires confirmed physical stop", ended, err)
+	}
+	if got := e.count(`SELECT COUNT(*) FROM leases WHERE run_id='receipt-reader-run' AND status='released'`); got != 1 {
+		t.Fatal("physical stop did not release the original lease", got)
+	}
+	t.Log("physical stop confirmed and original lease released")
+	session := coordination.New(ctx, &runnerTransport{app: e.app, run: run})
+	defer func() { cancel(); <-session.Done() }()
+	th, err := session.ResumeThread(ctx, "original-thread", harness.ThreadConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event harness.Event
+	select {
+	case event = <-th.Events():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if event.OriginRunID != run || event.OriginSequence != 1 || event.ItemID != "original-tail" {
+		t.Fatal("expected same-Run historical tail", event)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	missed := make(chan store.WriteObservation, 1)
+	held := make(chan error, 1)
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
+		if o.Source.Operation == "manager.event.ack" && o.Stage == "connection_wait" && o.Outcome == "deadline_exceeded" {
+			select {
+			case missed <- o:
+				close(release)
+			default:
+			}
+		}
+	})(e.store)
+	go func() {
+		held <- e.store.Write(ctx, func(*store.Tx) error {
+			close(entered)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	<-entered
+	acknowledger := th.(harness.EventAcknowledger)
+	err = acknowledger.AcknowledgeEvent(ctx, event)
+	select {
+	case o := <-missed:
+		if o.Source.RunID != run || o.Source.EventSequence != 1 {
+			t.Fatal("unexpected timeout identity", o.Source)
+		}
+		t.Logf("writer timed out before BEGIN for original run=%s seq=%d", o.Source.RunID, o.Source.EventSequence)
+	case <-ctx.Done():
+		t.Fatal("ACK did not observe writer contention", err)
+	}
+	if holdErr := <-held; holdErr != nil {
+		t.Fatal(holdErr)
+	}
+	applied, readErr := e.app.ManagerAppliedCursor(ctx, run)
+	if err != nil || readErr != nil || applied != 1 {
+		t.Fatalf("stopped original Run could not settle its retained tail: ack=%v cursor=%d read=%v", err, applied, readErr)
+	}
+	t.Logf("stopped original Run settled its retained tail at applied cursor %d", applied)
+}
