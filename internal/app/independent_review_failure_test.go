@@ -194,3 +194,156 @@ func TestFault_IndependentReviewReplacementCannotResetFailedObligation(t *testin
 		t.Fatal("a distinctly observed candidate did not permit new work", replacement, ok)
 	}
 }
+
+func TestFault_IndependentReviewExplicitNewCandidateKeepsOriginalFailure(t *testing.T) {
+	h, runtime, issue, task := independentReviewFailureFixture(t, false)
+	observe := func(head string) {
+		t.Helper()
+		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+			_, err := tx.PutDeliveryObservationFact(t.Context(), issue.Plan.Deliveries[0], protocol.DeliveryObservation{
+				State: "open", HeadSHA: head, BaseSHA: strings.Repeat("a", 40),
+			})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldHead, newHead := strings.Repeat("b", 40), strings.Repeat("c", 40)
+	observe(oldHead)
+	run, ok := h.claimInputRun(runtime)
+	if !ok || run.TaskID != task {
+		t.Fatal(run, ok)
+	}
+	reason := protocol.WorkerFailureReason(&protocol.AgentFailure{Code: "cyberPolicy"})
+	if op := h.runAs(run, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: reason}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var spec protocol.OwnerTaskSpec
+	if err := json.Unmarshal(run.Spec, &spec); err != nil {
+		t.Fatal(err)
+	}
+	spec.Scope = "Review the newly observed candidate for the same PR"
+	change := protocol.UpdateIssueTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Spec: &spec}
+	if op := h.exec(owner, h.env("issues.update_task", taskTarget(task), change, rev(h.task(task).ControlRevision)), CanonicalOwnerTaskUpdate{}); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+		t.Fatal("rewriting the same failed candidate admitted new work", op)
+	}
+	observe(newHead)
+	if op := h.exec(owner, h.env("issues.update_task", taskTarget(task), change, rev(h.task(task).ControlRevision)), CanonicalOwnerTaskUpdate{}); op.Status != protocol.OpSucceeded {
+		t.Fatal("explicit agreement for a verified new candidate could not be admitted", op)
+	}
+	observe(oldHead)
+	if _, ok := h.claimInputRun(runtime); ok {
+		t.Fatal("a provider rollback restored the rejected execution")
+	}
+	observe(newHead)
+	next, ok := h.claimInputRun(runtime)
+	if !ok || next.TaskID != task || next.SpecVersion != run.SpecVersion+1 || h.run(run.RunID).ObservedState != protocol.RunFailed {
+		t.Fatal("a genuine new candidate rewrote the original failure", next, ok, run)
+	}
+}
+
+func TestFault_IndependentReviewApprovedRetryRecordsItsActualReport(t *testing.T) {
+	h, runtime, issue, source, _, _ := sharedReviewFixture(t)
+	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
+	task := createSharedReviewerTaskForTest(t, h, issue.IssueID)
+	review := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: task}))
+	original, ok := h.claimInputRun(runtime)
+	if !ok || original.TaskID != task {
+		t.Fatal(original, ok)
+	}
+	reason := protocol.WorkerFailureReason(&protocol.AgentFailure{Code: "server_overloaded"})
+	if op := h.runAs(original, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: reason}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	approval := h.env("actions.create", taskTarget(task), protocol.CreateActionPayload{Kind: protocol.ActionImplement, Generation: 2}, rev(h.task(task).ControlRevision))
+	if op := h.exec(owner, approval, CreateAction{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := h.exec(owner, approval, CreateAction{}); op.Error == nil || op.Error.Code != protocol.CodeDuplicateEffect {
+		t.Fatal("an unknown retry response did not name its original committed action", op)
+	}
+	run, ok := h.claimInputRun(runtime)
+	if !ok || run.TaskID != task || run.RunID == original.RunID {
+		t.Fatal(run, ok)
+	}
+	submitSharedReviewForTest(t, h, run, review, "changes_requested")
+	recorded := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+	if len(recorded.Rounds) != 1 || recorded.Rounds[0].RunID != run.RunID || recorded.Rounds[0].Result == nil ||
+		len(recorded.Rounds[0].Result.Findings) != 1 || recorded.Status != "changes_requested" ||
+		h.run(original.RunID).ObservedState != protocol.RunFailed {
+		t.Fatal("registration lost failure history or replaced the retry's real findings", recorded)
+	}
+}
+
+func TestFault_IndependentReviewHandoffRetainsOriginalRetryBudget(t *testing.T) {
+	h, runtime, issue := issueOwnerHarness(t)
+	issue.Plan.Deliveries = []protocol.IssueDelivery{{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 17, URL: "https://example.invalid/repo/pull/17"}}
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "update", protocol.UpdateIssuePayload{
+		Plan: issue.Plan, ExpectedAssignmentEpoch: issue.AssignmentEpoch,
+	}))
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		_, err := tx.PutDeliveryObservationFact(t.Context(), issue.Plan.Deliveries[0], protocol.DeliveryObservation{
+			State: "open", HeadSHA: strings.Repeat("a", 40), BaseSHA: strings.Repeat("b", 40),
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	create := func(current protocol.Issue, followUp string) (protocol.Operation, string) {
+		t.Helper()
+		p := protocol.CreateIssueTaskPayload{Title: "Independently review the exact PR candidate", ExpectedAssignmentEpoch: current.AssignmentEpoch,
+			Spec: protocol.OwnerTaskSpec{Goal: "Review the complete candidate", ReviewDeliveryID: "pr", Acceptance: []string{"Record the immutable whole-PR report"},
+				Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary},
+				AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "linux-1/beta"}}},
+		}
+		if followUp != "" {
+			p.Relations = []protocol.TaskRelation{{TaskID: followUp, Kind: protocol.RelationFollowUp}}
+		}
+		op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: current.IssueID}, p, rev(current.Revision)), CanonicalOwnerTaskCreate{})
+		var result taskResult
+		if op.Status == protocol.OpSucceeded && json.Unmarshal(op.Result, &result) != nil {
+			t.Fatal(op)
+		}
+		return op, result.TaskID
+	}
+	original, task := create(issue, "")
+	if original.Status != protocol.OpSucceeded || task == "" {
+		t.Fatal(original)
+	}
+	run := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
+	if run.TaskID != task {
+		t.Fatal(run)
+	}
+	typed := protocol.WorkerFailureReason(&protocol.AgentFailure{Code: "server_overloaded"})
+	if op := h.runAs(run, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: typed}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	current := handoffCollaboratorIssue(t, h, issue.IssueID)
+	finish := protocol.FinishIssueAssignmentPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, HandoffID: current.PendingHandoffID,
+		Reason: "Original review execution and physical stop are settled"}
+	current = canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.finish_assignment", protocol.Target{Type: "issue", ID: issue.IssueID}, finish,
+		rev(current.Revision)), HostedIssueAssignment{Finish: true}))
+	if op := h.requestAction(task, protocol.ActionImplement, 2); op.Error == nil || op.Error.Code != protocol.CodeStaleRevision {
+		t.Fatal("a successor acquired the original owner's Task", op)
+	}
+	if op, _ := create(current, ""); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+		t.Fatal("an unrelated Task restarted the original candidate", op)
+	}
+	retry, replacement := create(current, task)
+	if retry.Status != protocol.OpSucceeded || replacement == "" || replacement == task {
+		t.Fatal("the new current owner could not explicitly recover the original obligation", retry)
+	}
+	// A responsibility handoff returns the Issue to backlog. Re-admit it
+	// through its ordinary board control before the runner can claim work.
+	moveBoardIssue(t, h, canonicalTaskIssue(t, h, current.IssueID), protocol.IssueTodo)
+	as := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
+	if as.TaskID != replacement || as.RunID == run.RunID || as.Responsibility != nil && as.Responsibility.AssignmentEpoch == run.Responsibility.AssignmentEpoch {
+		t.Fatal("the retry used the wrong Task or responsibility", as, run)
+	}
+	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: typed}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if got := h.countWhere(`SELECT COUNT(*) FROM independent_review_failures WHERE run_id=? AND root_run_id=? AND retries=1`, as.RunID, run.RunID); got != 1 {
+		t.Fatal("ownership transfer reset the original retry budget", got)
+	}
+}

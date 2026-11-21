@@ -170,7 +170,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			if round.ArtifactID == "" && round.TaskID != "" {
 				target := independentReviewPRTarget(ref, o.Observation.HeadSHA, o.Observation.BaseSHA)
-				if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, round.TaskID); err != nil {
+				if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, round.TaskID, ""); err != nil {
 					return Outcome{}, err
 				} else if !allowed {
 					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "resolve the original independent review Task for this candidate")
@@ -250,7 +250,10 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				result, run, artifact, err = store.ReadSharedAcceptanceResult(ctx, tx.Q(), r, &inputRound)
 				last.AcceptanceID, last.AcceptanceVerdict = inputRound.AcceptanceID, inputRound.AcceptanceVerdict
 			} else {
-				result, run, artifact, err = store.ReadSharedReviewResult(ctx, tx.Q(), r, inputRound)
+				inputRound, err = independentReviewRetryResultRound(ctx, tx.Q(), inputRound)
+				if err == nil {
+					result, run, artifact, err = store.ReadSharedReviewResult(ctx, tx.Q(), r, inputRound)
+				}
 			}
 			if errors.Is(err, store.ErrAcceptanceReviewEvidence) {
 				if previousAcceptance == inputRound.AcceptanceID && previousVerdict != "" && previousVerdict == inputRound.AcceptanceVerdict {
@@ -268,8 +271,13 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			last.Result = result
 			if last.SupplementTaskID != "" {
 				last.SupplementRunID, last.SupplementArtifactID = run, artifact
+				last.SupplementTaskID, last.SupplementSpecVersion = inputRound.TaskID, inputRound.SpecVersion
+				last.SupplementGeneration = inputRound.ImplementGeneration
 			} else {
 				last.RunID, last.ArtifactID = run, artifact
+				last.TaskID, last.SpecVersion = inputRound.TaskID, inputRound.SpecVersion
+				last.ImplementGeneration = inputRound.ImplementGeneration
+				last.ReviewerProfile = inputRound.ReviewerProfile
 			}
 			r.Status = "changes_requested"
 			if result.Verdict == "passed" {
