@@ -332,3 +332,68 @@ func TestMessagingHistoryPagesKeepChronologicalSeekBoundaries(t *testing.T) {
 		t.Fatalf("forward page: size=%d more=%t next=%d err=%v", len(forward.Items), forward.More, forward.Next, err)
 	}
 }
+
+func TestMessagingWaitingOwnerUsesLinkedTaskIndex(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	issue := createCanonicalOwnerTestIssue(t, h)
+	task := createCanonicalTaskForTest(t, h, issue)
+	unrelated := createCanonicalTaskForTest(t, h, createCanonicalOwnerTestIssue(t, h))
+	id := messageID(t, h.exec(owner, h.env("messaging.send", protocol.Target{Type: "message"},
+		protocol.MessagingInput{Body: "Waiting for a linked decision"}, nil), MessagingCommand{Action: "send"}))
+	if op := h.associate(owner, id, issue.IssueID); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO decisions(decision_id,task_id,question,options_json,scope,version,status,created_at,updated_at)
+			VALUES('related-decision',?,'Continue?','[]','task',1,'open',0,0)`, task)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, extra := range []int{0, 10_000} {
+		if err := h.store.Write(ctx, func(tx *store.Tx) error {
+			_, err := tx.Exec(ctx, `WITH RECURSIVE n(i) AS (SELECT 1 WHERE ?>0 UNION ALL SELECT i+1 FROM n WHERE i<?)
+				INSERT INTO decisions(decision_id,task_id,question,options_json,scope,version,status,created_at,updated_at)
+				SELECT 'historical-'||i,?,'Continue?','[]','task',2,'answered',0,0 FROM n`, extra, extra, unrelated)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := h.app.MessagingRecentMessages(ctx, 0)
+		if err != nil || len(page.Items) != 1 || page.Items[0].MessageID != id || page.Items[0].Processing != "waiting_user" {
+			t.Fatalf("%d unrelated decisions: %+v, %v", extra, page, err)
+		}
+
+		if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+			keys, err := json.Marshal([]string{id})
+			if err != nil {
+				return err
+			}
+			rows, err := tx.Q().QueryContext(ctx, "EXPLAIN QUERY PLAN "+messagingProcessingSQL, string(keys))
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			var indexed bool
+			for rows.Next() {
+				var planID, parent, aux int
+				var detail string
+				if err := rows.Scan(&planID, &parent, &aux, &detail); err != nil {
+					return err
+				}
+				if strings.Contains(detail, "decisions_open_by_task (task_id=?)") {
+					t.Logf("%d unrelated decisions: %s", extra, detail)
+					indexed = true
+				}
+			}
+			if !indexed {
+				t.Errorf("%d unrelated decisions: waiting owner projection did not seek by linked task", extra)
+			}
+			return rows.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

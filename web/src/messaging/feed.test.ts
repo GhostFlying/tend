@@ -175,26 +175,109 @@ test("unrelated work adds no reads and a real publication only reads forward", a
   }
 });
 
-test("a read receipt received during the initial page survives its stale snapshot", async () => {
-  const message = { message_id: "first", sequence: 1, direction: "input", agent_read_at: 0 };
-  let emit!: (value: string) => void;
-  let completePage!: () => void;
-  const snapshot = new Promise((resolve) => {
-    completePage = () => resolve({ items: [message], next: 1, more: false });
-  });
-  const get = vi.fn(async (path: string) =>
-    path.endsWith("/first") ? { ...message, agent_read_at: 1000 } : snapshot,
-  );
-  const noteAlive = vi.fn();
+test.each(["latest", "after", "before"])(
+  "keeps read event racing an in-flight %s snapshot",
+  async (mode) => {
+    const unread = {
+      message_id: "pending",
+      sequence: mode === "before" ? 1 : 2,
+      direction: "input",
+      agent_read_at: 0,
+    };
+    const read = { ...unread, agent_read_at: 25 };
+    const anchor = {
+      message_id: "anchor",
+      sequence: mode === "before" ? 2 : 1,
+      direction: "publication",
+    };
+    let current = unread;
+    let releaseSnapshot!: () => void;
+    let requested = false;
+    let alive = 0;
+    let emit!: (frame: string) => void;
+    const page = (items: unknown[], more = false) => ({ items, next: 2, more });
+    const feed = new MessagingFeed({
+      noteAlive() {
+        alive++;
+      },
+      get: (async (path: string) => {
+        if (path.endsWith("/pending")) return current as MessagingMessage;
+        if (path.includes("latest") && mode !== "latest") return page([anchor], mode === "before");
+        if (!path.includes(mode + "=")) return page([]);
+        if (requested) return page([current]);
+        const snapshot = current;
+        requested = true;
+        await new Promise<void>((resolve) => {
+          releaseSnapshot = resolve;
+        });
+        return page([snapshot]);
+      }) as ApiClient["get"],
+      async openStream(_path, signal) {
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              emit = (frame) => controller.enqueue(new TextEncoder().encode(frame));
+              emit('event: start\ndata: {"event_seq":1}\n\n');
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        );
+      },
+    });
+    const event = (event_seq: number, kind: string) =>
+      "event: ledger\ndata: " +
+      JSON.stringify({ event_seq, kind, object_type: "message", object_id: "pending" }) +
+      "\n\n";
+    feed.start();
+    try {
+      if (mode !== "latest") {
+        await vi.waitFor(() => expect(feed.state.get().items[0]?.message_id).toBe("anchor"));
+      }
+      if (mode === "after") emit(event(2, "messaging.input"));
+      const older = mode === "before" ? feed.older() : undefined;
+      await vi.waitFor(() => expect(requested).toBe(true));
+      current = read;
+      const chunks = alive;
+      emit(event(3, "messaging.read"));
+      await vi.waitFor(() => expect(alive).toBeGreaterThan(chunks));
+      releaseSnapshot();
+      await older;
+      await vi.waitFor(
+        () =>
+          expect(
+            feed.state.get().items.find((m) => m.message_id === "pending")?.agent_read_at,
+          ).toBe(25),
+        { timeout: 450 },
+      );
+    } finally {
+      releaseSnapshot?.();
+      await feed.stop();
+    }
+  },
+);
+
+test("hiding during a queued SSE read lets resumed stream replay the read event", async () => {
+  const unread = { message_id: "m", direction: "input", sequence: 1, agent_read_at: 0 };
+  let current = unread;
+  let emit!: (frame: string) => void;
+  const opens: string[] = [];
+  const ledger =
+    'event: ledger\ndata: {"event_seq":2,"kind":"messaging.read","object_type":"message","object_id":"m"}\n\n';
   const feed = new MessagingFeed({
-    get: get as ApiClient["get"],
-    noteAlive,
-    async openStream(_path, signal) {
+    noteAlive() {},
+    get: (async (path: string) => {
+      if (path.endsWith("/m")) return current;
+      return { items: path.includes("latest") ? [current] : [], next: 1, more: false };
+    }) as ApiClient["get"],
+    async openStream(path, signal) {
+      opens.push(path);
+      const after = Number(new URL(path, "http://test.invalid").searchParams.get("after") ?? 1);
       return new Response(
         new ReadableStream({
           start(controller) {
-            emit = (text) => controller.enqueue(new TextEncoder().encode(text));
-            emit('event: start\ndata: {"event_seq":1}\n\n');
+            emit = (frame) => controller.enqueue(new TextEncoder().encode(frame));
+            emit('event: start\ndata: {"event_seq":' + after + "}\n\n");
+            if (opens.length > 1 && after < 2) emit(ledger);
             signal?.addEventListener("abort", () => controller.close(), { once: true });
           },
         }),
@@ -203,15 +286,15 @@ test("a read receipt received during the initial page survives its stale snapsho
   });
   feed.start();
   try {
-    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-    emit(
-      'event: ledger\ndata: {"event_seq":2,"kind":"messaging.read","object_type":"message","object_id":"first"}\n\n',
-    );
-    await vi.waitFor(() => expect(noteAlive).toHaveBeenCalledTimes(2));
-    completePage();
-    await vi.waitFor(() => expect(feed.state.get().items[0]?.agent_read_at).toBe(1000));
+    await vi.waitFor(() => expect(feed.state.get().items[0]?.agent_read_at).toBe(0));
+    current = { ...unread, agent_read_at: 25 };
+    emit(ledger); // Resolves the pending read; its continuation has not executed yet.
+    await feed.stop();
+    feed.start();
+    await vi.waitFor(() => expect(opens.length).toBe(2));
+    expect(opens[1]).toBe("/api/v1/messaging/events?after=1");
+    await vi.waitFor(() => expect(feed.state.get().items[0]?.agent_read_at).toBe(25));
   } finally {
-    completePage();
     await feed.stop();
   }
 });
