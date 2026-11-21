@@ -13,6 +13,7 @@ import (
 	"github.com/GhostFlying/tend/internal/harness"
 	"github.com/GhostFlying/tend/internal/harness/coordination"
 	"github.com/GhostFlying/tend/internal/protocol"
+	"github.com/GhostFlying/tend/internal/store"
 )
 
 // RunnerSession reuses the coordinator and its source/authorization semantics;
@@ -183,57 +184,34 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 	}()
 	for {
 		wake := t.app.Changes().Wait()
-		events, err := t.app.ManagerReplayEvents(ctx, t.run, t.rowCursor)
+		events, physicalEnded, err := readManagerEventBatch(ctx, t.app, t.run, t.rowCursor)
 		if err != nil {
 			return nil, err
 		}
-		if len(events) == 0 {
-			ended, err := t.app.ManagerTransportEnded(ctx, t.run)
-			if err != nil {
-				return nil, err
-			}
-			if ended {
-				// A final event may have committed between the first empty read
-				// and the physical end. Terminal Runs cannot append new events.
-				events, err = t.app.ManagerReplayEvents(ctx, t.run, t.rowCursor)
-				if err != nil {
-					return nil, err
-				}
-				if len(events) == 0 {
-					return nil, io.EOF
-				}
-			}
-		}
 		if len(events) > 0 {
-			physicalEnded, err := t.app.ManagerRunEnded(ctx, t.run)
-			if err != nil {
-				return nil, err
-			}
 			out := make([]coordination.Event, 0, len(events))
-			for _, e := range events {
+			for i, event := range events {
 				var item coordination.Event
-				if err = json.Unmarshal(e.Body, &item); err != nil {
+				if err := json.Unmarshal(event.Body, &item); err != nil {
 					return nil, err
 				}
-				t.sequence++
-				item.Sequence = t.sequence
-				item.SourceRunID = e.RunID
-				item.SourceSequence = e.Sequence
-				item.Historical = e.RunID != t.run || physicalEnded
-				if item.Disconnected && !item.Historical {
-					t.mu.Lock()
-					t.streamEnded = true
-					t.mu.Unlock()
-				}
-				t.rowCursor = e.Cursor
-				t.mu.Lock()
-				if t.origins == nil {
-					t.origins = map[int64]managerEventOrigin{}
-				}
-				t.origins[item.Sequence] = managerEventOrigin{run: e.RunID, sequence: e.Sequence, historical: item.Historical}
-				t.mu.Unlock()
+				item.Sequence = t.sequence + int64(i) + 1
+				item.SourceRunID = event.RunID
+				item.SourceSequence = event.Sequence
+				item.Historical = event.RunID != t.run || physicalEnded
 				out = append(out, item)
 			}
+			t.mu.Lock()
+			if t.origins == nil {
+				t.origins = map[int64]managerEventOrigin{}
+			}
+			for _, item := range out {
+				t.origins[item.Sequence] = managerEventOrigin{run: item.SourceRunID, sequence: item.SourceSequence, historical: item.Historical}
+				t.streamEnded = t.streamEnded || item.Disconnected && !item.Historical
+			}
+			t.sequence = out[len(out)-1].Sequence
+			t.rowCursor = events[len(events)-1].Cursor
+			t.mu.Unlock()
 			return out, nil
 		}
 		select {
@@ -243,6 +221,60 @@ func (t *runnerTransport) Events(ctx context.Context, _ int64) (eventsOut []coor
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+type managerEventReader interface {
+	ManagerReplayEvents(context.Context, string, int64) ([]app.ManagerReplayEvent, error)
+	ManagerTransportEnded(context.Context, string) (bool, error)
+	ManagerRunEnded(context.Context, string) (bool, error)
+}
+
+// Read operations can be retried without changing the cursor or issuing a
+// native command. A real disconnect or EOF keeps its existing meaning.
+func readManagerEventBatch(ctx context.Context, source managerEventReader, run string, after int64) ([]app.ManagerReplayEvent, bool, error) {
+	const attempts = 3
+	for attempt := 0; ; attempt++ {
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		events, ended, err := loadManagerEventBatch(readCtx, source, run, after)
+		cancel()
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		if err == nil || !store.IsTransientSQLite(err) {
+			return events, ended, err
+		}
+		if attempt == attempts-1 {
+			return nil, false, fmt.Errorf("manager event stream read failed at cursor %d: %w", after, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func loadManagerEventBatch(ctx context.Context, source managerEventReader, run string, after int64) ([]app.ManagerReplayEvent, bool, error) {
+	events, err := source.ManagerReplayEvents(ctx, run, after)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(events) == 0 {
+		ended, err := source.ManagerTransportEnded(ctx, run)
+		if err != nil || !ended {
+			return nil, false, err
+		}
+		// A final event may commit before the terminal observation.
+		events, err = source.ManagerReplayEvents(ctx, run, after)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(events) == 0 {
+			return nil, true, io.EOF
+		}
+	}
+	ended, err := source.ManagerRunEnded(ctx, run)
+	return events, ended, err
 }
 
 func (t *runnerTransport) Acknowledge(ctx context.Context, e coordination.Event) error {
