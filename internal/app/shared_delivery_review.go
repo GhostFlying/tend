@@ -303,6 +303,13 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 					return Outcome{}, err
 				}
 			} else {
+				active, err := sharedReviewRetryActive(ctx, tx.Q(), last)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if active {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "settle the approved review retry before moving the review to waiting")
+				}
 				last, err = independentReviewRetryResultRound(ctx, tx.Q(), r, last)
 				if err != nil {
 					return Outcome{}, err
