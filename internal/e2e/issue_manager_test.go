@@ -207,21 +207,30 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 		return time.Now()
 	}
-	s := newServerWithOptions(t, time.Second*10, now, app.WithFollowups(true))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	const ackMarker = "writer-deadline-item"
+	var recoveredACK <-chan store.WriteSource
+	openFixture := serverFixtureTemplate.Open
+	if archiveMode == "ack_writer" {
+		var observe func(*store.Store)
+		recoveredACK, observe = holdManagerWriterAtACK(ctx, ackMarker)
+		openFixture = func(openCtx context.Context, path string, clock func() time.Time) (*store.Store, error) {
+			st, err := serverFixtureTemplate.Open(openCtx, path, clock)
+			if err == nil {
+				observe(st)
+			}
+			return st, err
+		}
+	}
+	s := startServer(t, 10*time.Second, filepath.Join(t.TempDir(), "tend.db"), now, openFixture, app.WithFollowups(true))
 	archiveFault := archiveMode == "foreign" || archiveMode == "receipt"
 	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated"
 	var migration sync.Once
 	if delivery {
 		s.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"tend"}, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	var wg sync.WaitGroup
-	const ackMarker = "writer-deadline-item"
-	var recoveredACK <-chan store.WriteSource
-	if archiveMode == "ack_writer" {
-		recoveredACK = holdManagerWriterAtACK(ctx, s, ackMarker)
-	}
 	category := protocol.DefaultIssueManagerCategory
 	zero := int64(0)
 	execute := func(op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
