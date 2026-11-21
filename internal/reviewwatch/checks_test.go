@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGitHubChecksAreBoundToHeadAndKeepSkippedDistinct(t *testing.T) {
@@ -73,10 +74,8 @@ func TestProviderErrorsHaveSafeActionableCategories(t *testing.T) {
 }
 
 func TestCodebaseServerKeepsFrozenBaseApartFromLiveTarget(t *testing.T) {
-	calls := 0
-	c := New(Config{IncludeChecks: true, Exec: func(context.Context, string, []string) ([]byte, error) {
-		calls++
-		if calls == 1 {
+	c := New(Config{IncludeChecks: true, Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[3] == "get" {
 			return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"merged","MergeCommitId":"merge","TargetBranch":{"Commit":{"Id":"advanced-target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"frozen-base"}]}}}`), nil
 		}
 		return nil, errors.New("provider status unavailable")
@@ -131,5 +130,74 @@ func TestGitHubLegacyQueryDoesNotRequestChecks(t *testing.T) {
 	}})
 	if _, err := c.Observe(t.Context(), Ref{Provider: GitHub, Repository: "example/project", Number: 7}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodebaseNamedChecksPreserveRunnerCandidateBase(t *testing.T) {
+	c := New(Config{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[3] == "get" {
+			return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"open","TargetBranch":{"Name":"integration","Commit":{"Id":"live-target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"patchset-base"}]}}}`), nil
+		}
+		return []byte(`{"status":"success","data":{"merge_request":{"number":7,"status":"open","source_commit_id":"head"},"check_runs":{"total_count":1,"items":[{"Name":"required","Status":"completed","Conclusion":"success"}]}}}`), nil
+	}})
+	ref := Ref{Provider: Codebase, Repository: "example/project", Number: 7}
+	before, err := c.Observe(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref.IncludeChecks = true
+	during, err := c.Observe(t.Context(), ref)
+	if err != nil || during.CI == nil || len(during.CI.Checks) != 1 || during.BaseSHA != "live-target" ||
+		before.BaseSHA != during.BaseSHA || before.HeadSHA != during.HeadSHA || before.TargetSHA != during.TargetSHA {
+		t.Fatal("requesting check evidence changed existing candidate metadata", before, during, err)
+	}
+}
+
+func TestCodebaseExplicitChecksKeepSeparateMergeLineage(t *testing.T) {
+	c := New(Config{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[2] == "commit" {
+			return []byte(`{"status":"success","data":{"ref_name":"target..merge","page_number":1,"commits":[]}}`), nil
+		}
+		if args[3] == "get" {
+			return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"merged","MergeCommitId":"merge","TargetBranch":{"Name":"integration","Commit":{"Id":"target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"base"}]}}}`), nil
+		}
+		return []byte(`{"status":"success","data":{"merge_request":{"number":7,"status":"merged","source_commit_id":"head"},"check_runs":{"total_count":1,"items":[{"Name":"required","Status":"completed","Conclusion":"success"}]}}}`), nil
+	}})
+	o, err := c.Observe(t.Context(), Ref{Provider: Codebase, Repository: "example/project", Number: 7, IncludeChecks: true})
+	if err != nil || !o.TargetContainsMerge || o.LineageErrorKind != "" || o.BaseSHA != "target" ||
+		o.CI == nil || len(o.CI.Checks) != 1 {
+		t.Fatal("check enrichment lost the independent lineage proof or changed legacy base", o, err)
+	}
+}
+
+func TestCodebaseNamedCheckReadSurvivesIndependentLineageFailure(t *testing.T) {
+	for _, server := range []bool{true, false} {
+		t.Run(map[bool]string{true: "server", false: "runner"}[server], func(t *testing.T) {
+			statusRead := make(chan struct{})
+			c := New(Config{IncludeChecks: server, Timeout: 5 * time.Second, Exec: func(ctx context.Context, _ string, args []string) ([]byte, error) {
+				switch {
+				case args[2] == "commit":
+					select {
+					case <-statusRead:
+						return nil, errors.New("merge lineage service is unavailable")
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				case args[3] == "get":
+					return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"merged","MergeCommitId":"merge","TargetBranch":{"Name":"integration","Commit":{"Id":"target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"base"}]}}}`), nil
+				case args[3] == "status":
+					close(statusRead)
+					return []byte(`{"status":"success","data":{"merge_request":{"number":7,"status":"merged","source_commit_id":"head"},"check_runs":{"total_count":1,"items":[{"Name":"required","Status":"completed","Conclusion":"success"}]}}}`), nil
+				default:
+					return nil, errors.New("unexpected provider operation")
+				}
+			}})
+			o, err := c.Observe(t.Context(), Ref{Provider: Codebase, Repository: "example/project", Number: 7, IncludeChecks: !server})
+			expectedBase := map[bool]string{true: "base", false: "target"}[server]
+			if err != nil || o.TargetContainsMerge || o.LineageErrorKind != "query_failed" || o.BaseSHA != expectedBase ||
+				o.CI == nil || o.CI.ErrorKind != "" || len(o.CI.Checks) != 1 || o.CI.Checks[0].Conclusion != "success" {
+				t.Fatal("lineage failure held the separately observed named check", o, err)
+			}
+		})
 	}
 }

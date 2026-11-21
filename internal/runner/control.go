@@ -212,7 +212,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		capabilities = append(capabilities, protocol.CapabilityAgentInventory)
 	}
 	if r.cfg.DeliveryObserver != nil && len(r.cfg.DeliveryProviders) > 0 {
-		capabilities = append(capabilities, protocol.CapabilityDeliveryCandidateIdentity, protocol.CapabilityDeliveryTargetLineage)
+		capabilities = append(capabilities, protocol.CapabilityDeliveryCandidateIdentity, protocol.CapabilityDeliveryTargetLineage, protocol.CapabilityDeliveryPRWaitEvidence)
 	}
 	for _, provider := range r.cfg.DeliveryProviders {
 		if r.cfg.DeliveryObserver != nil {

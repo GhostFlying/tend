@@ -5650,6 +5650,12 @@
     "DeliveryCI": {
       "additionalProperties": false,
       "properties": {
+        "attempt_checks": {
+          "items": {
+            "$ref": "#/definitions/DeliveryCheck"
+          },
+          "type": "array"
+        },
         "checks": {
           "anyOf": [
             {
@@ -5687,10 +5693,22 @@
     "DeliveryCheck": {
       "additionalProperties": false,
       "properties": {
+        "app": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
         "conclusion": {
           "type": "string"
         },
+        "id": {
+          "type": "string"
+        },
         "name": {
+          "type": "string"
+        },
+        "source": {
           "type": "string"
         },
         "state": {
@@ -5698,6 +5716,9 @@
         },
         "url": {
           "type": "string"
+        },
+        "workflow_run_id": {
+          "type": "integer"
         }
       },
       "required": [
@@ -5961,6 +5982,9 @@
         },
         "target_contains_merge": {
           "type": "boolean"
+        },
+        "target_ref": {
+          "type": "string"
         },
         "target_sha": {
           "type": "string"
@@ -7445,6 +7469,9 @@
     "ExternalWait": {
       "additionalProperties": false,
       "properties": {
+        "condition": {
+          "$ref": "#/definitions/PRWaitCondition"
+        },
         "created_at_ms": {
           "type": "integer"
         },
@@ -7480,6 +7507,15 @@
         },
         "observed_target": {
           "type": "string"
+        },
+        "observed_target_ref": {
+          "type": "string"
+        },
+        "pr_binding": {
+          "$ref": "#/definitions/IssueDelivery"
+        },
+        "pr_evidence": {
+          "$ref": "#/definitions/PRWaitEvidence"
         },
         "reason": {
           "type": "string"
@@ -9944,6 +9980,9 @@
         },
         "target_contains_merge": {
           "type": "boolean"
+        },
+        "target_ref": {
+          "type": "string"
         },
         "target_sha": {
           "type": "string"
@@ -15538,6 +15577,95 @@
         "mounts"
       ],
       "title": "OwnerTaskWorkspace",
+      "type": "object"
+    },
+    "PRWaitCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target_ref": {
+          "type": "string"
+        },
+        "target_sha": {
+          "type": "string"
+        },
+        "workflow_run_id": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "PRWaitCondition",
+      "type": "object"
+    },
+    "PRWaitEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "check": {
+          "$ref": "#/definitions/DeliveryCheck"
+        },
+        "fact_revision": {
+          "type": "integer"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "observed_at_ms": {
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/IssueDeliveryProvider"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "target_ref": {
+          "type": "string"
+        },
+        "target_sha": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "repository",
+        "number",
+        "fact_revision",
+        "observed_at_ms",
+        "reason",
+        "state"
+      ],
+      "title": "PRWaitEvidence",
       "type": "object"
     },
     "PendingClarification": {
@@ -22839,6 +22967,9 @@
     "WaitExternalPayload": {
       "additionalProperties": false,
       "properties": {
+        "condition": {
+          "$ref": "#/definitions/PRWaitCondition"
+        },
         "deadline_at_ms": {
           "type": "integer"
         },

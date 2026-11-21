@@ -528,7 +528,7 @@ func commandUsage(prefix []string) string {
 		out.WriteString("\nRead-only audit queries: see docs/operations/audit-ledger-queries.md.\n")
 	}
 	if name == "task" || name == "task resume-wait" {
-		out.WriteString("\nExternal waits: task waits <id> [--run <run-id>] [--status <status>] reads the recorded condition, physical-stop status and recovery action. task resume-wait <id> --revision <current> --data '{\"wait_id\":\"<original wait>\",\"reason\":\"Inspect the existing outcome\"}' resumes judgment without repeating the external operation. Actual stop still precedes slot release. Keep the original Envelope/request ID for an unknown response.\n")
+		out.WriteString("\nExternal waits: task waits <id> [--run <run-id>] [--status <status>] reads the recorded condition, PR provider evidence, physical-stop status and recovery action. task resume-wait <id> --revision <current> --data '{\"wait_id\":\"<original wait>\",\"reason\":\"Inspect the existing outcome\"}' resumes judgment without repeating the external operation. Actual stop still precedes slot release. Keep the original Envelope/request ID for an unknown response.\n")
 	}
 	if name == "task" || name == "observation show" {
 		out.WriteString("\nDelivery authorization is a top-level server-read binding, not a field in task spec. Workers use their existing run-scoped read_observation tool to inspect it without owner credentials. A missing legacy field is unknown, not proof that authorization was granted.\n")

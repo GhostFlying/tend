@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 type codebaseActor struct {
@@ -34,6 +36,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 				Status, URL, UpdatedAt, MergedAt, ClosedAt, MergeCommitId string
 				MergedBy, ClosedBy                                        *codebaseActor
 				SourceBranch, TargetBranch                                *struct {
+					Name   string
 					Commit *struct {
 						ID string `json:"Id"`
 					}
@@ -75,6 +78,9 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
 	out := Observation{State: mr.Status, URL: mr.URL, UpdatedAt: mr.UpdatedAt, MergedAt: mr.MergedAt, ClosedAt: mr.ClosedAt, MergeSHA: mr.MergeCommitId, MergedBy: mr.MergedBy.actor()}
+	if mr.TargetBranch != nil {
+		out.TargetRef = mr.TargetBranch.Name
+	}
 	if mr.TargetBranch != nil && mr.TargetBranch.Commit != nil {
 		if !c.cfg.IncludeChecks {
 			out.BaseSHA = mr.TargetBranch.Commit.ID
@@ -100,7 +106,26 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	if mr.Status == Closed {
 		out.ClosedBy = mr.ClosedBy.actor()
 	}
-	if c.cfg.IncludeChecks && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
+	readStatus := c.cfg.IncludeChecks || ref.IncludeChecks
+	readLineage := readStatus && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge
+	collectStatus := func() {
+		if err := c.codebaseChecks(ctx, ref, &out); err != nil {
+			kind := "query_failed"
+			var failure *Error
+			if errors.As(err, &failure) {
+				kind = failure.Kind
+			}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				kind = "timeout"
+			}
+			out.CI = &protocol.DeliveryCI{HeadSHA: out.HeadSHA, State: "unknown", Checks: []protocol.DeliveryCheck{}, ErrorKind: kind}
+		}
+	}
+	// The candidate is already known. Check and lineage reads each get the
+	// same remaining provider time budget.
+	var status sync.WaitGroup
+	if readLineage {
+		status.Go(collectStatus)
 		confirmed, err := c.codebaseLineage(ctx, ref, out.TargetSHA, out.MergeSHA)
 		if err != nil {
 			out.LineageErrorKind = "query_failed"
@@ -114,20 +139,10 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		} else {
 			out.TargetContainsMerge = confirmed
 		}
+	} else if readStatus {
+		collectStatus()
 	}
-	if c.cfg.IncludeChecks {
-		if err := c.codebaseChecks(ctx, ref, &out); err != nil {
-			kind := "query_failed"
-			var failure *Error
-			if errors.As(err, &failure) {
-				kind = failure.Kind
-			}
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				kind = "timeout"
-			}
-			out.CI = &protocol.DeliveryCI{HeadSHA: out.HeadSHA, State: "unknown", Checks: []protocol.DeliveryCheck{}, ErrorKind: kind}
-		}
-	}
+	status.Wait()
 	return out, nil
 }
 
@@ -183,7 +198,7 @@ func (c *Client) codebaseChecks(ctx context.Context, ref Ref, out *Observation) 
 	unknown, pending, failed, passed := false, false, false, false
 	for _, r := range checks.Items {
 		state, conclusion := strings.ToLower(r.Status), strings.ToLower(r.Conclusion)
-		out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Name: r.Name, State: state, Conclusion: conclusion, URL: r.DetailsURL})
+		out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Source: "codebase_check_run", Name: r.Name, State: state, Conclusion: conclusion, URL: r.DetailsURL})
 		if state == "queued" || state == "in_progress" {
 			pending = true
 			continue

@@ -50,6 +50,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	now := x.Now.UnixMilli()
+	prWaitEvidence := slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryPRWaitEvidence)
 	var selected *store.DeliveryObservationRow
 	var selectedDelivery protocol.IssueDelivery
 	var selectedItem protocol.WorkItem
@@ -83,8 +84,23 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			if reading {
 				continue
 			}
-			if !row.RefreshRequested && (item.Status == "closed" || row.Observation.State == "merged" || row.Observation.State == "closed") {
-				continue
+			if !row.RefreshRequested && (item.Status == "closed" || oneOf(row.Observation.State, "closed", "merged")) {
+				waiting, err := hasPRDeliveryWait(ctx, tx.Q(), item.WorkItemID, delivery.DeliveryID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if !waiting {
+					continue
+				}
+			}
+			if !prWaitEvidence {
+				preferred, err := preferredPRDeliveryReader(ctx, tx.Q(), delivery, now)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if preferred {
+					continue
+				}
 			}
 			if selected == nil || row.NextCheckAt < selected.NextCheckAt {
 				selected = &row
@@ -136,7 +152,16 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='claimed',event_id=?,updated_at=? WHERE issue_id=? AND delivery_id=?`, eventID, now, selectedItem.WorkItemID, selectedDelivery.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
-	result.Assignments = append(result.Assignments, protocol.DeliveryAssignment{TargetLineage: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryTargetLineage), CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity), WorkItemID: selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce})
+	assignment := protocol.DeliveryAssignment{PRWaitEvidence: prWaitEvidence, TargetLineage: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryTargetLineage),
+		CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity),
+		WorkItemID:        selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce}
+	if prWaitEvidence {
+		assignment.PRChecks, assignment.CheckAttempts, err = deliveryPRObservationNeeds(ctx, tx.Q(), selectedDelivery)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	result.Assignments = append(result.Assignments, assignment)
 	event := deliveryChanged(selectedItem, selected.Observation)
 	event.Kind = "work_item.delivery_query_started"
 	return Outcome{Result: result, Events: append(events, event)}, nil
@@ -301,6 +326,9 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if p.Snapshot != nil {
 		row.Observation.DeliverySnapshot = *p.Snapshot
 		row.Observation.CheckedAt = x.Now.UnixMilli()
+		if p.Snapshot.State == "merged" && p.Snapshot.LineageErrorKind != "" {
+			row.Observation.ErrorKind = p.Snapshot.LineageErrorKind
+		}
 	}
 	row.Nonce = ""
 	row.QueryUntil = 0
@@ -346,8 +374,8 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		}
 	}
 	status, reason := "completed", "observation changed"
-	if p.ErrorKind != "" {
-		status, reason = "failed", p.ErrorKind
+	if row.Observation.ErrorKind != "" {
+		status, reason = "failed", row.Observation.ErrorKind
 	} else if reflect.DeepEqual(previous.DeliverySnapshot, row.Observation.DeliverySnapshot) {
 		status, reason = "not_dispatched", "observation unchanged"
 	}
@@ -379,7 +407,14 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	events = append(events, sharedEvents...)
-	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: events}, nil
+	if err := capturePRWaits(ctx, x, tx, delivery); err != nil {
+		return Outcome{}, err
+	}
+	merged, err := deliveryMergeEvents(ctx, x, tx, delivery, row.Observation.State)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: append(events, merged...)}, nil
 }
 
 func validateDeliveryReport(p protocol.DeliveryReportPayload) error {

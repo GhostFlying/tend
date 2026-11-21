@@ -2766,3 +2766,24 @@ GitHub 合入回执及 tree 核对后，下批从已验证截止点开始。
 Tend 的通用负责人指令遵循实际仓库和目标分支规则。集成批次不改变 Issue 交付
 语义、部署授权或升级来源。见 [实施计划](plans/integration-promotion.md) 和
 [操作说明](operations/integration-promotion.md)。
+
+## D266：PR 观测与一次性 Agent 订阅
+
+服务端与 runner 的 PR provider 回执归入原交付账本，正常刷新 Issue 视图、候选和交付守卫。
+普通查询、PR 元数据、检查和候选变化不进入通用 Agent 通知。正式审阅、工作结果、人类
+输入和经过原授权验证的交付结算继续使用各自的业务入口。
+
+原 Run 可使用外部等待为已注册的交付订阅一项可验证的 PR 条件。命名检查和冲突订阅固定
+完整 head、目标 ref 与目标 commit。目标分支移动只有在显式订阅该 ref 时按原基线求值，
+合并和关闭可按原 PR 身份各自订阅。检查结果绑定 provider 及可选的来源、应用、运行和
+attempt。GitHub 指定 attempt 从原工作流的该次执行独立读取，按 job、head 和工作流
+身份验证，即使最新 rollup 已显示另一次执行。普通检查继续读取当前 rollup。PR 状态和
+目标分支事实独立于合并 lineage，有授权的交付结算仍要求实际 lineage。缺失、截断和歧义
+继续保持未知。候选变化只失效绑定该候选的等待，首次匹配证据与 provider 回执一同落账。
+共享查询在具备所需能力且连接有效的 runner 可接收时优先交给该 runner。普通旧代查询
+在无合适 runner 时继续保留可核实的事实。附加检查读取沿用原 provider 的候选 base。
+
+已知命中的条件返回给当前 Run；其他等待按原物理停止释放 slot 后接续相同 Task。继续
+事件包含订阅与证据身份，可沿原 Task 查询、恢复和取消。用户输入保留其原有通道。PR
+订阅只有显式 deadline，没有默认提醒。旧等待、回执及许可边界保持原约定。
+见 [实施计划](plans/pr-external-waits.md)。

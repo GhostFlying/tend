@@ -56,13 +56,18 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		observed, observeErr := r.cfg.DeliveryObserver.Observe(ctx, reviewwatch.Ref{Provider: string(assignment.Delivery.Provider), Repository: assignment.Delivery.Repository, Number: assignment.Delivery.Number})
+		observed, observeErr := r.cfg.DeliveryObserver.Observe(ctx, reviewwatch.Ref{Provider: string(assignment.Delivery.Provider), Repository: assignment.Delivery.Repository, Number: assignment.Delivery.Number, IncludeChecks: assignment.PRChecks, PreservePartial: assignment.PRWaitEvidence, CheckAttempts: assignment.CheckAttempts})
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		report := protocol.DeliveryReportPayload{InstanceID: r.instanceID, WorkItemID: assignment.WorkItemID, DeliveryID: assignment.Delivery.DeliveryID, Generation: assignment.Generation, Nonce: assignment.Nonce}
 		if observeErr == nil {
 			report.Snapshot = &protocol.DeliverySnapshot{Draft: observed.Draft, State: observed.State, HeadSHA: observed.HeadSHA, MergeSHA: observed.MergeSHA, URL: observed.URL, ProviderUpdatedAt: observed.UpdatedAt, MergedAt: observed.MergedAt, ClosedAt: observed.ClosedAt, MergedBy: deliveryActor(observed.MergedBy), ClosedBy: deliveryActor(observed.ClosedBy)}
+			if assignment.PRWaitEvidence {
+				report.Snapshot.TargetRef = observed.TargetRef
+				report.Snapshot.CI = observed.CI
+				report.Snapshot.LineageErrorKind = observed.LineageErrorKind
+			}
 			if assignment.TargetLineage {
 				report.Snapshot.TargetSHA = observed.TargetSHA
 				report.Snapshot.TargetContainsMerge = observed.TargetContainsMerge

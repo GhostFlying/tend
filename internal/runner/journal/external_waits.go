@@ -32,7 +32,7 @@ func (j *Journal) RecordExternalWait(ctx context.Context, run string, v *protoco
 			if err := json.Unmarshal([]byte(prior), &old); err != nil {
 				return err
 			}
-			if old.WaitID != v.WaitID || old.WaitExternalPayload != v.WaitExternalPayload {
+			if old.WaitID != v.WaitID || !old.WaitExternalPayload.Equal(v.WaitExternalPayload) {
 				return errors.New("journal: external wait identity changed")
 			}
 			return nil
