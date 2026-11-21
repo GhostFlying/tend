@@ -64,6 +64,12 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if w.spec.IndependentReview() {
+		if validRootTurn(a, w.st.Turn) && a.RootTurn.State == "failed" && a.RootTurn.Operations == "settled" {
+			return &harness.TerminalWorkerFailure{Evidence: protocol.AgentFailure{Code: a.RootTurn.ErrorCode}}
+		}
+		return errors.New("orca: independent review failed without typed terminal evidence")
+	}
 	if w.st.Send != "" {
 		// Settle the previous prompt under its own identity before creating a
 		// distinct recovery action. send deliberately replays saved text.

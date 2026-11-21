@@ -168,6 +168,14 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			if err != nil {
 				return Outcome{}, err
 			}
+			if round.ArtifactID == "" && round.TaskID != "" {
+				target := independentReviewPRTarget(ref, o.Observation.HeadSHA, o.Observation.BaseSHA)
+				if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, round.TaskID); err != nil {
+					return Outcome{}, err
+				} else if !allowed {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "resolve the original independent review Task for this candidate")
+				}
+			}
 			// A completed report already declares its actual candidate. Explicit
 			// acceptance imports retain their original evidence/supplement path.
 			if round.ArtifactID != "" && round.AcceptanceID == "" && round.ReviewerRole != protocol.RoleAccept {

@@ -143,6 +143,25 @@ func (s WorkerSpec) AttachmentOnly() bool {
 	return s.AttachOriginal || s.RetainedResume != nil
 }
 
+// IndependentReview identifies the declared worker role or explicit report obligation.
+func (s WorkerSpec) IndependentReview() bool {
+	if s.Role == protocol.RoleAccept {
+		return true
+	}
+	var review briefSpec
+	return json.Unmarshal(s.Spec, &review) == nil && (review.ReviewArtifactID != "" || review.ReviewDeliveryID != "")
+}
+
+// TerminalWorkerFailure retains the provider classification of a failed turn.
+// The worker's physical release still uses its existing ownership boundary.
+type TerminalWorkerFailure struct {
+	Evidence protocol.AgentFailure
+}
+
+func (e *TerminalWorkerFailure) Error() string {
+	return protocol.WorkerFailureReason(&e.Evidence)
+}
+
 // WorkerResult is how a worker ended.
 type WorkerResult struct {
 	Result *protocol.ArtifactPayload
