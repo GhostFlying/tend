@@ -21,6 +21,7 @@ type independentReviewFailure struct {
 	role                              protocol.RunRole
 	retries                           int
 	specVersion                       int64
+	assignmentEpoch                   int64
 	retryAction                       string
 }
 
@@ -105,8 +106,9 @@ func recordIndependentReviewFailure(ctx context.Context, x *Exec, tx *store.Tx, 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO independent_review_failures(run_id,task_id,role,artifact_id,reason,root_run_id,retries)
-		VALUES(?,?,?,?,?,?,?)`, rc.run.RunID, rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID, reason, root, retries); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO independent_review_failures(run_id,task_id,role,artifact_id,reason,root_run_id,retries,issue_assignment_epoch)
+		SELECT ?,?,?,?,?,?,?,c.assignment_epoch FROM task_work_item_owners o JOIN issue_controls c ON c.issue_id=o.work_item_id WHERE o.task_id=?`,
+		rc.run.RunID, rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID, reason, root, retries, rc.task.TaskID); err != nil {
 		return nil, err
 	}
 	f, err := pendingIndependentReviewFailure(ctx, tx.Q(), rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID, rc.action.TargetSpecVersion)
@@ -119,7 +121,7 @@ func recordIndependentReviewFailure(ctx context.Context, x *Exec, tx *store.Tx, 
 
 func pendingIndependentReviewFailure(ctx context.Context, q store.Querier, task string, role protocol.RunRole, artifact string, specVersion int64) (*independentReviewFailure, error) {
 	f := &independentReviewFailure{task: task, role: role, artifact: artifact}
-	err := q.QueryRowContext(ctx, `SELECT f.run_id,f.root_run_id,f.reason,f.retries,COALESCE(f.retry_action_id,''),CASE WHEN f.task_id=? THEN a.target_spec_version ELSE retry.target_spec_version END
+	err := q.QueryRowContext(ctx, `SELECT f.run_id,f.root_run_id,f.reason,f.retries,COALESCE(f.retry_action_id,''),f.issue_assignment_epoch,CASE WHEN f.task_id=? THEN a.target_spec_version ELSE retry.target_spec_version END
 		FROM independent_review_failures f JOIN runs r USING(run_id) JOIN plan_actions a USING(action_id)
 		JOIN independent_review_failures root ON root.run_id=f.root_run_id
 		LEFT JOIN plan_actions retry ON retry.action_id=f.retry_action_id
@@ -127,7 +129,7 @@ func pendingIndependentReviewFailure(ctx context.Context, q store.Querier, task 
 		  AND ((f.task_id=? AND (?=0 OR a.target_spec_version=?))
 		    OR (retry.task_id=? AND (?=0 OR retry.target_spec_version=?)))
 		ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`, task, role, artifact, task, specVersion, specVersion, task, specVersion, specVersion).
-		Scan(&f.run, &f.root, &f.reason, &f.retries, &f.retryAction, &f.specVersion)
+		Scan(&f.run, &f.root, &f.reason, &f.retries, &f.retryAction, &f.assignmentEpoch, &f.specVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -345,20 +347,30 @@ func handoffIndependentReviewRetry(ctx context.Context, x *Exec, q store.Querier
 		var original independentReviewTarget
 		err = q.QueryRowContext(ctx, `SELECT target_key,head_sha,base_sha FROM independent_review_run_targets WHERE run_id=?`, f.run).
 			Scan(&original.key, &original.head, &original.base)
-		if errors.Is(err, sql.ErrNoRows) || err == nil && original != target {
+		if errors.Is(err, sql.ErrNoRows) || err == nil && !matchesIndependentReviewRetryTarget(original, target) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		current, err := store.TaskOwnerContractCurrent(ctx, q, source.TaskID)
-		if err != nil || current {
+		if err != nil {
 			return nil, err
+		}
+		if current && issue.AssignmentEpoch <= f.assignmentEpoch {
+			continue
 		}
 		if selected != nil {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "name one original failed review in the follow-up")
 		}
-		if err := authorizeIndependentReviewRetry(ctx, x, q, source, *f); err != nil {
+		approval := *f
+		if approval.retryAction != "" {
+			if _, err := unclaimedIndependentReviewAction(ctx, q, approval.retryAction); err != nil {
+				return nil, err
+			}
+			approval.retryAction = ""
+		}
+		if err := authorizeIndependentReviewRetry(ctx, x, q, source, approval); err != nil {
 			return nil, err
 		}
 		selected = f
@@ -366,15 +378,30 @@ func handoffIndependentReviewRetry(ctx context.Context, x *Exec, q store.Querier
 	return selected, nil
 }
 
-func consumeIndependentReviewRetry(ctx context.Context, tx *store.Tx, failure *independentReviewFailure, actions []actionResult) error {
+func consumeIndependentReviewRetry(ctx context.Context, x *Exec, tx *store.Tx, failure *independentReviewFailure, actions []actionResult) error {
 	if failure == nil {
 		return nil
 	}
 	if len(actions) != 1 {
 		return protocol.Errorf(protocol.CodeInvalidTransition, "an independent review approval requires exactly one execution action")
 	}
-	result, err := tx.Exec(ctx, `UPDATE independent_review_failures SET retry_action_id=? WHERE run_id=? AND retry_action_id IS NULL`,
-		actions[0].ActionID, failure.run)
+	if failure.retryAction != "" {
+		original, err := unclaimedIndependentReviewAction(ctx, tx.Q(), failure.retryAction)
+		if err != nil {
+			return err
+		}
+		if original.Status == protocol.ActionPending {
+			if err := tx.SetActionStatus(ctx, original.ActionID, protocol.ActionSuperseded, x.Now.UnixMilli()); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=json_set(trigger_json,'$.original_review_retry_action_id',?) WHERE action_id=?`,
+			original.ActionID, actions[0].ActionID); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(ctx, `UPDATE independent_review_failures SET retry_action_id=? WHERE run_id=? AND COALESCE(retry_action_id,'')=?`,
+		actions[0].ActionID, failure.run, failure.retryAction)
 	if err != nil {
 		return err
 	}
@@ -386,4 +413,20 @@ func consumeIndependentReviewRetry(ctx context.Context, tx *store.Tx, failure *i
 		return protocol.Errorf(protocol.CodeStaleRevision, "the original review retry has already been decided")
 	}
 	return nil
+}
+
+func unclaimedIndependentReviewAction(ctx context.Context, q store.Querier, action string) (store.ActionRow, error) {
+	var a store.ActionRow
+	var err error
+	if a, err = store.GetAction(ctx, q, action); err != nil {
+		return a, err
+	}
+	var claimed bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE action_id=?)`, action).Scan(&claimed); err != nil {
+		return a, err
+	}
+	if claimed || (a.Status != protocol.ActionPending && a.Status != protocol.ActionSuperseded && a.Status != protocol.ActionCancelled) {
+		return a, protocol.Errorf(protocol.CodeInvalidTransition, "settle the original approved retry before arranging another execution")
+	}
+	return a, nil
 }
