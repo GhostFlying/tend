@@ -459,6 +459,9 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 	}
 	facts := []string{
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"unfinished","ItemType":"commandExecution","Tool":{"Name":"shell","Input":"retained command","Status":"running"},"Raw":{"status":"inProgress"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"running"},"Raw":{"status":"inProgress"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original aggregated output","Status":"running"},"Raw":{"status":"backgrounded","aggregatedOutput":"original aggregated output"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background-observation","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"output from retained observation","Status":"running"},"Raw":{"status":"backgrounded","aggregatedOutput":"output from retained observation"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"running"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original failure","Status":"failed"}}}`,
 	}
@@ -498,6 +501,10 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unfinished' AND status='running'`) != 1 {
 			t.Fatal("the restored start should still be running while the original close is unresolved")
 		}
+		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses
+ WHERE item_id IN ('background','background-observation') AND status='running' AND output<>''`) != 2 {
+			t.Fatal("backgrounded observations should retain output while the original close is unresolved")
+		}
 		if scenario == "close-reply-after-projection" {
 			if op := h.runAs(as, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: closeID, LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
@@ -509,6 +516,13 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
  WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='unfinished' AND u.input='retained command' AND u.status='interrupted'`, thread, turn, source) != 1 {
 		t.Fatal("original tool without a result did not retain its source and interrupted state")
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
+ WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.status='interrupted' AND (
+  (u.item_id='background' AND u.output='original aggregated output') OR
+  (u.item_id='background-observation' AND u.output='output from retained observation')
+ )`, thread, turn, source) != 2 {
+		t.Fatal("interruption did not retain both original backgrounded outputs")
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
  WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='with-result' AND u.status='failed' AND u.output='original failure'`, thread, turn, source) != 1 {

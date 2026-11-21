@@ -10,7 +10,7 @@ CREATE TABLE manager_event_apply_failures (
 ) STRICT;
 CREATE INDEX manager_event_apply_retry ON manager_event_apply_failures(retry_at) WHERE retry_at>0;
 
--- Starts recovered while the original close is unresolved may still need a
+-- Tools recovered while the original close is unresolved may still need a
 -- status update when that same Run supplies its physical stop proof.
 CREATE TABLE manager_projected_running_tools (
  run_id TEXT NOT NULL,
