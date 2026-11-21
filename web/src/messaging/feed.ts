@@ -25,6 +25,7 @@ export class MessagingFeed {
   private workIssues = new Set<string>();
   private workTimer: ReturnType<typeof setTimeout> | undefined;
   private reading: Promise<void> | undefined;
+  private paging: Promise<void> | undefined;
   private readonly stream: EventStream<MessagingEvent>;
 
   constructor(private client: Pick<ApiClient, "get" | "openStream" | "noteAlive">) {
@@ -81,7 +82,12 @@ export class MessagingFeed {
     this.workTimer = undefined;
     // Drain aborted reads and the EventStream loop before restarting the same
     // stream. Its cursor remains valid and pending invalidations stay queued.
-    const stopping = Promise.all([this.stopping, this.stream.stop(), this.reading]).then(() => {
+    const stopping = Promise.all([
+      this.stopping,
+      this.stream.stop(),
+      this.reading,
+      this.paging,
+    ]).then(() => {
       if (this.stopping === stopping) this.stopping = undefined;
     });
     this.stopping = stopping;
@@ -95,18 +101,19 @@ export class MessagingFeed {
 
   private handleEvent(event: MessagingEvent) {
     if (!this.controller || this.stopping) return;
+    const loadingPage = this.reset || this.forward || this.reading || this.paging;
+    const items = this.state.get().items;
     if (event.kind === "messaging.work_changed") {
+      const issueID = event.issue_id;
       if (
-        !event.issue_id ||
-        !this.state
-          .get()
-          .items.some((m) => m.direction === "input" && m.issue_ids?.includes(event.issue_id!))
+        !issueID ||
+        (!loadingPage &&
+          !items.some((m) => m.direction === "input" && m.issue_ids?.includes(issueID)))
       )
         return;
-      this.workIssues.add(event.issue_id);
+      this.workIssues.add(issueID);
       this.workTimer ??= setTimeout(() => {
         this.workTimer = undefined;
-        this.queueChangedWork();
         void this.read();
       }, workRefreshMs);
       return;
@@ -114,7 +121,7 @@ export class MessagingFeed {
     if (event.object_type !== "message") return;
     if (event.kind === "messaging.input" || event.kind === "messaging.published")
       this.forward = true;
-    if (this.state.get().items.some((m) => m.message_id === event.object_id))
+    if (loadingPage || items.some((m) => m.message_id === event.object_id))
       this.dirty.add(event.object_id);
     void this.read();
   }
@@ -142,8 +149,9 @@ export class MessagingFeed {
       // Start after the current SSE chunk so its work is read together.
       this.reading = Promise.resolve()
         .then(() => this.readPending(signal))
-        .finally(() => {
+        .then((complete) => {
           this.reading = undefined;
+          if (complete) void this.read();
         });
     }
     return this.reading;
@@ -151,11 +159,13 @@ export class MessagingFeed {
 
   private async readPending(signal: AbortSignal) {
     while (!signal.aborted && this.connected) {
+      if (this.paging) await this.paging.catch(() => {});
+      if (signal.aborted || !this.connected) return false;
       if (!this.workTimer) this.queueChangedWork();
       const reset = this.reset;
       const forward = this.forward;
       const ids = [...this.dirty];
-      if (!reset && !forward && !ids.length) return;
+      if (!reset && !forward && !ids.length) return true;
       this.reset = false;
       this.forward = false;
       this.dirty.clear();
@@ -172,7 +182,8 @@ export class MessagingFeed {
         const updates: MessagingMessage[] = [];
         if (!reset) {
           const arrivedIDs = new Set(arrived.map((message) => message.message_id));
-          const remainingIDs = ids.filter((id) => !arrivedIDs.has(id));
+          const visibleIDs = new Set(this.state.get().items.map((message) => message.message_id));
+          const remainingIDs = ids.filter((id) => visibleIDs.has(id) && !arrivedIDs.has(id));
           for (let i = 0; i < remainingIDs.length && !signal.aborted; i += detailBatch) {
             updates.push(
               ...(await Promise.all(
@@ -209,9 +220,10 @@ export class MessagingFeed {
             loading: false,
             error: e instanceof Error ? e.message : String(e),
           });
-        return;
+        return false;
       }
     }
+    return false;
   }
 
   private async readAfter(after: number, signal: AbortSignal) {
@@ -225,7 +237,14 @@ export class MessagingFeed {
     return items;
   }
 
-  async older() {
+  older(): Promise<void> {
+    this.paging ??= this.readOlder().finally(() => {
+      this.paging = undefined;
+    });
+    return this.paging;
+  }
+
+  private async readOlder() {
     const signal = this.controller?.signal;
     const before = this.state.get().items[0]?.sequence;
     if (!signal || !before) return;
