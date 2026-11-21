@@ -426,12 +426,8 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			res.Reassigned[i].RunToken = RunToken(s.secret, res.Reassigned[i].LeaseID)
 		}
 		return withResult(op, res)
-	case "runner.upgrade_authorize", "runner.rolling_authorize":
-		var command app.Command = app.AuthorizeRunnerUpgrade{}
-		if env.Operation == "runner.rolling_authorize" {
-			command = app.AuthorizeRollingRunner{}
-		}
-		op, err := s.app.Execute(ctx, p, env, command)
+	case "runner.upgrade_authorize":
+		op, err := s.app.Execute(ctx, p, env, app.AuthorizeRunnerUpgrade{})
 		if err != nil || op.Status != protocol.OpSucceeded {
 			return op, err
 		}
@@ -440,6 +436,17 @@ func (s *Server) dispatch(ctx context.Context, p protocol.Principal, env *protoc
 			return op, err
 		}
 		return withResult(op, s.app.RefreshUpgradeGrant(grant))
+	case "runner.rolling_authorize":
+		op, err := s.app.Execute(ctx, p, env, app.AuthorizeRollingRunner{})
+		if err != nil || op.Status != protocol.OpSucceeded {
+			return op, err
+		}
+		var grant protocol.RollingRunnerGrant
+		if err := json.Unmarshal(op.Result, &grant); err != nil {
+			return op, err
+		}
+		grant.UpgradeGrant = s.app.RefreshUpgradeGrant(grant.UpgradeGrant)
+		return withResult(op, grant)
 	case "runner.rolling_target":
 		var req protocol.RollingTargetRequest
 		if err := decodeStrict(env.Payload, &req); err != nil {

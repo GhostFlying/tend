@@ -93,8 +93,9 @@ type RunnerUpgradeTarget struct {
 }
 
 type RollingAuthorization struct {
-	Revision int64                     `json:"revision"`
-	Request  RollingRunnerGrantRequest `json:"request"`
+	Revision             int64                     `json:"revision"`
+	Request              RollingRunnerGrantRequest `json:"request"`
+	PredecessorJournalID *string                   `json:"predecessor_journal_id,omitempty"`
 }
 
 type RollingTargetRequest struct {
@@ -111,8 +112,37 @@ type RollingTarget struct {
 // RollingRunnerGrantRequest is a request to launch another process alongside
 // the observed predecessor. It carries no authority to stop either process.
 type RollingRunnerGrantRequest struct {
-	Binding UpgradeBinding         `json:"binding"`
-	Updater UpdaterSelfObservation `json:"updater"`
+	Binding      UpgradeBinding         `json:"binding"`
+	Updater      UpdaterSelfObservation `json:"updater"`
+	PendingProof *RollingPendingProof   `json:"pending_proof,omitempty"`
+}
+
+// RollingRunnerGrant optionally asks the staged helper to identify all pending
+// operations from the supervisor's current journal. Old helpers read the grant.
+type RollingRunnerGrant struct {
+	UpgradeGrant
+	PendingCheck *RollingPendingCheck `json:"pending_check,omitempty"`
+}
+
+const MaxRollingPendingProof = 64
+
+type RollingPendingCheck struct {
+	Sequence int64 `json:"sequence"`
+	Count    int64 `json:"count"`
+}
+
+type RollingPendingProof struct {
+	Sequence   int64                     `json:"sequence"`
+	JournalID  string                    `json:"journal_id"`
+	Operations []RollingPendingOperation `json:"operations"`
+}
+
+type RollingPendingOperation struct {
+	Operation string `json:"operation"`
+	RunID     string `json:"run_id"`
+	LeaseID   string `json:"lease_id"`
+	CommandID string `json:"command_id,omitempty"`
+	RequestID string `json:"request_id"`
 }
 
 // RunnerRetirement binds the stop and its acknowledgement to one predecessor.

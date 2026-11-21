@@ -2,12 +2,296 @@ package app
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
 	"github.com/GhostFlying/tend/internal/store"
 )
+
+func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		version     int64
+		independent bool
+	}{
+		{"original-journal", protocol.MinimumRunnerProtocol, false},
+		{"previous-generation", protocol.MinimumRunnerProtocol, true},
+		{"current-generation", protocol.CurrentRunnerProtocol, true},
+	} {
+		t.Run(scenario.name+"-"+strconv.FormatInt(scenario.version, 10), func(t *testing.T) {
+			ctx := t.Context()
+			const host = "linux-1"
+			h, old := managerClaimHarness(t)
+			old.Sequence++
+			old.Protocol, old.ProtocolMin, old.ProtocolMax = scenario.version, scenario.version, scenario.version
+			if scenario.independent {
+				// Begin this subtest with a previously installed journal.
+				old.JournalID = old.InstanceID
+				if err := h.store.Write(ctx, func(tx *store.Tx) error {
+					rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
+					if err != nil {
+						return err
+					}
+					rt.Runtime.JournalID = old.JournalID
+					return tx.PutHostRuntime(ctx, host, rt)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			old.Build.PID, old.Build.BinarySHA256 = 91, strings.Repeat("a", 64)
+			old.Capabilities = append(old.Capabilities, capabilityUpdater, protocol.CapabilityCompleteReleaseSet, protocol.CapabilityUpdaterSelfUpdate)
+			if op := h.versionedHello(host, old); op.Error != nil {
+				t.Fatal(op)
+			}
+			claimManager := func() protocol.Assignment {
+				t.Helper()
+				issue := createCanonicalOwnerTestIssue(t, h)
+				request := protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Coordinate the Issue"}
+				if op := h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, request, rev(issue.Revision)), RequestIssueManager{}); op.Error != nil {
+					t.Fatal(op)
+				}
+				return reviewClaimManager(t, h, old)
+			}
+			original := claimManager()
+			native := func(operation string, payload any) protocol.Operation {
+				t.Helper()
+				return h.runAs(original, operation, payload, ManagerNativeCommand{OperationName: operation})
+			}
+			queue := func(method, payload string) string {
+				t.Helper()
+				id, err := h.app.QueueManagerNative(ctx, original.RunID, method, json.RawMessage(payload))
+				if err != nil {
+					t.Fatal(err)
+				}
+				op := native(protocol.OpManagerNativeClaim, protocol.ManagerNativeClaimPayload{})
+				var command protocol.ManagerNativeClaimResult
+				if err := json.Unmarshal(op.Result, &command); op.Error != nil || err != nil || command.ID != id {
+					t.Fatal("did not claim the original command", op, err)
+				}
+				return id
+			}
+			toolID := queue("tool_result", `{"thread_id":"original-thread","turn_id":"original-turn","call_id":"original-call","tool_result":{"Success":true,"Text":"original"}}`)
+			toolReply := h.env(protocol.OpManagerNativeReply, runTarget(original.RunID), protocol.ManagerNativeReply{ID: toolID, Result: json.RawMessage(`null`), Error: "original tool result unconfirmed"}, nil)
+			replyCommand := ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}
+			// Deliver the tool reply but retain its original envelope as if the
+			// transport acknowledgement was lost.
+			if op := h.exec(runPrincipal(original.RunID, original.Role), toolReply, replyCommand); op.Error != nil {
+				t.Fatal(op)
+			}
+			closeID := queue("close", "{}")
+			// A real stop receipt releases the lease while the original close
+			// remains uncertain. The native operation remains tied to its Run.
+			if op := native(protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original process stopped"}); op.Error != nil {
+				t.Fatal(op)
+			}
+			if run, lease := h.run(original.RunID), h.lease(original.RunID); run.ObservedState != protocol.RunFailed || lease.Status != store.LeaseReleased {
+				t.Fatalf("original execution did not stop: state=%v lease=%+v", run.ObservedState, lease)
+			}
+			if h.countWhere("SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'", closeID) != 1 {
+				t.Fatal("stop settled the unknown close")
+			}
+			count := int64(2)
+			var idle protocol.Assignment
+			var poll *protocol.Envelope
+			pollCommand := ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim}
+			checkEmptyPoll := func() {
+				t.Helper()
+				op := h.exec(runPrincipal(idle.RunID, idle.Role), poll, pollCommand)
+				var result protocol.ManagerNativeClaimResult
+				if err := json.Unmarshal(op.Result, &result); op.Error != nil || err != nil || result.ID != "" || h.run(idle.RunID).ObservedState != protocol.RunStarting {
+					t.Fatal("original empty native poll lost its starting Run", op, err)
+				}
+			}
+			if scenario.independent {
+				idle = claimManager()
+				poll = h.env(protocol.OpManagerNativeClaim, runTarget(idle.RunID), protocol.ManagerNativeClaimPayload{}, nil)
+				checkEmptyPoll()
+				count++
+			}
+			c := selfUpgradeFixtureRelease(upgradeFixtureRelease(t, h))
+			c.Manifest.Storage.RunnerJournal.Max = old.JournalVersion
+			c.ServerUpdaterSupported = true
+			c.ServerCapabilities = []string{release.ServerCapabilityRunnerJournals}
+			if op := startPreparedTestUpgrade(h, "rolling-pending", c); op.Error != nil {
+				t.Fatal(op)
+			}
+			batch := upgradeRead(h)
+			server := ServerObservation{MainDrained: true, Healthy: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "current-server"}
+			server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
+			for range 5 {
+				if upgradeTick(h, server).Hosts[0].Phase == "draining" {
+					break
+				}
+			}
+			current := upgradeAck(h, host, protocol.RunnerMaintenance)
+			old = &current
+			heartbeat := func(r *protocol.RunnerRuntime) protocol.HeartbeatResult {
+				t.Helper()
+				r.Sequence++
+				out, err := h.app.RuntimeHeartbeat(ctx, runner(host), protocol.HeartbeatPayload{Runtime: r})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			batch = upgradeRead(h)
+			b := protocol.UpgradeBinding{UpgradeID: batch.View.UpgradeID, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: batch.Hosts[0].TargetHash, InstanceID: host, ProcessInstanceID: "next-instance"}
+			target := protocol.Target{Type: "host", ID: host}
+			req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *selfUpgradeObservation(batch, host, old.InstanceID, old.Build.BinarySHA256)}
+			authorize := func(proof *protocol.RollingPendingProof) protocol.RollingRunnerGrant {
+				t.Helper()
+				req.PendingProof = proof
+				op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
+				var g protocol.RollingRunnerGrant
+				if err := json.Unmarshal(op.Result, &g); op.Error != nil || err != nil {
+					t.Fatal(op, err)
+				}
+				return g
+			}
+			old.PendingClaims, old.PendingOperations = 1, count+1
+			heartbeat(old)
+			if grant := authorize(nil); grant.Allowed || grant.PendingCheck != nil {
+				t.Fatal("an unconfirmed claim was eligible for overlap", grant)
+			}
+			old.PendingClaims, old.PendingOperations = 0, count
+			old.Blockers = []string{"pending_operation"}
+			heartbeat(old)
+			if grant := authorize(nil); grant.Allowed || grant.PendingCheck == nil || grant.PendingCheck.Sequence != old.Sequence || grant.PendingCheck.Count != count {
+				t.Fatal("undifferentiated pending operation needed a current proof", grant)
+			}
+			reply := protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`)}
+			originalReply := h.env(protocol.OpManagerNativeReply, runTarget(original.RunID), reply, nil)
+			proof := protocol.RollingPendingProof{Sequence: old.Sequence, JournalID: old.JournalID, Operations: []protocol.RollingPendingOperation{
+				{Operation: protocol.OpManagerNativeReply, RunID: original.RunID, LeaseID: original.LeaseID, CommandID: closeID, RequestID: originalReply.RequestID},
+				{Operation: protocol.OpManagerNativeReply, RunID: original.RunID, LeaseID: original.LeaseID, CommandID: toolID, RequestID: toolReply.RequestID},
+			}}
+			if poll != nil {
+				proof.Operations = append(proof.Operations, protocol.RollingPendingOperation{Operation: protocol.OpManagerNativeClaim, RunID: idle.RunID, LeaseID: idle.LeaseID, RequestID: poll.RequestID})
+			}
+			heartbeat(old)
+			if grant := authorize(&proof); grant.Allowed {
+				t.Fatal("accepted proof for an obsolete heartbeat", grant)
+			}
+			proof.Sequence = old.Sequence
+			proof.Operations[0].LeaseID = h.ids.New(protocol.PrefixLease)
+			if grant := authorize(&proof); grant.Allowed {
+				t.Fatal("accepted another lease as the original", grant)
+			}
+			proof.Operations[0].LeaseID = original.LeaseID
+			if poll != nil {
+				proof.Operations[2].LeaseID = original.LeaseID
+				if grant := authorize(&proof); grant.Allowed {
+					t.Fatal("another lease proved the idle manager poll", grant)
+				}
+				proof.Operations[2].LeaseID = idle.LeaseID
+			}
+			if grant := authorize(&proof); !grant.Allowed {
+				t.Fatal("the original stopped receipt blocked successor launch", grant)
+			}
+			ctl := upgradeCtl(h, host)
+			next := testRuntime(b.ProcessInstanceID)
+			next.Generation, next.JournalID, next.JournalVersion = 1, b.ProcessInstanceID, c.Manifest.Storage.RunnerJournal.Max
+			next.Build = protocol.RunnerBuild{PID: 92, BinarySHA256: b.ArtifactSHA256}
+			next.Mode, next.AppliedControlRevision, next.UpgradeID = protocol.RunnerReady, ctl.Revision, b.UpgradeID
+			if op := h.versionedHello(host, next); op.Error != nil {
+				t.Fatal(op)
+			}
+			_, want := h.createTask(owner, createTaskPayload{Title: "unrelated queued work", Spec: testSpec})
+			claim := func(rt *protocol.RunnerRuntime) (protocol.Assignment, bool) {
+				t.Helper()
+				return h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: rt}, nil))
+			}
+			if _, ok := claim(next); ok {
+				t.Fatal("uncommitted candidate claimed work")
+			}
+			next.Capabilities = append(next.Capabilities, protocol.CapabilityUpdaterSelfUpdate)
+			next.Updater = selfUpgradeObservation(batch, host, next.InstanceID, next.Build.BinarySHA256)
+			next.Updater.SupervisedProcess.PID = int(next.Build.PID)
+			next.UpdaterReceipt = committedServerForTest(b)
+			heartbeat(next)
+			upgradeTick(h, server)
+			ctl = upgradeCtl(h, host)
+			next.Mode, next.AppliedControlRevision = ctl.Mode, ctl.Revision
+			heartbeat(next)
+			drain := heartbeat(old).Control
+			old.AppliedControlRevision = drain.Revision
+			if _, ok := claim(old); ok {
+				t.Fatal("draining predecessor claimed new work")
+			}
+			newRun, ok := claim(next)
+			if !ok || newRun.TaskID != want.TaskID || newRun.Protocol != protocol.CurrentRunnerProtocol {
+				t.Fatal("committed successor could not claim unrelated work", newRun)
+			}
+			if poll != nil {
+				checkEmptyPoll()
+				if l := h.lease(idle.RunID); l.Status != store.LeaseActive || l.LeaseID != idle.LeaseID {
+					t.Fatal("unrelated work displaced a live manager lease", l)
+				}
+				h.createTask(owner, createTaskPayload{Title: "await a physical slot", Spec: testSpec})
+				if _, ok := claim(next); ok {
+					t.Fatal("successor claimed the predecessor's occupied slot")
+				}
+			}
+			if h.countWhere("SELECT COUNT(*) FROM runs WHERE task_id=?", original.TaskID) != 1 {
+				t.Fatal("another Run took the predecessor's unsettled manager work")
+			}
+			retirement := protocol.RunnerRetirement{UpgradeID: b.UpgradeID, Process: req.Updater.SupervisedProcess}
+			retire := func() protocol.RunnerRetirementResult {
+				t.Helper()
+				op := h.exec(runner(host), h.env("runner.rolling_retire", target, retirement, nil), RetireRollingRunner{})
+				var result protocol.RunnerRetirementResult
+				if err := json.Unmarshal(op.Result, &result); op.Error != nil || err != nil {
+					t.Fatal(op, err)
+				}
+				return result
+			}
+			heartbeat(old)
+			if result := retire(); result.Allowed {
+				t.Fatal("successor launch bypassed retirement readiness", result)
+			}
+			if op, err := h.app.Execute(ctx, runPrincipal(newRun.RunID, protocol.RoleIssueManager), originalReply, replyCommand); protocol.CodeOf(err) != protocol.CodeForbidden {
+				t.Fatal("another Run can send the predecessor's original reply", op, err)
+			}
+			if op := h.exec(runPrincipal(original.RunID, original.Role), originalReply, replyCommand); op.Error != nil {
+				t.Fatal("predecessor could not deliver its original reply after handoff", op)
+			}
+			if h.countWhere("SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='completed'", closeID) != 1 {
+				t.Fatal("original receipt did not settle")
+			}
+			if op := h.exec(runPrincipal(original.RunID, original.Role), toolReply, replyCommand); op.Error != nil {
+				t.Fatal("predecessor could not reconcile the unknown under its original identity", op)
+			}
+			if h.countWhere("SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'", toolID) != 1 {
+				t.Fatal("transport acceptance resolved the native outcome")
+			}
+			if poll != nil {
+				if result := retire(); result.Allowed {
+					t.Fatal("retirement ignored the original active manager", result)
+				}
+				if op := h.runAs(idle, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original idle process exited"}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Error != nil {
+					t.Fatal(op)
+				}
+			}
+			old.PendingOperations, old.Blockers, old.Mode = 0, nil, protocol.RunnerReady
+			heartbeat(old)
+			grant := retire()
+			if !grant.Allowed || grant.Confirmed {
+				t.Fatal("settled predecessor did not get a separate stop grant", grant)
+			}
+			// Report the supervisor's exact physical-exit proof to finish.
+			retirement.AuthorizationID = grant.AuthorizationID
+			if result := retire(); !result.Confirmed {
+				t.Fatal("exact retirement acknowledgement did not confirm", result)
+			}
+			if op := h.versionedHello(host, old); op.Error == nil {
+				t.Fatal("retired process registered again")
+			}
+		})
+	}
+}
 
 // The prepared candidate and supervisor receipts are observations from the
 // fixture. Claims, rolling admission, journal routing and renewal use commands.

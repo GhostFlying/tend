@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/cfgfile"
@@ -17,8 +18,8 @@ import (
 	"github.com/GhostFlying/tend/internal/runner"
 )
 
-// Both invocations run in the runner's credential context. Neither opens its
-// workspace, registers a runner, or joins the embedded node.
+// Both invocations run in the runner's credential context without opening its
+// workspace, registering a runner, or joining the embedded node.
 func rollingCommand(ctx context.Context, action string, args []string, in io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet(action, flag.ContinueOnError)
 	configPath := fs.String("config", "", "runner configuration file")
@@ -60,7 +61,25 @@ func rollingCommand(ctx context.Context, action string, args []string, in io.Rea
 		if err := json.NewDecoder(io.LimitReader(in, 64<<10)).Decode(&input); err != nil {
 			return err
 		}
-		grant, err := r.AuthorizeRolling(ctx, input)
+		var journalPath string
+		if id := input.PredecessorJournalID; id != nil {
+			if *id != "" && !release.ValidID(*id) {
+				return errors.New("rolling authorization requires the supervised predecessor journal")
+			}
+			if cfg.Home == "" {
+				cfg.Home = "~/.tend"
+			}
+			home, err := cfgfile.Path(cfg.Home)
+			if err != nil {
+				return err
+			}
+			root := filepath.Join(home, "runner")
+			if *id != "" {
+				root = filepath.Join(root, "generations", *id)
+			}
+			journalPath = filepath.Join(root, "journal.db")
+		}
+		grant, err := r.AuthorizeRolling(ctx, input, journalPath)
 		if err != nil {
 			return err
 		}

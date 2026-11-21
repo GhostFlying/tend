@@ -522,7 +522,7 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 		if s.opts.RollingAuthority == nil {
 			return errors.New("updater: rolling authority unavailable")
 		}
-		g, err = s.opts.RollingAuthority.AuthorizeLaunch(ctx, op.Candidate, op.Binding, *op.Rolling)
+		g, err = s.opts.RollingAuthority.AuthorizeLaunch(ctx, op.Candidate, op.Binding, *op.Rolling, s.state.CurrentJournal)
 	} else {
 		g, err = s.opts.Authority.Authorize(ctx, op.Binding)
 	}
