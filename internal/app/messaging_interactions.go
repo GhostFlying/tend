@@ -149,26 +149,47 @@ func bindMessagingInteraction(ctx context.Context, x *Exec, tx *store.Tx, messag
 }
 
 func messagingInteraction(ctx context.Context, q store.Querier, id string) (protocol.MessagingInteraction, error) {
-	i, err := messagingInteractionBusinessState(ctx, q, id)
-	if err != nil {
-		return i, err
-	}
-	human, err := store.HumanProblem(ctx, q, i.ObjectType, i.ObjectID)
-	if err == nil && !human && i.State == "open" {
-		i.State = "superseded"
-	}
-	return i, err
+	return readMessagingInteraction(ctx, q, id, true)
 }
 
 func messagingInteractionBusinessState(ctx context.Context, q store.Querier, id string) (protocol.MessagingInteraction, error) {
+	return readMessagingInteraction(ctx, q, id, false)
+}
+
+func readMessagingInteraction(ctx context.Context, q store.Querier, id string, ownerOnly bool) (protocol.MessagingInteraction, error) {
+	interaction, err := scanMessagingInteraction(q.QueryRowContext(ctx, `SELECT `+messagingInteractionColumns+
+		`FROM messaging_interactions i `+messagingInteractionJoins+` WHERE i.interaction_id=?`, id), ownerOnly)
+	return interaction, errNotFound(err, "交互请求不存在")
+}
+
+const messagingInteractionColumns = `i.snapshot_json,i.handled_channel,i.handled_at,i.answer_summary,i.observed_state,
+	d.version,d.status,d.answer_json,a.body_json,c.body_json,
+	EXISTS(SELECT 1 FROM attention_responsibilities r JOIN attentions owner USING(attention_id)
+		WHERE r.recipient_kind<>'owner' AND (
+			(i.object_type='attention' AND owner.attention_id=i.object_id)
+			OR (i.object_type='decision' AND owner.decision_id=i.object_id)
+			OR (i.object_type='work_item_choice' AND owner.choice_id=i.object_id))) `
+
+const messagingInteractionJoins = `LEFT JOIN decisions d ON i.object_type='decision' AND d.decision_id=i.object_id
+	LEFT JOIN attentions a ON i.object_type='attention' AND a.attention_id=i.object_id
+	LEFT JOIN work_item_choices c ON i.object_type='work_item_choice' AND c.choice_id=i.object_id`
+
+type interactionScanner interface {
+	Scan(...any) error
+}
+
+func scanMessagingInteraction(row interactionScanner, ownerOnly bool, prefix ...any) (protocol.MessagingInteraction, error) {
 	var i protocol.MessagingInteraction
-	var raw, observed string
-	err := q.QueryRowContext(ctx, `SELECT snapshot_json,handled_channel,handled_at,answer_summary,observed_state FROM messaging_interactions WHERE interaction_id=?`, id).Scan(&raw, &i.HandledChannel, &i.HandledAt, &i.AnswerSummary, &observed)
-	if err != nil {
-		return i, errNotFound(err, "交互请求不存在")
+	var snapshot, channel, summary, observed string
+	var at int64
+	var decisionVersion sql.NullInt64
+	var decisionStatus, decisionAnswer, attention, choice sql.NullString
+	var internal bool
+	if err := row.Scan(append(prefix, &snapshot, &channel, &at, &summary, &observed,
+		&decisionVersion, &decisionStatus, &decisionAnswer, &attention, &choice, &internal)...); err != nil {
+		return i, err
 	}
-	channel, at, summary := i.HandledChannel, i.HandledAt, i.AnswerSummary
-	if err = json.Unmarshal([]byte(raw), &i); err != nil {
+	if err := json.Unmarshal([]byte(snapshot), &i); err != nil {
 		return i, err
 	}
 	i.HandledChannel, i.HandledAt, i.AnswerSummary = channel, at, summary
@@ -178,38 +199,40 @@ func messagingInteractionBusinessState(ctx context.Context, q store.Querier, id 
 	}
 	switch i.ObjectType {
 	case "decision":
-		d, e := store.GetDecision(ctx, q, i.ObjectID)
-		if e != nil {
-			return i, e
+		if !decisionVersion.Valid {
+			return i, store.ErrNotFound
 		}
 		switch {
-		case d.Status == "answered" && d.Version == i.Version+1:
+		case decisionStatus.String == "answered" && decisionVersion.Int64 == i.Version+1:
 			i.State = "answered"
-			var a struct {
+			var answer struct {
 				Option string                 `json:"option"`
 				Text   string                 `json:"text"`
 				Effect *protocol.EffectResult `json:"effect"`
 			}
-			if e = json.Unmarshal([]byte(d.AnswerJSON), &a); e != nil {
-				return i, e
+			if err := json.Unmarshal([]byte(decisionAnswer.String), &answer); err != nil {
+				return i, err
 			}
-			i.Effect = a.Effect
+			i.Effect = answer.Effect
 			if i.AnswerSummary == "" {
-				i.AnswerSummary = strings.TrimSpace(interactionLabel(a.Option) + " " + a.Text)
+				i.AnswerSummary = strings.TrimSpace(interactionLabel(answer.Option) + " " + answer.Text)
 			}
-		case d.Version > i.Version+1:
+		case decisionVersion.Int64 > i.Version+1:
 			i.State = "superseded"
-		case d.Status != "open":
+		case decisionStatus.String != "open":
 			i.State = "withdrawn"
-		case d.Version != i.Version:
+		case decisionVersion.Int64 != i.Version:
 			i.State = "superseded"
 		default:
 			i.State = "open"
 		}
 	case "attention":
-		a, e := store.GetAttention(ctx, q, i.ObjectID)
-		if e != nil {
-			return i, e
+		if !attention.Valid {
+			return i, store.ErrNotFound
+		}
+		var a protocol.Attention
+		if err := json.Unmarshal([]byte(attention.String), &a); err != nil {
+			return i, err
 		}
 		switch {
 		case a.Title != i.Question:
@@ -225,9 +248,12 @@ func messagingInteractionBusinessState(ctx context.Context, q store.Querier, id 
 			i.State = "open"
 		}
 	case "work_item_choice":
-		c, e := store.GetWorkItemChoice(ctx, q, i.ObjectID)
-		if e != nil {
-			return i, e
+		if !choice.Valid {
+			return i, store.ErrNotFound
+		}
+		var c protocol.WorkItemChoice
+		if err := json.Unmarshal([]byte(choice.String), &c); err != nil {
+			return i, err
 		}
 		switch {
 		case c.Status == "answered" && c.Version == i.Version+1:
@@ -243,18 +269,38 @@ func messagingInteractionBusinessState(ctx context.Context, q store.Querier, id 
 			i.State = "open"
 		}
 	}
+	if ownerOnly && internal && i.State == "open" {
+		i.State = "superseded"
+	}
 	return i, nil
 }
+
+func hydrateMessagingInteractions(ctx context.Context, q store.Querier, keys string, index map[string]*protocol.MessagingMessage) error {
+	rows, err := q.QueryContext(ctx, `SELECT m.message_id,`+messagingInteractionColumns+
+		`FROM messaging_interaction_messages m JOIN messaging_interactions i USING(interaction_id) `+messagingInteractionJoins+
+		` WHERE m.message_id IN (SELECT value FROM json_each(?))`, keys)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		interaction, err := scanMessagingInteraction(rows, true, &id)
+		if err != nil {
+			return err
+		}
+		index[id].Interaction = &interaction
+	}
+	return rows.Err()
+}
+
 func interactionForMessage(ctx context.Context, q store.Querier, message string) (*protocol.MessagingInteraction, error) {
-	var id string
-	err := q.QueryRowContext(ctx, `SELECT interaction_id FROM messaging_interaction_messages WHERE message_id=?`, message).Scan(&id)
+	i, err := scanMessagingInteraction(q.QueryRowContext(ctx, `SELECT `+messagingInteractionColumns+
+		`FROM messaging_interaction_messages m JOIN messaging_interactions i USING(interaction_id) `+messagingInteractionJoins+
+		` WHERE m.message_id=?`, message), true)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	i, err := messagingInteraction(ctx, q, id)
 	return &i, err
 }
 func (a *App) MessagingInteraction(ctx context.Context, id string) (protocol.MessagingInteraction, error) {

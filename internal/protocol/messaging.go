@@ -166,4 +166,5 @@ type MessagingEvent struct {
 	Kind       string `json:"kind"`
 	ObjectType string `json:"object_type"`
 	ObjectID   string `json:"object_id"`
+	IssueID    string `json:"issue_id,omitempty"`
 }
