@@ -318,8 +318,10 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 	if n.Tool != nil {
 		p := recordToolUsePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Tool: n.Tool.Name, Input: n.Tool.Input, Output: n.Tool.Output, Status: n.Tool.Status}
 		command := RecordToolUse{DeliveryTurn: root}
-		runningStart := n.Kind == "item_started" && p.Status == protocol.ToolRunning
-		if runningStart {
+		stillRunning := p.Status == protocol.ToolRunning
+		if stillRunning {
+			// A native item_completed can still describe a backgrounded
+			// command. Retain its observed output under the same stop proof.
 			_, stoppedThrough, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), in.run)
 			if err != nil {
 				return Outcome{}, err
@@ -327,12 +329,12 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 			command.interruptRunning = stopped && stoppedThrough >= in.sequence
 		}
 		out, err := applyManagerProjectionMessage(ctx, &projection, tx, p, command)
-		if err != nil || !runningStart || command.interruptRunning {
+		if err != nil || !stillRunning || command.interruptRunning {
 			return out, err
 		}
 		// Background tool records settle as interrupted when published.
 		// Remember any already visible, running tool in the same transaction
-		// that applies its original start.
+		// that applies the original running observation.
 		_, err = tx.Exec(ctx, `INSERT INTO manager_projected_running_tools(run_id,seq,message_id)
  SELECT ?,?,message_id FROM conversation_tool_uses
  WHERE thread_id=? AND turn_id=? AND item_id=? AND status='running'`,
