@@ -327,6 +327,9 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 				return Outcome{}, err
 			}
 			command.interruptRunning = stopped && stoppedThrough >= in.sequence
+			// The old attachment may already have interrupted this same
+			// tool while the original close is still unresolved.
+			command.preserveInterrupted = n.Kind == protocol.ManagerEventItemCompleted && p.Output != ""
 		}
 		out, err := applyManagerProjectionMessage(ctx, &projection, tx, p, command)
 		if err != nil || !stillRunning || command.interruptRunning {
