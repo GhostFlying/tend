@@ -607,6 +607,9 @@ func readEvents(ctx context.Context, q store.Querier, after int64, limit int, ch
 	out := make([]protocol.LedgerEvent, 0, len(rows))
 	for _, e := range rows {
 		after = e.Seq
+		if chat && e.Kind == store.MessagingTurnProcessing {
+			continue
+		}
 		ev := protocol.LedgerEvent{EventSeq: e.Seq, ObjectType: e.ObjectType, ObjectID: e.ObjectID, Kind: e.Kind, CreatedAt: time.UnixMilli(e.CreatedAt).UTC()}
 		if e.ObjectType == "message" {
 			if chat {

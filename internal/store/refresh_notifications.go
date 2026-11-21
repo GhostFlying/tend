@@ -8,11 +8,14 @@ import (
 	"strings"
 )
 
+// MessagingTurnProcessing invalidates IM input status for one shared logical turn.
+const MessagingTurnProcessing = "messaging.turn_processing"
+
 // RefreshKind identifies notices whose payload is rebuilt from current SoT.
 // Business transitions, authorization and results never belong in this set.
 func RefreshKind(kind string) bool {
 	switch kind {
-	case "token_usage.changed", "storage.originals_changed", "host.runtime_changed", "conversation.process_changed":
+	case "token_usage.changed", "storage.originals_changed", "host.runtime_changed", "conversation.process_changed", MessagingTurnProcessing:
 		return true
 	}
 	return false
@@ -72,7 +75,9 @@ func (t *Tx) advanceRefresh(ctx context.Context, e EventRow) (int64, error) {
 	}
 	if previous > 0 {
 		chatPrevious := previous
-		if e.Kind == "conversation.process_changed" && e.ObjectType == "message" {
+		if e.Kind == MessagingTurnProcessing {
+			chatPrevious = 0
+		} else if e.Kind == "conversation.process_changed" && e.ObjectType == "message" {
 			conversation, err := ChatProcessChangeConversation(ctx, t.Q(), e.ObjectID)
 			if err != nil {
 				return 0, err

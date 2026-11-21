@@ -17,10 +17,12 @@ func readMessagingEvents(ctx context.Context, q store.Querier, after int64) ([]s
 		return nil, nil, err
 	}
 
-	var messages, tasks, runs, decisions []string
+	var messages, tasks, runs, decisions, turns []string
 	for _, ev := range batch {
 		kind := messagingEventKind(ev.Kind)
 		switch kind {
+		case store.MessagingTurnProcessing:
+			turns = append(turns, ev.ObjectID)
 		case "messaging.input", "messaging.associations_changed":
 			messages = append(messages, ev.ObjectID)
 		case "messaging.processing":
@@ -41,8 +43,9 @@ func readMessagingEvents(ctx context.Context, q store.Querier, after int64) ([]s
 
 	directions := map[string]string{}
 	work := map[protocol.Target]string{}
-	if len(messages)+len(tasks)+len(runs)+len(decisions) > 0 {
-		if err := readMessagingEventScopes(ctx, q, messages, tasks, runs, decisions, directions, work); err != nil {
+	turnInputs := map[string][]string{}
+	if len(messages)+len(tasks)+len(runs)+len(decisions)+len(turns) > 0 {
+		if err := readMessagingEventScopes(ctx, q, messages, tasks, runs, decisions, turns, directions, work, turnInputs); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -65,6 +68,9 @@ func readMessagingEvents(ctx context.Context, q store.Querier, after int64) ([]s
 			}
 		}
 		event := protocol.MessagingEvent{EventSeq: ev.Seq, Kind: kind, ObjectType: ev.ObjectType, ObjectID: ev.ObjectID}
+		if kind == store.MessagingTurnProcessing {
+			event.MessageIDs = turnInputs[ev.ObjectID]
+		}
 		if kind == "messaging.work_changed" {
 			switch ev.ObjectType {
 			case "issue", "work_item":
@@ -96,7 +102,7 @@ func messagingEventKind(kind string) string {
 	}
 }
 
-func readMessagingEventScopes(ctx context.Context, q store.Querier, messages, tasks, runs, decisions []string, directions map[string]string, work map[protocol.Target]string) error {
+func readMessagingEventScopes(ctx context.Context, q store.Querier, messages, tasks, runs, decisions, turns []string, directions map[string]string, work map[protocol.Target]string, turnInputs map[string][]string) error {
 	messageIDs, err := json.Marshal(messages)
 	if err != nil {
 		return err
@@ -113,12 +119,20 @@ func readMessagingEventScopes(ctx context.Context, q store.Querier, messages, ta
 	if err != nil {
 		return err
 	}
+	turnIDs, err := json.Marshal(turns)
+	if err != nil {
+		return err
+	}
 	rows, err := q.QueryContext(ctx, `SELECT 'message',message_id,direction FROM messaging_messages WHERE message_id IN (SELECT value FROM json_each(?))
 		UNION ALL SELECT 'task',task_id,work_item_id FROM task_work_item_owners WHERE task_id IN (SELECT value FROM json_each(?))
 		UNION ALL SELECT 'run',run_id,work_item_id FROM runs JOIN task_work_item_owners USING(task_id)
 			WHERE run_id IN (SELECT value FROM json_each(?))
 		UNION ALL SELECT 'decision',decision_id,work_item_id FROM decisions JOIN task_work_item_owners USING(task_id)
-			WHERE decision_id IN (SELECT value FROM json_each(?))`, string(messageIDs), string(taskIDs), string(runIDs), string(decisionIDs))
+			WHERE decision_id IN (SELECT value FROM json_each(?))
+		UNION ALL SELECT 'logical_turn',l.logical_turn_id,l.message_id
+			FROM logical_turn_messages l JOIN messaging_messages m USING(message_id)
+			WHERE l.logical_turn_id IN (SELECT value FROM json_each(?)) AND m.direction='input'`,
+		string(messageIDs), string(taskIDs), string(runIDs), string(decisionIDs), string(turnIDs))
 	if err != nil {
 		return err
 	}
@@ -129,9 +143,12 @@ func readMessagingEventScopes(ctx context.Context, q store.Querier, messages, ta
 		if err := rows.Scan(&target.Type, &target.ID, &value); err != nil {
 			return err
 		}
-		if target.Type == "message" {
+		switch target.Type {
+		case "message":
 			directions[target.ID] = value
-		} else {
+		case "logical_turn":
+			turnInputs[target.ID] = append(turnInputs[target.ID], value)
+		default:
 			work[target] = value
 		}
 	}
