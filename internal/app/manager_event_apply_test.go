@@ -420,6 +420,15 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 }
 
 func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing.T) {
+	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection"} {
+		t.Run(scenario, func(t *testing.T) {
+			testManagerProjectionInterruptedTool(t, scenario)
+		})
+	}
+}
+
+func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
+	t.Helper()
 	h, _, issue, as, _ := reviewManagerAssignment(t)
 	ctx := t.Context()
 	id := as.Manager.ConversationID
@@ -435,6 +444,13 @@ func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing
 			return err
 		}
 		if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: request, ConversationID: id, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, Selection: selection, CreatedAt: now}); err != nil {
+			return err
+		}
+		unrelated := h.ids.New(protocol.PrefixMessage)
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: unrelated, ConversationID: id, Author: "main_agent", ReplyTo: source, CreatedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.PutToolUse(ctx, store.ToolUseRow{MessageID: unrelated, ThreadID: thread, TurnID: turn, ItemID: "unrelated", Tool: "shell", Status: string(protocol.ToolRunning)}); err != nil {
 			return err
 		}
 		return tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, ThreadID: thread, TurnID: turn, MessageID: source, Status: store.TurnInterrupted}, now)
@@ -453,8 +469,24 @@ func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing
 		}
 	}
 	last := int64(len(facts))
-	if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original process stopped", LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
+	stop := func() {
+		if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original process stopped", LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	var closeID string
+	if scenario == "stop-before-projection" {
+		stop()
+	} else {
+		closeID, err = h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed := h.runAs(as, protocol.OpManagerNativeClaim, struct{}{}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim})
+		var req protocol.ManagerNativeRequest
+		if json.Unmarshal(claimed.Result, &req) != nil || req.ID != closeID {
+			t.Fatal("original close was not claimed", claimed)
+		}
 	}
 	for seq := int64(1); seq <= last; seq++ {
 		if err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq); err != nil {
@@ -462,6 +494,18 @@ func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing
 		}
 	}
 	assertManagerProjectionWatermarks(t, h, as.RunID, last, last)
+	if scenario != "stop-before-projection" {
+		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unfinished' AND status='running'`) != 1 {
+			t.Fatal("the restored start should still be running while the original close is unresolved")
+		}
+		if scenario == "close-reply-after-projection" {
+			if op := h.runAs(as, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: closeID, LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+		} else {
+			stop()
+		}
+	}
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
  WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='unfinished' AND u.input='retained command' AND u.status='interrupted'`, thread, turn, source) != 1 {
 		t.Fatal("original tool without a result did not retain its source and interrupted state")
@@ -473,6 +517,14 @@ func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing
 	if h.countWhere(`SELECT COUNT(*) FROM agent_rollout_events WHERE thread_id=? AND turn_id=? AND item_id='unfinished'
  AND kind='item_started' AND json_extract(data_json,'$.status')='inProgress'`, thread, turn) != 1 {
 		t.Fatal("projection did not preserve the original native start")
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM events e JOIN conversation_tool_uses u ON e.object_id=u.message_id
+ WHERE u.item_id='unfinished' AND e.kind='conversation.tool_use' AND json_extract(e.body_json,'$.status')='interrupted'`) != 1 {
+		t.Fatal("interruption was not published once for the original visible tool")
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unrelated' AND status='running'`) != 1 ||
+		h.countWhere(`SELECT COUNT(*) FROM manager_projected_running_tools WHERE run_id=?`, as.RunID) != 0 {
+		t.Fatal("stop changed an unrelated tool or left settled projection tracking")
 	}
 }
 

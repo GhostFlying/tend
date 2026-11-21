@@ -404,7 +404,7 @@ func (a *App) BindMainToolSource(ctx context.Context, native, messageID, request
 		}
 		changed = true
 		now := a.now().UnixMilli()
-		if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolStatus(status), now); err != nil {
+		if err := insertToolUseEvent(ctx, tx, a.ids, id, protocol.ToolStatus(status), now); err != nil {
 			return err
 		}
 		// The tool event resolves to the new source. Refresh the old turn after

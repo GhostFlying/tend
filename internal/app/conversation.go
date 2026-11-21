@@ -639,7 +639,7 @@ func recordMessageState(ctx context.Context, tx *store.Tx, ids protocol.IDGen, m
 
 // insertToolUseEvent records that a tool use was settled outside a
 // request, as a request's record would.
-func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID string, status protocol.ToolStatus, now int64) error {
+func insertToolUseEvent(ctx context.Context, tx *store.Tx, ids protocol.IDGen, messageID string, status protocol.ToolStatus, now int64) error {
 	seq, err := store.GetConversationSeq(ctx, tx.Q(), messageID)
 	if err != nil {
 		return err
@@ -649,7 +649,7 @@ func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID st
 		return fmt.Errorf("app: encode tool use event: %w", err)
 	}
 	_, err = tx.InsertEvent(ctx, store.EventRow{
-		EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
+		EventID: ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
 		ObjectVersion: seq, Kind: "conversation.tool_use", BodyJSON: string(body), CreatedAt: now,
 	})
 	return err
@@ -976,7 +976,7 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		}
 		defer endTools(len(uses))
 		for _, id := range uses {
-			if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolInterrupted, now); err != nil {
+			if err := insertToolUseEvent(ctx, tx, a.ids, id, protocol.ToolInterrupted, now); err != nil {
 				return err
 			}
 		}
