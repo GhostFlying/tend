@@ -133,3 +133,23 @@ func TestGitHubLegacyQueryDoesNotRequestChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCodebaseNamedChecksPreserveRunnerCandidateBase(t *testing.T) {
+	c := New(Config{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[3] == "get" {
+			return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"open","TargetBranch":{"Name":"integration","Commit":{"Id":"live-target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"patchset-base"}]}}}`), nil
+		}
+		return []byte(`{"status":"success","data":{"merge_request":{"number":7,"status":"open","source_commit_id":"head"},"check_runs":{"total_count":1,"items":[{"Name":"required","Status":"completed","Conclusion":"success"}]}}}`), nil
+	}})
+	ref := Ref{Provider: Codebase, Repository: "example/project", Number: 7}
+	before, err := c.Observe(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref.IncludeChecks = true
+	during, err := c.Observe(t.Context(), ref)
+	if err != nil || during.CI == nil || len(during.CI.Checks) != 1 || during.BaseSHA != "live-target" ||
+		before.BaseSHA != during.BaseSHA || before.HeadSHA != during.HeadSHA || before.TargetSHA != during.TargetSHA {
+		t.Fatal("requesting check evidence changed existing candidate metadata", before, during, err)
+	}
+}

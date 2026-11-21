@@ -80,7 +80,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		out.TargetRef = mr.TargetBranch.Name
 	}
 	if mr.TargetBranch != nil && mr.TargetBranch.Commit != nil {
-		if !(c.cfg.IncludeChecks || ref.IncludeChecks) {
+		if !c.cfg.IncludeChecks {
 			out.BaseSHA = mr.TargetBranch.Commit.ID
 		}
 		out.TargetSHA = mr.TargetBranch.Commit.ID
@@ -93,7 +93,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		if v.Number > latest && v.SourceCommitId != "" {
 			latest = v.Number
 			out.HeadSHA = v.SourceCommitId
-			if c.cfg.IncludeChecks || ref.IncludeChecks {
+			if c.cfg.IncludeChecks {
 				out.BaseSHA = v.TargetCommitId
 			}
 		}
@@ -104,7 +104,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	if mr.Status == Closed {
 		out.ClosedBy = mr.ClosedBy.actor()
 	}
-	if (c.cfg.IncludeChecks || ref.IncludeChecks) && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
+	if c.cfg.IncludeChecks && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
 		confirmed, err := c.codebaseLineage(ctx, ref, out.TargetSHA, out.MergeSHA)
 		if err != nil {
 			out.LineageErrorKind = "query_failed"

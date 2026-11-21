@@ -387,3 +387,52 @@ func TestUnsubscribedRunnerQueriesLeaveCanonicalOwnerIdle(t *testing.T) {
 		t.Fatal("runner query or provider result woke the canonical owner", initial, n)
 	}
 }
+
+func TestPRWaitPrefersCapableRunnerAndRetainsLegacyObservationFallback(t *testing.T) {
+	for _, modern := range []bool{true, false} {
+		t.Run(map[bool]string{false: "legacy-only", true: "mixed-generations"}[modern], func(t *testing.T) {
+			f := newPRWaitTest(t, false)
+			o := prWaitSnapshot()
+			f.record(t, &o, "")
+			f.request(t, "needs-check", protocol.PRWaitCondition{Kind: protocol.PRWaitCheckCompleted, HeadSHA: o.HeadSHA, Name: prWaitCheck})
+			stopOwnerClaim(t, f.h, f.run)
+
+			cfg := testConfig()
+			old := cfg.Hosts[0]
+			old.HostID = "linux-2"
+			cfg.Hosts = append(cfg.Hosts, old)
+			f.h.syncConfig(cfg)
+			if !modern {
+				f.h.clock.Advance(RunnerOfflineAfter)
+			}
+			observerHello(t, f.h, "linux-2", "legacy-observer")
+			legacy := pollDelivery(t, f.h, "linux-2", "legacy-observer")
+			if modern {
+				if len(legacy) != 0 {
+					t.Fatal("a legacy reader reserved the available exact-evidence query", legacy)
+				}
+				o.CI.Checks[0].State, o.CI.Checks[0].Conclusion = "completed", "failure"
+				f.record(t, &o, "")
+				if v := f.readWait(t); v.WakeReason != "check_completed" || v.PREvidence.Check.Conclusion != "failure" {
+					t.Fatal("new generation could not resolve the held wait", v)
+				}
+				return
+			}
+			if len(legacy) != 1 || legacy[0].PRWaitEvidence {
+				t.Fatal("no modern reader is live, so the original legacy path should still observe facts", legacy)
+			}
+			rep := protocol.DeliveryReportPayload{InstanceID: "legacy-observer", WorkItemID: legacy[0].WorkItemID,
+				DeliveryID: legacy[0].Delivery.DeliveryID, Generation: legacy[0].Generation, Nonce: legacy[0].Nonce,
+				Snapshot: &protocol.DeliverySnapshot{State: "open", HeadSHA: o.HeadSHA, TargetSHA: o.TargetSHA, Mergeability: "conflicting"}}
+			if !accepted(t, f.h.exec(runner("linux-2"), f.h.env(protocol.OpDeliveriesReport, protocol.Target{Type: "host", ID: "linux-2"}, rep, nil), ReportDelivery{})) {
+				t.Fatal("capability preference rejected an original legacy receipt")
+			}
+			if v := f.readWait(t); v.Status != "waiting" || v.PREvidence != nil {
+				t.Fatal("legacy observation fabricated new check evidence", v)
+			}
+			if current := readObservations(t, f.h, f.issue.IssueID)[0]; current.Mergeability != "conflicting" {
+				t.Fatal("legacy observation stopped updating ordinary views", current)
+			}
+		})
+	}
+}
