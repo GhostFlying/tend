@@ -250,7 +250,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				result, run, artifact, err = store.ReadSharedAcceptanceResult(ctx, tx.Q(), r, &inputRound)
 				last.AcceptanceID, last.AcceptanceVerdict = inputRound.AcceptanceID, inputRound.AcceptanceVerdict
 			} else {
-				inputRound, err = independentReviewRetryResultRound(ctx, tx.Q(), inputRound)
+				inputRound, err = independentReviewRetryResultRound(ctx, tx.Q(), r, inputRound)
 				if err == nil {
 					result, run, artifact, err = store.ReadSharedReviewResult(ctx, tx.Q(), r, inputRound)
 				}
@@ -295,18 +295,25 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait requires an unresolved frozen review without a quality conclusion")
 			}
 			last := protocol.SharedReviewInputRound(r.Rounds[len(r.Rounds)-1])
-			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), last.TaskID, false); err != nil {
-				return Outcome{}, err
-			}
+			stopTask := last.TaskID
 			if last.ReviewerRole == protocol.RoleAccept {
 				if _, _, _, err := store.ReadSharedAcceptanceResult(ctx, tx.Q(), r, &last); err == nil {
 					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record the actual acceptance instead of replacing its conclusion with waiting")
 				} else if protocol.CodeOf(err) != protocol.CodeInvalidTransition && !errors.Is(err, store.ErrAcceptanceReviewEvidence) {
 					return Outcome{}, err
 				}
-			} else if _, _, _, err := store.ReadSharedReviewResult(ctx, tx.Q(), r, last); err == nil {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record the actual review report instead of replacing its conclusion with waiting")
-			} else if protocol.CodeOf(err) != protocol.CodeInvalidTransition && protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+			} else {
+				last, err = independentReviewRetryResultRound(ctx, tx.Q(), r, last)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if _, _, _, err := store.ReadSharedReviewResult(ctx, tx.Q(), r, last); err == nil {
+					return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "record the actual review report instead of replacing its conclusion with waiting")
+				} else if protocol.CodeOf(err) != protocol.CodeInvalidTransition && protocol.CodeOf(err) != protocol.CodeInvalidRequest {
+					return Outcome{}, err
+				}
+			}
+			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), stopTask, false); err != nil {
 				return Outcome{}, err
 			}
 			r.Status = "waiting"
@@ -583,39 +590,8 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		return out, err
 	}
 	out.ExecutionRequirements = requirements
-	for _, link := range r.Links {
-		if link.TaskID != "" && acceptance == "" {
-			_, sourceSpec, err := loadTask(ctx, q, link.TaskID)
-			if err != nil {
-				return out, err
-			}
-			if sourceSpec.AgentSelection != nil && sourceSpec.AgentSelection.Acceptance.CategoryID != "" {
-				required := sourceSpec.AgentSelection.Acceptance
-				actual := spec.AgentSelection.Implementation
-				if actual.CategoryID != required.CategoryID || required.AgentID != "" && required.AgentID != out.Reviewer {
-					return out, protocol.Errorf(protocol.CodeForbidden, "shared reviewer must retain the linked delivery's formal category, identity and profile")
-				}
-			}
-		}
-		if link.TaskID == "" {
-			continue
-		}
-		rows, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role IN ('implement','issue_manager')`, link.TaskID)
-		if err != nil {
-			return out, err
-		}
-		for _, run := range rows {
-			pin, err := store.GetRunExecution(ctx, q, run)
-			if errors.Is(err, store.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return out, err
-			}
-			if out.Reviewer == pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID {
-				return out, protocol.Errorf(protocol.CodeForbidden, "the formal reviewer must be independent of the linked implementation")
-			}
-		}
+	if err := validateLinkedSharedReviewer(ctx, q, r, spec, out.Reviewer, acceptance); err != nil {
+		return out, err
 	}
 	// Running report work may yield and resume on a successor Run within the
 	// same execution generation. Freeze its selected identity/profile now;
@@ -624,6 +600,43 @@ func bindSharedReviewTask(ctx context.Context, q store.Querier, r protocol.Share
 		out.RunID = ""
 	}
 	return out, nil
+}
+
+func validateLinkedSharedReviewer(ctx context.Context, q store.Querier, r protocol.SharedDeliveryReview, spec domain.Spec, reviewer, acceptance string) error {
+	for _, link := range r.Links {
+		if link.TaskID == "" {
+			continue
+		}
+		if acceptance == "" {
+			_, sourceSpec, err := loadTask(ctx, q, link.TaskID)
+			if err != nil {
+				return err
+			}
+			if sourceSpec.AgentSelection != nil && sourceSpec.AgentSelection.Acceptance.CategoryID != "" {
+				required := sourceSpec.AgentSelection.Acceptance
+				if spec.AgentSelection == nil || spec.AgentSelection.Implementation.CategoryID != required.CategoryID || required.AgentID != "" && required.AgentID != reviewer {
+					return protocol.Errorf(protocol.CodeForbidden, "shared reviewer must retain the linked delivery's formal category, identity and profile")
+				}
+			}
+		}
+		rows, err := store.FollowupIDs(ctx, q, `SELECT run_id FROM runs WHERE task_id=? AND role IN ('implement','issue_manager')`, link.TaskID)
+		if err != nil {
+			return err
+		}
+		for _, run := range rows {
+			pin, err := store.GetRunExecution(ctx, q, run)
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if reviewer == pin.Identity.ExecutionEnvironmentID+"/"+pin.Identity.LocalID {
+				return protocol.Errorf(protocol.CodeForbidden, "the formal reviewer must be independent of the linked implementation")
+			}
+		}
+	}
+	return nil
 }
 
 // A category expresses the work; only an actual Run pin establishes its reviewer.

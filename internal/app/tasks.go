@@ -558,8 +558,23 @@ func (UpdateIntent) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 	}
-	actions, events, err := applyDecision(ctx, x, tx, row, merged, map[string]any{"on": "task.spec_updated"})
+	trigger := map[string]any{"on": "task.spec_updated"}
+	var repair *independentReviewFailure
+	if p.Spec != nil && len(merged.Actions) != 0 {
+		repair, err = repairIndependentReviewPreparation(ctx, x, tx.Q(), row, *p.Spec)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if repair != nil {
+			trigger["independent_review_failed_run"] = repair.run
+			trigger["review_retry_preparation_run_id"] = repair.preparationRun
+		}
+	}
+	actions, events, err := applyDecision(ctx, x, tx, row, merged, trigger)
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := consumeIndependentReviewRetry(ctx, x, tx, repair, actions); err != nil {
 		return Outcome{}, err
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {

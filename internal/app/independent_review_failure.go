@@ -23,6 +23,7 @@ type independentReviewFailure struct {
 	specVersion                       int64
 	assignmentEpoch                   int64
 	retryAction                       string
+	preparationRun                    string
 }
 
 func (f independentReviewFailure) canRetry() bool {
@@ -279,7 +280,7 @@ func settleIndependentReviewRetry(ctx context.Context, tx *store.Tx, rc runConte
 // independentReviewRetryResultRound resolves an existing failed binding to an
 // actual outcome from its approved retry. All ordinary review qualification
 // still uses the frozen candidate, requirements, profile and reviewer.
-func independentReviewRetryResultRound(ctx context.Context, q store.Querier, round protocol.SharedDeliveryReviewRound) (protocol.SharedDeliveryReviewRound, error) {
+func independentReviewRetryResultRound(ctx context.Context, q store.Querier, review protocol.SharedDeliveryReview, round protocol.SharedDeliveryReviewRound) (protocol.SharedDeliveryReviewRound, error) {
 	if round.ArtifactID != "" || round.ImplementGeneration <= 0 {
 		return round, nil
 	}
@@ -309,6 +310,17 @@ func independentReviewRetryResultRound(ctx context.Context, q store.Querier, rou
 		if err := store.RequireSharedReviewExecutionProfile(round.ExecutionRequirements, pin.Profile); err != nil {
 			return round, err
 		}
+	}
+	raw, err := store.GetSpec(ctx, q, task, spec)
+	if err != nil {
+		return round, err
+	}
+	var reviewerSpec domain.Spec
+	if err := json.Unmarshal([]byte(raw), &reviewerSpec); err != nil {
+		return round, err
+	}
+	if err := validateLinkedSharedReviewer(ctx, q, review, reviewerSpec, round.Reviewer, ""); err != nil {
+		return round, err
 	}
 	round.RunID, round.TaskID, round.SpecVersion, round.ImplementGeneration = run, task, spec, generation
 	round.ReviewerProfile = &pin.Profile
@@ -378,6 +390,79 @@ func handoffIndependentReviewRetry(ctx context.Context, x *Exec, q store.Querier
 	return selected, nil
 }
 
+func qualifyIndependentReviewHandoff(ctx context.Context, q store.Querier, failedRun, replacement string) error {
+	original, err := store.GetRun(ctx, q, failedRun)
+	if err != nil {
+		return err
+	}
+	action, err := store.GetAction(ctx, q, original.ActionID)
+	if err != nil {
+		return err
+	}
+	ref, round, err := boundIndependentReviewRound(ctx, q, original.TaskID, action.TargetSpecVersion, original.Role)
+	if err != nil || round == nil {
+		return err
+	}
+	review, err := store.SharedDeliveryReviewForTarget(ctx, q, ref)
+	if err != nil {
+		return err
+	}
+	bound, err := bindSharedReviewTask(ctx, q, review, replacement, "", round.ExecutionRequirements)
+	if err != nil {
+		return err
+	}
+	if bound.Reviewer != round.Reviewer {
+		return protocol.Errorf(protocol.CodeForbidden, "the review retry belongs to the original formal reviewer")
+	}
+	return nil
+}
+
+func repairIndependentReviewPreparation(ctx context.Context, x *Exec, q store.Querier, task store.TaskRow, spec domain.Spec) (*independentReviewFailure, error) {
+	if x.Env.Operation != "issues.update_task" || task.BlockReason != protocol.BlockPreparationRequired || !spec.Workspace.IncludeExistingChanges {
+		return nil, nil
+	}
+	f, err := pendingIndependentReviewFailure(ctx, q, task.TaskID, protocol.RoleImplement, "", task.SpecVersion)
+	if err != nil || f == nil || f.retryAction == "" {
+		return nil, err
+	}
+	// An immutable preparation failure was admitted only for a starting Run.
+	// A second Run in the approved generation precludes transferring the slot.
+	err = q.QueryRowContext(ctx, `SELECT r.run_id FROM plan_actions a JOIN runs r USING(action_id)
+		JOIN run_preparation_failures p USING(run_id)
+		WHERE a.action_id=? AND a.task_id=? AND a.generation=? AND a.status='done' AND r.observed_state='failed'
+		 AND json_type(p.failure_json,'$.worker_started')='false'
+		 AND NOT EXISTS(SELECT 1 FROM runs other JOIN plan_actions a2 ON a2.action_id=other.action_id
+		   WHERE a2.task_id=a.task_id AND a2.kind=a.kind AND a2.target_spec_version=a.target_spec_version
+		     AND a2.generation=a.generation AND other.run_id<>r.run_id)`,
+		f.retryAction, task.TaskID, task.ImplementGeneration).Scan(&f.preparationRun)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	action, err := store.GetAction(ctx, q, f.retryAction)
+	if err != nil {
+		return nil, err
+	}
+	_, original, err := approvedIndependentReviewRetry(ctx, q, action)
+	if err != nil {
+		return nil, err
+	}
+	if original.key != "" {
+		target, err := independentReviewTargetForTask(ctx, q, task.TaskID, spec)
+		if err != nil || !matchesIndependentReviewRetryTarget(original, target) {
+			return nil, err
+		}
+	}
+	approval := *f
+	approval.retryAction = ""
+	if err := authorizeIndependentReviewRetry(ctx, x, q, task, approval); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
 func consumeIndependentReviewRetry(ctx context.Context, x *Exec, tx *store.Tx, failure *independentReviewFailure, actions []actionResult) error {
 	if failure == nil {
 		return nil
@@ -386,17 +471,19 @@ func consumeIndependentReviewRetry(ctx context.Context, x *Exec, tx *store.Tx, f
 		return protocol.Errorf(protocol.CodeInvalidTransition, "an independent review approval requires exactly one execution action")
 	}
 	if failure.retryAction != "" {
-		original, err := unclaimedIndependentReviewAction(ctx, tx.Q(), failure.retryAction)
-		if err != nil {
-			return err
-		}
-		if original.Status == protocol.ActionPending {
-			if err := tx.SetActionStatus(ctx, original.ActionID, protocol.ActionSuperseded, x.Now.UnixMilli()); err != nil {
+		if failure.preparationRun == "" {
+			original, err := unclaimedIndependentReviewAction(ctx, tx.Q(), failure.retryAction)
+			if err != nil {
 				return err
+			}
+			if original.Status == protocol.ActionPending {
+				if err := tx.SetActionStatus(ctx, original.ActionID, protocol.ActionSuperseded, x.Now.UnixMilli()); err != nil {
+					return err
+				}
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE plan_actions SET trigger_json=json_set(trigger_json,'$.original_review_retry_action_id',?) WHERE action_id=?`,
-			original.ActionID, actions[0].ActionID); err != nil {
+			failure.retryAction, actions[0].ActionID); err != nil {
 			return err
 		}
 	}

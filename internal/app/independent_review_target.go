@@ -142,24 +142,36 @@ func saveIndependentReviewTarget(ctx context.Context, tx *store.Tx, run string, 
 }
 
 func boundIndependentReviewTarget(ctx context.Context, q store.Querier, rc runContext) (independentReviewTarget, error) {
+	ref, round, err := boundIndependentReviewRound(ctx, q, rc.task.TaskID, rc.action.TargetSpecVersion, rc.run.Role)
+	if err != nil || round == nil {
+		return independentReviewTarget{}, err
+	}
+	return independentReviewPRTarget(ref, round.HeadSHA, round.BaseSHA), nil
+}
+
+func boundIndependentReviewRound(ctx context.Context, q store.Querier, task string, spec int64, role protocol.RunRole) (protocol.IssueDelivery, *protocol.SharedDeliveryReviewRound, error) {
 	var ref protocol.IssueDelivery
-	var head, base string
-	err := q.QueryRowContext(ctx, `SELECT r.provider,r.repository,r.number,json_extract(part.value,'$.head_sha'),json_extract(part.value,'$.base_sha')
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT r.provider,r.repository,r.number,part.value
 		FROM shared_delivery_reviews r JOIN json_each(r.body_json, '$.rounds') part
 		WHERE (json_extract(part.value,'$.task_id')=? AND json_extract(part.value,'$.spec_version')=?
 		    AND COALESCE(json_extract(part.value,'$.reviewer_role'),'implement')=? AND json_extract(part.value,'$.result') IS NULL)
 		   OR (json_extract(part.value,'$.supplement_task_id')=? AND json_extract(part.value,'$.supplement_spec_version')=?
 		    AND COALESCE(json_extract(part.value,'$.supplement_artifact_id'),'')='' AND ?='implement')
 		ORDER BY r.revision DESC,r.review_id,part.key DESC LIMIT 1`,
-		rc.task.TaskID, rc.action.TargetSpecVersion, rc.run.Role, rc.task.TaskID, rc.action.TargetSpecVersion, rc.run.Role).
-		Scan(&ref.Provider, &ref.Repository, &ref.Number, &head, &base)
+		task, spec, role, task, spec, role).
+		Scan(&ref.Provider, &ref.Repository, &ref.Number, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
-		return independentReviewTarget{}, nil
+		return ref, nil, nil
 	}
 	if err != nil {
-		return independentReviewTarget{}, err
+		return ref, nil, err
 	}
-	return independentReviewPRTarget(ref, head, base), nil
+	var round protocol.SharedDeliveryReviewRound
+	if err := json.Unmarshal([]byte(raw), &round); err != nil {
+		return ref, nil, err
+	}
+	return ref, &round, nil
 }
 
 // A registered target remains the same obligation when its first provider
