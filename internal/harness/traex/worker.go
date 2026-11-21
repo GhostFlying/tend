@@ -441,7 +441,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 						terminalFailure = ev.Failure
 					}
 				case harness.EventTurnCompleted:
-					if ev.TurnStatus == "failed" && (ev.Failure == nil || ev.Failure.Code == "unknown") {
+					if terminalFailure != nil && ev.TurnStatus == "failed" && (ev.Failure == nil || ev.Failure.Code == "unknown") {
 						ev.Failure = terminalFailure
 					}
 					if spec.Role == protocol.RoleAccept && spec.AcceptanceEvidenceFiles {
