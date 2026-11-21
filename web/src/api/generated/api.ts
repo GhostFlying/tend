@@ -6273,6 +6273,7 @@ export interface MessagingDelivery {
  */
 export interface MessagingEvent {
   event_seq: number;
+  issue_id?: string;
   kind: string;
   object_id: string;
   object_type: string;

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/GhostFlying/tend/internal/blobstore"
 )
@@ -37,6 +38,88 @@ func parseOriginalReference(ctx context.Context, q Querier, raw string) (origina
 	return ref, false, nil
 }
 
+// ResolveMessageBodies resolves a page of internal assistant bodies in place.
+// The caller supplies only trusted assistant content, as with ResolveMessageBody.
+func ResolveMessageBodies(ctx context.Context, q Querier, bodies []string) error {
+	positions := make(map[int64][]int)
+	var ids []int64
+	for n, raw := range bodies {
+		if !strings.Contains(raw, "tend:retained-json:") {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if json.Unmarshal([]byte(raw), &object) != nil {
+			continue
+		}
+		if compact := object[retainedMarker]; compact != nil && object[derivedEventMarker] == nil {
+			var id int64
+			if err := json.Unmarshal(compact, &id); err != nil || id <= 0 {
+				return errors.New("store: invalid compact original identity")
+			}
+			if _, seen := positions[id]; !seen {
+				ids = append(ids, id)
+			}
+			positions[id] = append(positions[id], n)
+			continue
+		}
+		body, err := ResolveJSON(ctx, q, raw)
+		if err != nil {
+			return err
+		}
+		bodies[n] = body
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	keys, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT v.body_id,v.sha256,v.encoding,v.window_id,w.sha256,a.archive_id,w.byte_offset,w.byte_length
+		FROM json_each(?) k CROSS JOIN retained_original_values v ON v.body_id=k.value
+		JOIN retained_original_windows w ON w.window_id=COALESCE(v.window_id,v.recipe_window_id)
+		JOIN retained_original_archives a USING(archive_key)`, string(keys))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	fq, ok := q.(interface{ FileStore() *blobstore.Store })
+	if !ok || fq.FileStore() == nil {
+		return errors.New("store: original file store unavailable")
+	}
+	files := fq.FileStore()
+	for rows.Next() {
+		var id int64
+		var hash, windowHash []byte
+		var windowID *int64
+		var w blobstore.Window
+		var encoding string
+		if err := rows.Scan(&id, &hash, &encoding, &windowID, &windowHash, &w.Archive, &w.Offset, &w.Length); err != nil {
+			return err
+		}
+		w.SHA256 = hex.EncodeToString(windowHash)
+		ref, err := compactOriginalReference(ctx, files, hex.EncodeToString(hash), encoding, windowID != nil, w)
+		if err != nil {
+			return err
+		}
+		body, err := resolveOriginalReference(ctx, files, ref)
+		if err != nil {
+			return err
+		}
+		for _, n := range positions[id] {
+			bodies[n] = string(body)
+		}
+		delete(positions, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(positions) != 0 {
+		return errors.New("store: missing compact original or source window")
+	}
+	return nil
+}
+
 func loadOriginalWindow(ctx context.Context, q Querier, id int64) (blobstore.Window, error) {
 	var w blobstore.Window
 	var hash []byte
@@ -51,34 +134,41 @@ func loadOriginalValue(ctx context.Context, q Querier, id int64) (originalRefere
 	if err := q.QueryRowContext(ctx, `SELECT sha256,window_id,encoding,recipe_window_id FROM retained_original_values WHERE body_id=?`, id).Scan(&hash, &window, &ref.Encoding, &recipe); err != nil {
 		return ref, fmt.Errorf("store: compact original %d: %w", id, err)
 	}
-	ref.SHA256 = hex.EncodeToString(hash)
-	if window != nil {
-		w, err := loadOriginalWindow(ctx, q, *window)
-		if err != nil {
-			return ref, err
-		}
-		ref.Window = &w
-		return ref, nil
+	fq, _ := q.(interface{ FileStore() *blobstore.Store })
+	var files *blobstore.Store
+	if fq != nil {
+		files = fq.FileStore()
 	}
-	if recipe == nil {
+	source := window
+	if source == nil {
+		source = recipe
+	}
+	if source == nil {
 		return ref, errors.New("store: compact original has no source")
 	}
-	w, err := loadOriginalWindow(ctx, q, *recipe)
+	w, err := loadOriginalWindow(ctx, q, *source)
 	if err != nil {
 		return ref, err
 	}
-	fq, ok := q.(interface{ FileStore() *blobstore.Store })
-	if !ok || fq.FileStore() == nil {
+	return compactOriginalReference(ctx, files, hex.EncodeToString(hash), ref.Encoding, window != nil, w)
+}
+
+func compactOriginalReference(ctx context.Context, files *blobstore.Store, hash, encoding string, direct bool, w blobstore.Window) (originalReference, error) {
+	if direct {
+		return originalReference{SHA256: hash, Encoding: encoding, Window: &w}, nil
+	}
+	var ref originalReference
+	if files == nil {
 		return ref, errors.New("store: original file store unavailable")
 	}
-	raw, err := fq.FileStore().ReadWindow(ctx, w)
+	raw, err := files.ReadWindow(ctx, w)
 	if err != nil {
 		return ref, err
 	}
 	if err = json.Unmarshal(raw, &ref); err != nil {
 		return ref, err
 	}
-	if ref.SHA256 != hex.EncodeToString(hash) {
+	if ref.SHA256 != hash {
 		return ref, errors.New("store: compact rule identity differs")
 	}
 	return ref, nil

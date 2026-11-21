@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -299,5 +301,34 @@ func TestMessagingManagerReplyPublishesWithoutContextCeremonyAndRetainsIssueScop
 	op, err := h.app.Execute(t.Context(), principal, h.env("conversation.reply", protocol.Target{Type: "logical_turn", ID: turn.RequestID}, p, nil), HostedCoordinationCommand{Command: CoordinationReply{}, ExecutionID: turn.RequestID, EffectSeq: 3})
 	if protocol.CodeOf(err) != protocol.CodeForbidden || h.count("conversation_messages") != before {
 		t.Fatal("optional metadata expanded the actual Issue authority", op, err)
+	}
+}
+
+func TestMessagingHistoryPagesKeepChronologicalSeekBoundaries(t *testing.T) {
+	h := newHarness(t)
+	var ids []string
+	for i := range 105 {
+		op := h.exec(owner, h.env("messaging.notify", protocol.Target{Type: "message"},
+			protocol.MessagingPublication{Body: fmt.Sprintf("publication %d", i), Reason: "verified_result"},
+			nil), MessagingCommand{Action: "notify"})
+		ids = append(ids, messageID(t, op))
+	}
+
+	latest, err := h.app.MessagingRecentMessages(t.Context(), 0)
+	if err != nil || len(latest.Items) != 100 || !latest.More || latest.Next != latest.Items[0].Sequence {
+		t.Fatalf("latest page: size=%d more=%t next=%d err=%v", len(latest.Items), latest.More, latest.Next, err)
+	}
+	older, err := h.app.MessagingRecentMessages(t.Context(), latest.Next)
+	if err != nil || len(older.Items) != 5 || older.More || older.Next != older.Items[0].Sequence {
+		t.Fatalf("older page: size=%d more=%t next=%d err=%v", len(older.Items), older.More, older.Next, err)
+	}
+	for i, message := range append(older.Items, latest.Items...) {
+		if message.MessageID != ids[i] || message.Processing != "published" || message.SourceMessageIDs == nil || message.Attachments == nil {
+			t.Fatalf("message %d: %+v", i, message)
+		}
+	}
+	forward, err := h.app.MessagingMessages(t.Context(), older.Items[4].Sequence, "", "", "")
+	if err != nil || !reflect.DeepEqual(latest.Items, forward.Items) || forward.More || forward.Next != latest.Items[99].Sequence {
+		t.Fatalf("forward page: size=%d more=%t next=%d err=%v", len(forward.Items), forward.More, forward.Next, err)
 	}
 }

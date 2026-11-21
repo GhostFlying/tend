@@ -125,6 +125,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		// read is not missed.
 		changed := s.app.Changes().Wait()
 		var batch []protocol.LedgerEvent
+		var messagingProjection map[int64]protocol.MessagingEvent
 		var resetAt, through int64
 		var scanned int
 		if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -136,7 +137,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				resetAt, err = store.LatestEventSeq(ctx, tx.Q())
 				return err
 			}
-			if chat {
+			if messaging {
+				var events []store.EventView
+				events, messagingProjection, err = readMessagingEvents(ctx, tx.Q(), after)
+				scanned = len(events)
+				for _, ev := range events {
+					batch = append(batch, protocol.LedgerEvent{EventSeq: ev.Seq, Kind: ev.Kind})
+				}
+			} else if chat {
 				batch, through, scanned, err = views.ChatEvents(ctx, tx.Q(), after, eventBatch)
 			} else {
 				batch, err = views.Events(ctx, tx.Q(), after, eventBatch)
@@ -169,30 +177,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			after = ev.EventSeq
 			var payload any = ev
 			if messaging {
-				kind := ev.Kind
-				if kind == "conversation.message" {
-					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
-					if err != nil || message.Direction != "input" {
-						continue
-					}
-					kind = "messaging.input"
-				} else if kind == "conversation.associations_changed" {
-					if _, err := s.app.MessagingMessage(ctx, ev.ObjectID); err != nil {
-						continue
-					}
-					kind = "messaging.associations_changed"
-				} else if kind == "conversation.message_state" || kind == "conversation.urgent_consumed" || kind == "conversation.turn_reviewed" || strings.HasPrefix(kind, "conversation.processing_") || strings.HasPrefix(kind, "conversation.clarification_") {
-					message, err := s.app.MessagingMessage(ctx, ev.ObjectID)
-					if err != nil || message.Direction != "input" {
-						continue
-					}
-					kind = "messaging.processing"
-				} else if strings.HasPrefix(kind, "task.") || strings.HasPrefix(kind, "issue.") || kind == "run.observed" {
-					kind = "messaging.work_changed"
-				} else if !strings.HasPrefix(kind, "messaging.") {
+				event, ok := messagingProjection[ev.EventSeq]
+				if !ok {
 					continue
 				}
-				payload = protocol.MessagingEvent{EventSeq: ev.EventSeq, Kind: kind, ObjectType: ev.ObjectType, ObjectID: ev.ObjectID}
+				payload = event
 			}
 			if writeEvent(w, "ledger", ev.EventSeq, payload) != nil {
 				diagnostic.reason = "ledger_write_failed"
