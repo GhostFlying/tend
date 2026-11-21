@@ -3347,16 +3347,23 @@ try {
       assert.equal(new URL(page.url()).searchParams.get("issue"), issue.issue_id);
       assert.equal(new URL(page.url()).searchParams.get("tab"), "events");
       assert.deepEqual(pageErrors, []);
-      await page.route("**/api/v1/conversation/transcript?*", (route) =>
+      const mainHistory = (url: URL) =>
+        url.pathname === "/api/v1/conversation" &&
+        url.searchParams.get("projection") === "chat" &&
+        url.searchParams.get("conversation_id") === "main";
+      await page.route(mainHistory, (route) =>
         route.fulfill({
-          json: { blocks: [{ ...block, items: [associationItem, crossReply] }], more: false },
+          json: { items: [associationItem, crossReply], more: false, event_seq: seq },
         }),
       );
       await navigate(page, "/diagnostics/main");
-      await page
-        .locator('[data-scroll-id="reply-cross-issue"]')
-        .getByRole("button", { name: "修改 Issue 关联", exact: true })
-        .waitFor();
+      // The main conversation can retain a page from before this fixture was installed.
+      const history = page.waitForResponse((response) => mainHistory(new URL(response.url())));
+      await page.reload();
+      assert.equal((await history).status(), 200);
+      const chatReply = page.locator('[data-scroll-id="reply-cross-issue"]');
+      await chatReply.getByText(crossReply.body!, { exact: true }).waitFor();
+      await chatReply.getByRole("button", { name: "修改 Issue 关联", exact: true }).waitFor();
       console.log(
         `PASS S11 hierarchy ${width}: aligned full-width discussion, background disclosure, scoped diagnostics, collapsed trace and stable event history`,
       );
