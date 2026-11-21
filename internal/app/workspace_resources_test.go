@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"testing"
 	"time"
 
@@ -418,5 +419,94 @@ func TestWorkspaceCleanupRotatesPastDeferredFullBatch(t *testing.T) {
 			t.Fatal("same clock tick starved the resource outside previous batch")
 		}
 		previousBatch = next
+	}
+}
+
+func TestRollingWorkspaceCleanupKeepsOriginalReservation(t *testing.T) {
+	h := newDeliverableHarness(t)
+	ctx := t.Context()
+	const host = "linux-1"
+	finished := func(title string) string {
+		t.Helper()
+		task := h.createReportTask(title, temporaryReportSpec())
+		as, ok, _ := h.claimDeliverableRun()
+		if !ok || as.TaskID != task.TaskID {
+			t.Fatal("missing report assignment")
+		}
+		h.reportDirectory(as, t.TempDir())
+		h.completeReport(as)
+		if !h.releaseResource(task.TaskID, as.Workspace.ID) {
+			t.Fatal("resource did not become eligible for retention")
+		}
+		return as.Workspace.ID
+	}
+	oldResource := finished("predecessor cleanup")
+	legacyResource := finished("legacy cleanup without proven owner")
+	otherResource := finished("independent cleanup")
+	h.clock.Advance(8 * 24 * time.Hour)
+
+	old := testRuntime("predecessor")
+	if op := h.versionedHello(host, old); op.Error != nil {
+		t.Fatal(op)
+	}
+	reserve := func(journal string, limit int) []protocol.WorkspaceCleanup {
+		t.Helper()
+		payload := protocol.WorkspaceCleanupRequest{JournalID: journal, Limit: limit}
+		op := h.exec(runner(host), h.env(protocol.OpWorkspaceCleanup, protocol.Target{Type: "host", ID: host}, payload, nil), ReserveWorkspaceCleanup{})
+		var result protocol.WorkspaceCleanupResult
+		if err := json.Unmarshal(op.Result, &result); op.Error != nil || err != nil {
+			t.Fatal(op, err)
+		}
+		return result.Workspaces
+	}
+	original := reserve("", 2)
+	if len(original) != 2 || original[0].WorkspaceID != oldResource || original[1].WorkspaceID != legacyResource {
+		t.Fatal("missing original reservations", original)
+	}
+	next := testRuntime("successor")
+	next.JournalID = next.InstanceID
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		// This row models a schema-143 reservation whose original journal
+		// cannot be inferred while multiple generations are registered.
+		if _, err := tx.Exec(ctx, "UPDATE workspaces SET cleanup_journal_id=NULL WHERE workspace_id=?", legacyResource); err != nil {
+			return err
+		}
+		rt, err := store.GetHostRuntime(ctx, tx.Q(), host)
+		if err != nil {
+			return err
+		}
+		batch := store.UpgradeRow{View: protocol.UpgradeView{UpgradeID: "rolling", ReleaseID: "fixture", Status: "completed", Phase: "completed"}}
+		if err := tx.PutUpgrade(ctx, batch); err != nil {
+			return err
+		}
+		if err := tx.PreserveDrainingRunner(ctx, host, "rolling", rt, protocol.RunnerControl{Mode: protocol.RunnerMaintenance}); err != nil {
+			return err
+		}
+		rt.Runtime = *next
+		return tx.PutHostRuntime(ctx, host, rt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := reserve("", 4); len(got) != 1 || got[0] != original[0] {
+		t.Fatal("predecessor did not retain just its own reservation", got)
+	}
+	if got := reserve(next.JournalID, 4); len(got) != 1 || got[0].WorkspaceID != otherResource {
+		t.Fatal("outstanding cleanup blocked unrelated work or reassigned a reservation", got)
+	}
+	done := protocol.WorkspaceCleanupDone{WorkspaceID: legacyResource, CleanupID: original[1].CleanupID}
+	if op := h.exec(runner(host), h.env(protocol.OpWorkspaceCleanupDone, protocol.Target{Type: "workspace", ID: legacyResource}, done, nil), CompleteWorkspaceCleanup{}); op.Error != nil {
+		t.Fatal("valid legacy completion lost its original identity", op)
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		// The actual stop grant and physical-exit acknowledgment are covered
+		// by the rolling-runner tests.
+		_, err := tx.Exec(ctx, "DELETE FROM draining_runners WHERE host_id=? AND instance_id=?", host, old.InstanceID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := reserve(next.JournalID, 4)
+	if len(after) != 2 || !slices.Contains(after, original[0]) {
+		t.Fatal("confirmed exit did not let the successor recover the same reservation", after)
 	}
 }

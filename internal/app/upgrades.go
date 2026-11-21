@@ -761,15 +761,21 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				return nil
 			}
 			ctl.Revision++
-			ctl.Mode = protocol.RunnerMaintenance
 			ctl.UpgradeID = r.View.UpgradeID
 			ctl.Upgrade = nil
-			if rt.Runtime.JournalID != "" && h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) {
-				// Publish the target in the same transaction as the drain.
-				// Launch still requires the predecessor's applied-revision ACK.
+			phase := "draining"
+			if h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) && ctl.Mode == protocol.RunnerNormal {
+				phase = "warming"
 				ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
 				ctl.Upgrade.Rolling = true
 				ctl.Upgrade.Updater.Authorized = true
+			} else {
+				ctl.Mode = protocol.RunnerMaintenance
+				if rt.Runtime.JournalID != "" && h.Configuration == nil && h.PreviousHash != h.TargetHash && needsSelfUpdate(*r) {
+					ctl.Upgrade = runnerUpgradeTarget(*r, *h, false)
+					ctl.Upgrade.Rolling = true
+					ctl.Upgrade.Updater.Authorized = true
+				}
 			}
 			if ctl.CancelledUpgradeID != r.View.UpgradeID {
 				ctl.CancelledUpgradeID = ""
@@ -779,7 +785,7 @@ func advanceRunnerUpgrade(ctx context.Context, x *Exec, tx *store.Tx, r *store.U
 				return err
 			}
 			v.Status = "running"
-			v.Phase = "draining"
+			v.Phase = phase
 			r.Deadline = capUpgradeDeadline(r, now+r.DrainMillis)
 			return nil
 		}

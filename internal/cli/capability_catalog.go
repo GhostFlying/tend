@@ -386,7 +386,7 @@ func commandUsage(prefix []string) string {
 	slices.Sort(names)
 	var out strings.Builder
 	if name == "upgrade" || name == "upgrade recover" {
-		out.WriteString("\nUse tend upgrade runner-handoff --release <bundle> --config <runner-config> --upgrade-id <id> for the first overlapping runner installation on a host. --dry-run prints the pinned invocation.\n")
+		out.WriteString("\nUse tend upgrade runner-handoff --release <bundle> --config <runner-config> --upgrade-id <id> when the accepting runner needs explicit bootstrap during a rolling upgrade. --dry-run prints the pinned invocation.\n")
 		out.WriteString("\nIndependent local recovery: tend upgrade recover --release <complete-bundle> --config <fixed-updater-config> --force [--unit <service>] [--request-id <original-id>]. Uses the selected release's installer and does not require the old service or updater socket. --status reads the same durable recovery record; --dry-run prints the pinned invocation. Keep identical release, config and request identity after an interrupted reply.\n")
 	}
 	if name == "message" || name == "message associate" {

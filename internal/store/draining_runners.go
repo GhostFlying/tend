@@ -97,3 +97,21 @@ func (t *Tx) PutDrainingControl(ctx context.Context, host, instance string, cont
 	_, err = t.Exec(ctx, `UPDATE draining_runners SET control_json=? WHERE host_id=? AND instance_id=?`, string(raw), host, instance)
 	return err
 }
+
+// DrainingPreparationRepos identifies repositories whose first clone can
+// still be published by a runner that predates independent journals and
+// interprocess repository locks. An unknown Run without a release can still
+// own its original preparation.
+func DrainingPreparationRepos(ctx context.Context, q Querier, host string) ([]string, error) {
+	return FollowupIDs(ctx, q, `SELECT DISTINCT json_extract(m.value,'$.repo')
+		FROM draining_runners d JOIN runs r ON r.host_id=d.host_id
+		JOIN leases l ON l.run_id=r.run_id
+		JOIN plan_actions a ON a.action_id=r.action_id
+		JOIN task_specs s ON s.task_id=r.task_id AND s.spec_version=a.target_spec_version
+		JOIN json_each(s.body_json,'$.workspace.mounts') m
+		WHERE d.host_id=? AND d.journal_id='' AND r.role!='issue_manager'
+		AND r.observed_state IN ('starting','unknown','interrupted') AND l.status!='released'
+		AND json_type(m.value,'$.repo')='text'
+		AND NOT EXISTS(SELECT 1 FROM runner_journal_runs j WHERE j.run_id=r.run_id)
+		ORDER BY 1`, host)
+}

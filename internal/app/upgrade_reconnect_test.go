@@ -199,8 +199,12 @@ func TestUpgradeCompleteReleaseWaitsForTargetReconnect(t *testing.T) {
 			}
 			mode := upgradeCtl(h, "linux-1").Mode
 			selfRuntimeProof(t, h, "linux-1", mode)
-			if v := upgradeTick(h, o); v.Status != "running" || v.Hosts[0].Phase != "draining" {
-				t.Fatal("verified supervisor and target ACK did not resume drain", v)
+			wantPhase, wantMode := "warming", protocol.RunnerNormal
+			if handoff {
+				wantPhase, wantMode = "draining", protocol.RunnerMaintenance
+			}
+			if v := upgradeTick(h, o); v.Status != "running" || v.Hosts[0].Phase != wantPhase || upgradeCtl(h, "linux-1").Mode != wantMode {
+				t.Fatal("verified supervisor and target ACK did not resume rollout", v)
 			}
 			if upgradeRead(h).View.OverallDeadlineMillis != before.View.OverallDeadlineMillis {
 				t.Fatal("complete release changed original batch deadline")

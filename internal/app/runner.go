@@ -358,7 +358,7 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		if err != nil {
 			return Outcome{}, err
 		}
-		if confirmed.Runtime.InstanceID != p.Runtime.InstanceID {
+		if confirmed.Runtime.InstanceID != p.Runtime.InstanceID || confirmed.Runtime.JournalID != p.Runtime.JournalID {
 			return Outcome{Result: map[string]any{"assignment": nil}, NoEffect: true}, nil
 		}
 		if confirmed.Runtime.Protocol != p.Runtime.Protocol {
@@ -478,12 +478,17 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 			continuations[i].CapabilitySupport = false
 		}
 	}
+	preparingRepos, err := store.DrainingPreparationRepos(ctx, q, host.HostID)
+	if err != nil {
+		return Outcome{}, err
+	}
 	schedulingHost := scheduler.Host{
-		PauseHandoffs:    p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
-		QuestionHandoffs: p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
-		IssueOwners:      p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
-		IssueManagers:    p.Runtime != nil && protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
-		ID:               host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
+		DrainingPreparationRepos: preparingRepos,
+		PauseHandoffs:            p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
+		QuestionHandoffs:         p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
+		IssueOwners:              p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueOwner),
+		IssueManagers:            p.Runtime != nil && protocol.RunnerProtocolSupported(p.Runtime.Protocol) && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityIssueManager),
+		ID:                       host.HostID, OS: host.OS, Active: true, Labels: host.Labels, Repos: host.Repos, Slots: host.Slots, Busy: busy,
 		Worker: host.Worker.Capabilities(), WorkspaceProtocol: p.WorkspaceProtocol,
 		AcceptanceExecution: runtimeSupportsAcceptanceExecution(p.Runtime), TaskInputs: runtimeSupportsTaskInputs(p.Runtime), WorkerObservation: runtimeSupportsObservation(p.Runtime),
 		ContinuationsSupported: runtimeSupportsAgentContinuation(p.Runtime), Continuations: continuations, Executors: executors,
@@ -703,6 +708,9 @@ func (Hello) Authorize(ctx context.Context, x *Exec, q store.Querier) error {
 	if err := checkRuntime(ctx, q, x.Principal.Subject, p.Runtime, true); err != nil {
 		return err
 	}
+	if batch, _, err := warmCandidate(ctx, q, x.Principal.Subject, p.Runtime); err != nil || batch != nil {
+		return err
+	}
 	if err := checkNamedRunRecovery(ctx, q, x.Principal.Subject, p.Runtime); err != nil {
 		return err
 	}
@@ -731,11 +739,19 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		// repeats hello with the selected wire generation before reconciliation.
 		return Outcome{NoEffect: true, Result: protocol.HelloResult{ProtocolMax: selected}}, nil
 	}
-	if err := checkMaintenanceHello(ctx, q, host.HostID, p.Runtime); err != nil {
-		return Outcome{}, err
-	}
 	if p.WorkspaceProtocol < 0 || p.WorkspaceProtocol > 1 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported workspace_protocol")
+	}
+	if warm, err := observeWarmCandidate(ctx, tx, host.HostID, p.Runtime, x.Now.UnixMilli(), true); err != nil {
+		return Outcome{}, err
+	} else if warm != nil {
+		if len(p.Held) != 0 {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "warming candidate cannot hold Runs")
+		}
+		return Outcome{Result: protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Control: warm}}, nil
+	}
+	if err := checkMaintenanceHello(ctx, q, host.HostID, p.Runtime); err != nil {
+		return Outcome{}, err
 	}
 	// A reconnecting predecessor can report its own capabilities without
 	// replacing the admission capabilities of the current runner.
@@ -1261,6 +1277,15 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 		host, err := store.GetHost(ctx, q, p.Subject)
 		if err != nil || host.Status != store.HostActive {
 			return protocol.Errorf(protocol.CodeForbidden, "host %s is not active", p.Subject)
+		}
+		if warm, err := observeWarmCandidate(ctx, tx, host.HostID, payload.Runtime, now.UnixMilli(), false); err != nil {
+			return err
+		} else if warm != nil {
+			if len(refs) != 0 || len(payload.HistoryReplies) != 0 {
+				return protocol.Errorf(protocol.CodeForbidden, "warming candidate cannot report host work")
+			}
+			res.Control = warm
+			return nil
 		}
 		changed, err = observeRuntime(ctx, tx, host.HostID, payload.Runtime, now.UnixMilli(), false)
 		if err != nil {

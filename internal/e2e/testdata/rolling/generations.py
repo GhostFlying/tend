@@ -10,6 +10,7 @@ import shutil
 import socket
 import socketserver
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,17 @@ class LocalDial(BaseHTTPRequestHandler):
                 or self.headers.get("Dial-Port") != str(self.server.port)):
             self.send_error(403)
             return
+        if not self.server.allow.is_set():
+            peer_pid, _, _ = struct.unpack("3i", self.connection.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+            # Bootstrap and launch authorization use the same side channel.
+            # Gate only the candidate started as a service, after those helpers.
+            args = Path(f"/proc/{peer_pid}/cmdline").read_bytes().split(b"\0")
+            if not set(args).intersection({b"rolling-bootstrap", b"rolling-authorize"}):
+                self.server.attempted.set()
+                if not self.server.allow.wait(timeout=45):
+                    self.send_error(504)
+                    return
         with socket.create_connection(("127.0.0.1", self.server.port)) as upstream:
             self.connection.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: ts-dial\r\nConnection: Upgrade\r\n\r\n")
             self.server.dials += 1
@@ -88,7 +100,7 @@ ExecStartPost=/usr/bin/python3 {Path(__file__).with_name('controlled.py').resolv
     return state, initial
 
 
-def exercise(root, old, first, third, seed, next_window=None, sole=False):
+def exercise(root, old, first, third, seed, next_window=None, sole=False, legacy_bridge=False):
     assert pwd.getpwuid(os.getuid()).pw_name == "tend-wire-fixture"
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -142,7 +154,8 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
         stop(original)
         stop(registration)
         tasks = run(seed, db, "rolling").decode().splitlines()
-        assert len(tasks) == 4
+        assert len(tasks) == 5
+        probe_task = tasks[-1]
         prepare(root, first, first / "tend-server", server_config, env, stack,
                 drain_timeout="60s" if next_window else None)
         cli = first / "tend"
@@ -175,41 +188,85 @@ def exercise(root, old, first, third, seed, next_window=None, sole=False):
             assert not Path(f"/proc/{oldpid}").exists()
             print("sole busy historical runner stopped and candidate server committed", flush=True)
             return
-        daemon_sock = str(rc / "tailscaled.sock")
-        class Daemon(socketserver.ThreadingUnixStreamServer):
-            daemon_threads = True
-        daemon = Daemon(daemon_sock, LocalDial)
-        daemon.port, daemon.dials = port, 0
-        threading.Thread(target=daemon.serve_forever, daemon=True).start()
-        stack.callback(daemon.server_close)
-        stack.callback(daemon.shutdown)
-        runner["side_channel"] = {"kind": "tailscaled", "socket": daemon_sock}
-        write_private(runner_config, json.dumps(runner))
+        def side_channel(name, blocked):
+            class Daemon(socketserver.ThreadingUnixStreamServer):
+                daemon_threads = True
+            daemon = Daemon(str(rc / name), LocalDial)
+            daemon.port, daemon.dials = port, 0
+            daemon.attempted, daemon.allow = threading.Event(), threading.Event()
+            if not blocked:
+                daemon.allow.set()
+            threading.Thread(target=daemon.serve_forever, daemon=True).start()
+            stack.callback(daemon.server_close)
+            stack.callback(daemon.shutdown)
+            stack.callback(daemon.allow.set)
+            runner["side_channel"] = {"kind": "tailscaled", "socket": daemon.server_address}
+            write_private(runner_config, json.dumps(runner))
+            return daemon
+
+        daemon = side_channel("tailscaled.sock", not legacy_bridge and not next_window)
 
         def start(bundle, *flags):
             view = json.loads(run(cli, "upgrade", "start", "--socket", root / "server.sock", "--release", bundle, "--json", *flags))
             return view["upgrade_id"]
 
-        batch = start(first)
-        def ready():
+        read_state = lambda: json.loads((state / "state.json").read_text())
+
+        def ready(batch, phase, mode):
             return rows("""select 1 from host_runtime h join host_controls c using(host_id) where
-                json_extract(h.runtime_json,'$.upgrade_id')=? and json_extract(h.runtime_json,'$.mode')='maintenance'
+                json_extract(h.runtime_json,'$.upgrade_id')=? and json_extract(h.runtime_json,'$.mode')=?
                 and json_extract(h.runtime_json,'$.applied_control_revision')=c.revision
-                and exists(select 1 from upgrades where upgrade_id=? and phase='runners' and json_extract(state_json,'$.view.hosts[0].phase')='draining')""", (batch, batch))
-        eventually("old runner ready for overlap", ready, [])
+                and exists(select 1 from upgrades where upgrade_id=? and phase='runners'
+                    and json_extract(state_json,'$.view.hosts[0].phase')=?)""", (batch, mode, batch, phase))
+
+        def confirm_incumbent_admits(batch, dial, pid):
+            eventually("successor actually started and attempted its isolated connection", dial.attempted.is_set, [])
+            assert rows("""select json_extract(runtime_json,'$.build.pid'),
+                json_extract(runtime_json,'$.mode') from host_runtime""") == [(pid, "normal")]
+            assert not batch_done(batch)
+            run(cli, "resume", probe_task)
+            probe_lease, = eventually("incumbent claims the designated task while candidate connection waits",
+                                      lambda: [p for p in lease(probe_task) if p[2] == "active"], [])
+            thread, = eventually("the exact probe starts its native session", lambda: rows(
+                """select json_extract(body_json,'$.session_id') from run_logs
+                   where run_id=? and kind='worker.native_identity' and json_extract(body_json,'$.state')='known'
+                   order by seq desc limit 1""", (probe_lease[0],)), [])
+            probe_gate = root / (thread[0] + ".gate")
+            eventually("the probe's native session opens its gate", probe_gate.is_fifo, [])
+
+            assert rows("select json_extract(runtime_json,'$.build.pid') from host_runtime") == [(pid,)]
+            assert lease(tasks[0]) == [original_lease]
+            assert not list(root.glob("*.interrupted")), "the candidate link interrupted incumbent work"
+            run(cli, "cancel", probe_task)
+            eventually("incumbent confirms stopping the probe's original lease",
+                       lambda: lease(probe_task) == [(probe_lease[0], probe_lease[1], "released")], [])
+            probe_gate.unlink()
+            dial.allow.set()
+
+        batch = start(first)
+        phase, mode = ("draining", "maintenance") if legacy_bridge else ("warming", "normal")
+        eventually("old runner control acknowledges overlap", lambda: ready(batch, phase, mode), [])
         args = [cli, "upgrade", "runner-handoff", "--config", runner_config, "--upgrade-id", batch, "--release", first]
         run(*args)
+        if not legacy_bridge and not next_window:
+            confirm_incumbent_admits(batch, daemon, oldpid)
         eventually("first rolling batch committed", lambda: batch_done(batch), [], timeout=180)
         run(*args)
         assert lease(tasks[0]) == [original_lease] and Path(f"/proc/{oldpid}").exists()
-        read_state = lambda: json.loads((state / "state.json").read_text())
         middle = read_state()["process"]
         run(cli, "resume", tasks[1])
         eventually("middle runner owns a long run", lambda: len(gates()) == 2, [])
         middle_gate, = gates() - {first_gate}
         middle_lease, = lease(tasks[1])
+        if legacy_bridge:
+            daemon = side_channel("bridge-next.sock", blocked=True)
         batch = start(third)
-        eventually("automatic third generation committed", lambda: batch_done(batch), [], timeout=180)
+        if legacy_bridge:
+            eventually("released protocol-7 incumbent remains claiming", lambda: ready(batch, "warming", "normal"), [])
+            run(third / "tend", "upgrade", "runner-handoff", "--config", runner_config,
+                "--upgrade-id", batch, "--release", third)
+            confirm_incumbent_admits(batch, daemon, middle["pid"])
+        eventually("third generation committed", lambda: batch_done(batch), [], timeout=180)
         current = read_state()
         assert len(current["draining_processes"]) == 2
         assert middle["pid"] != current["process"]["pid"] != oldpid and daemon.dials > 0
@@ -258,8 +315,10 @@ if __name__ == "__main__":
         root = Path(tmp)
         try:
             args = sys.argv[1:]
-            sole = args[-1] == "--sole"
-            exercise(root, *map(Path, args[:-1] if sole else args), sole=sole)
+            sole = "--sole" in args
+            legacy_bridge = "--legacy-bridge" in args
+            exercise(root, *map(Path, [arg for arg in args if not arg.startswith("--")]),
+                     sole=sole, legacy_bridge=legacy_bridge)
         except BaseException:
             for path in [*root.glob("*.log"), *root.glob("host/*.log"), *root.glob("host/supervisor/state.json")]:
                 print(path.name, path.read_text()[-6000:], flush=True)

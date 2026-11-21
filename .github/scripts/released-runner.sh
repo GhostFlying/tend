@@ -22,6 +22,20 @@ archive=${1:-$scratch/$asset}
 if [[ $# == 0 ]]; then
   gh release download "$release" --repo GhostFlying/tend --pattern "$asset" --dir "$scratch"
 fi
+if "$controlled"; then
+  dev_source=6befc2b81d5f0101abc9a9786f51ff2e9ed2ab2d
+  bridge_source=38ea2dbed7f022bf3c6306798549d2cfe6ba2dfa
+  fetch_bundle() {
+    local commit=$1 hash=$2 dest=$3 name=tend-main-$1-linux-amd64.tar.gz
+    gh release download "main-$commit" --repo GhostFlying/tend --pattern "$name" --dir "$scratch"
+    echo "$hash  $scratch/$name" | sha256sum --check --status
+    mkdir "$dest"
+    tar -xzf "$scratch/$name" -C "$dest" manifest.json release-set.json tend tend-server tend-runner tend-updater
+    jq -e --arg commit "$commit" '.format == 2 and .commit == $commit' "$dest/release-set.json" >/dev/null
+  }
+  fetch_bundle "$dev_source" 79f7ec826d63b375d65053243b20a68a1bfdfce4f87668a3cdd01f20d74bed52 "$scratch/dev"
+  fetch_bundle "$bridge_source" 022ae971290ab24ace81d54b18fd5e596746773fd27052fd144f9cd8cf5313fc "$scratch/bridge"
+fi
 unset GH_TOKEN GITHUB_TOKEN
 echo "$archive_hash  $archive" | sha256sum --check --status
 tar -xzf "$archive" -C "$scratch/old" manifest.json release-set.json tend tend-server tend-runner tend-updater
@@ -36,6 +50,11 @@ args=(--historical-dir "$scratch/old" --source "$source_commit" --protocol "$min
       --candidate-server "$scratch/candidate-server" --seed "$scratch/seed")
 python3 -B "$fixture/cross_version.py" "${args[@]}"
 if ! "$controlled"; then exit; fi
+
+mkdir "$scratch/dev-source"
+git archive "$dev_source" | tar -x -C "$scratch/dev-source"
+cp "$fixture/seed.go" "$scratch/dev-source/seed.go"
+(cd "$scratch/dev-source" && go build -o "$scratch/dev-seed" seed.go)
 
 # Only a disposable hosted VM provisions a fresh service account. Its manager,
 # processes, sockets and generated credentials belong exclusively to this test.
@@ -84,7 +103,7 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
   python3 -B "$scratch/cross_version.py" "${args[@]}" --controlled-bundle "$scratch/bundle"
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-  python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed"
+  python3 -B "$scratch/generations.py" "$scratch/dev" "$scratch/bundle" "$scratch/third" "$scratch/dev-seed"
 
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
@@ -93,3 +112,8 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/generations.py" "$scratch/old" "$scratch/bundle" "$scratch/third" "$scratch/seed" "$scratch/next-window" --sole
+
+
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/generations.py" "$scratch/dev" "$scratch/bridge" "$scratch/bundle" "$scratch/dev-seed" --legacy-bridge

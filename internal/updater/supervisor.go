@@ -38,6 +38,7 @@ type Supervisor struct {
 	persistenceErr     error
 	writeState         func(string, State) error
 	mu                 sync.Mutex
+	stepping           bool
 	cfg                Config
 	opts               Options
 	state              State
@@ -522,7 +523,12 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 		if s.opts.RollingAuthority == nil {
 			return errors.New("updater: rolling authority unavailable")
 		}
-		g, err = s.opts.RollingAuthority.AuthorizeLaunch(ctx, op.Candidate, op.Binding, *op.Rolling, s.state.CurrentJournal)
+		authority, version, binding, launch := s.opts.RollingAuthority, op.Candidate, op.Binding, *op.Rolling
+		err = s.readRollingAuthority(func() error {
+			var requestErr error
+			g, requestErr = authority.AuthorizeLaunch(ctx, version, binding, launch)
+			return requestErr
+		})
 	} else {
 		g, err = s.opts.Authority.Authorize(ctx, op.Binding)
 	}
@@ -539,7 +545,15 @@ func (s *Supervisor) authorize(ctx context.Context, op *Operation) error {
 }
 func (s *Supervisor) Step(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.stepping {
+		s.mu.Unlock()
+		return nil
+	}
+	s.stepping = true
+	defer func() {
+		s.stepping = false
+		s.mu.Unlock()
+	}()
 	if s.selfUpdating {
 		j, err := readSelf(s.cfg)
 		if err != nil {
@@ -629,6 +643,9 @@ func (s *Supervisor) Step(ctx context.Context) error {
 		return err
 	}
 	err := s.step(ctx, op)
+	if errors.Is(err, errRollingAuthorityChanged) {
+		return nil
+	}
 	if err != nil && (op.LastError != err.Error() || digest(s.state) != digest(s.durable)) {
 		op.LastError = err.Error()
 		if saveErr := s.save(); saveErr != nil {
@@ -903,6 +920,9 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 	facts := &protocol.UpgradeHealthDiagnostics{PhaseMillis: map[string]int64{}}
 	observedAt := s.opts.Now()
 	defer func() {
+		if errors.Is(result, errRollingAuthorityChanged) {
+			return
+		}
 		result = s.finishHealthRead(op, result)
 		facts.PhaseMillis["health_total"] = max(0, s.opts.Now().Sub(observedAt).Milliseconds())
 		if result != nil {
@@ -957,7 +977,12 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		if s.opts.RollingAuthority == nil {
 			return errors.New("updater: rolling authority unavailable")
 		}
-		h, err = s.opts.RollingAuthority.Health(ctx, op.Binding)
+		authority, binding := s.opts.RollingAuthority, op.Binding
+		err = s.readRollingAuthority(func() error {
+			var requestErr error
+			h, requestErr = authority.Health(ctx, binding)
+			return requestErr
+		})
 	} else {
 		h, err = s.opts.Authority.Health(ctx, op.Binding)
 	}
@@ -1002,6 +1027,13 @@ func (s *Supervisor) check(ctx context.Context, op *Operation) (result error) {
 		}
 	}
 	if running && h.Healthy && h.HeartbeatSequence > op.LastHealthSequence {
+		if op.Rolling != nil {
+			actual, err := s.opts.Process.Inspect(ctx, op.CandidateProcess.PID)
+			if err != nil || actual != op.CandidateProcess {
+				facts.Failures = append(facts.Failures, "candidate_process_changed_during_health_read")
+				return errors.Join(ErrUnknown, err)
+			}
+		}
 		op.HealthCount++
 		op.LastHealthSequence = h.HeartbeatSequence
 		// Identity and readiness are already confirmed by the candidate's

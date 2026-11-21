@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -95,8 +97,20 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Outcome{}, err
 	}
-	if primary.Runtime.JournalID != p.JournalID {
-		return Outcome{NoEffect: true, Result: protocol.WorkspaceCleanupResult{Workspaces: []protocol.WorkspaceCleanup{}}}, nil
+	current := primary.Runtime.JournalID == p.JournalID
+	runtime := primary.Runtime
+	if !current {
+		var raw string
+		err := tx.Q().QueryRowContext(ctx, `SELECT runtime_json FROM draining_runners WHERE host_id=? AND journal_id=?`, x.Principal.Subject, p.JournalID).Scan(&raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Outcome{NoEffect: true, Result: protocol.WorkspaceCleanupResult{Workspaces: []protocol.WorkspaceCleanup{}}}, nil
+		}
+		if err != nil {
+			return Outcome{}, err
+		}
+		if err := json.Unmarshal([]byte(raw), &runtime); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if p.Limit == 0 {
 		p.Limit = 8
@@ -104,21 +118,14 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 	if p.Limit < 1 || p.Limit > 32 {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "cleanup limit must be between 1 and 32")
 	}
-	namedSupported := false
-	if p.AgentExecution {
-		runtime, err := store.GetHostRuntime(ctx, tx.Q(), x.Principal.Subject)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return Outcome{}, err
-		}
-		if err == nil {
-			namedSupported = runtimeSupportsAgentExecution(&runtime.Runtime)
-		}
-	}
+	namedSupported := p.AgentExecution && runtimeSupportsAgentExecution(&runtime)
 	rows, err := tx.Q().QueryContext(ctx, `SELECT w.workspace_id FROM workspaces w WHERE w.host_id=? AND (w.backend_id='' OR ?) AND
-	 (w.status='removing' OR (w.kind='directory' AND w.status='retained' AND w.occupied_by IS NULL AND w.path<>'' AND w.released_at<=?
+	 ((w.status='removing' AND (w.cleanup_journal_id=? OR (? AND NOT EXISTS(
+	   SELECT 1 FROM draining_runners d WHERE d.host_id=w.host_id AND (w.cleanup_journal_id IS NULL OR d.journal_id=w.cleanup_journal_id)))))
+	 OR (? AND w.kind='directory' AND w.status='retained' AND w.occupied_by IS NULL AND w.path<>'' AND w.released_at<=?
 	 AND NOT EXISTS(SELECT 1 FROM task_workspace_bindings b JOIN tasks t ON t.task_id=b.task_id WHERE b.workspace_id=w.workspace_id AND t.lifecycle NOT IN ('completed','cancelled'))
 	 AND NOT EXISTS(SELECT 1 FROM workspace_runs wr JOIN runs r ON r.run_id=wr.run_id WHERE wr.workspace_id=w.workspace_id AND r.observed_state IN ('starting','running','waiting','interrupted','unknown'))))
-	 ORDER BY w.updated_at,w.workspace_id LIMIT ?`, x.Principal.Subject, namedSupported, x.Now.Add(-7*24*time.Hour).UnixMilli(), p.Limit)
+	 ORDER BY w.updated_at,w.workspace_id LIMIT ?`, x.Principal.Subject, namedSupported, p.JournalID, current, current, x.Now.Add(-7*24*time.Hour).UnixMilli(), p.Limit)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("app: list expired workspaces: %w", err)
 	}
@@ -150,7 +157,7 @@ func (ReserveWorkspaceCleanup) Apply(ctx context.Context, x *Exec, tx *store.Tx)
 		}
 		// Rotate already-reserved work as well, so a blocked provider resource
 		// cannot monopolize every later bounded cleanup batch.
-		if _, err := tx.Exec(ctx, `UPDATE workspaces SET status='removing',cleanup_id=?,updated_at=MAX(updated_at+1,?) WHERE workspace_id=?`, w.CleanupID, x.Now.UnixMilli(), id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE workspaces SET status='removing',cleanup_id=?,cleanup_journal_id=?,updated_at=MAX(updated_at+1,?) WHERE workspace_id=?`, w.CleanupID, p.JournalID, x.Now.UnixMilli(), id); err != nil {
 			return Outcome{}, fmt.Errorf("app: reserve workspace cleanup: %w", err)
 		}
 		events = append(events, Event{ObjectType: "workspace", ObjectID: id, Kind: kind, Body: map[string]any{"cleanup_id": w.CleanupID}})

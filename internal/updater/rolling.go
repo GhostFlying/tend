@@ -36,9 +36,25 @@ type DrainingProcess struct {
 }
 
 type RollingAuthority interface {
-	AuthorizeLaunch(context.Context, Version, Binding, RollingLaunch, string) (Grant, error)
+	AuthorizeLaunch(context.Context, Version, Binding, RollingLaunch) (Grant, error)
 	Health(context.Context, Binding) (Health, error)
 	Retire(context.Context, string, protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error)
+}
+
+var errRollingAuthorityChanged = errors.New("updater: original rolling operation changed during authority read")
+
+// A candidate network delay must not block the incumbent's reads of the
+// supervisor. Step still owns the operation. Other control writes invalidate
+// this sample before it can change the durable state or launch a process.
+func (s *Supervisor) readRollingAuthority(read func() error) error {
+	generation := s.state.Generation
+	s.mu.Unlock()
+	err := read()
+	s.mu.Lock()
+	if s.state.Generation != generation || s.durabilityError() != nil {
+		return errRollingAuthorityChanged
+	}
+	return err
 }
 
 // JournalSocket keeps the bridge in the same private directory. A bounded

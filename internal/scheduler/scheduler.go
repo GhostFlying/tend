@@ -17,18 +17,19 @@ type Host struct {
 	PauseHandoffs      bool
 	ConcurrencyBlocked map[string]bool
 
-	QuestionHandoffs       bool
-	IssueManagers          bool
-	IssueOwners            bool
-	Executors              []Executor
-	Continuations          []Executor
-	ContinuationsSupported bool
-	ID                     string
-	OS                     string
-	Active                 bool
-	Labels                 []string
-	Repos                  []string
-	Slots                  int64
+	QuestionHandoffs         bool
+	IssueManagers            bool
+	IssueOwners              bool
+	Executors                []Executor
+	Continuations            []Executor
+	ContinuationsSupported   bool
+	ID                       string
+	OS                       string
+	Active                   bool
+	Labels                   []string
+	Repos                    []string
+	DrainingPreparationRepos []string
+	Slots                    int64
 	// Busy counts the host's runs that have not finished.
 	WorkspaceProtocol int64
 	Busy              int64
@@ -186,6 +187,11 @@ func SkipReason(h Host, c Candidate) *protocol.QueueWaitReason {
 		// The abandoned workspace and its branches are still there and
 		// would be taken up again.
 		return waitReason(protocol.QueueHostRequirements, "task gave up its workspace on this host")
+	}
+	for _, repo := range h.DrainingPreparationRepos {
+		if slices.Contains(c.Repos, repo) {
+			return waitReason(protocol.QueueWorkspaceBusy, "a draining runner still owns preparation for "+repo)
+		}
 	}
 	if c.AgentSelection != nil {
 		if _, reason := SelectExecution(h, c); reason != "" {
