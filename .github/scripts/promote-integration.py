@@ -6,12 +6,15 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 
 BRANCH = "promote/integration"
 RECEIPT = ".github/integration-batch.json"
+EXCEPTION_LABEL = "skip_integration"
+ROUTE_STATUS = "main-route"
 MAX_PRS = 3
 MAX_WAIT = timedelta(minutes=15)
 
@@ -99,6 +102,31 @@ def is_promotion(repo, pull):
     head = pull["head"]
     return (pull["base"]["ref"] == "main" and head["ref"] == BRANCH
             and bool(head["repo"]) and head["repo"]["full_name"] == repo)
+
+
+def publish_main_route(repo, head, run_url):
+    require(re.fullmatch(r"[0-9a-f]{40}", head), "expected a full GitHub head SHA")
+    # The status belongs to a commit. Read all active main PRs for that
+    # commit so any event in its queue can reconcile the whole status.
+    matches = [pr for pr in list_pulls(repo, "main", "open") if pr["head"]["sha"] == head]
+    status = "failure"
+    if not matches:
+        description = "No open main pull request for this head."
+    elif len(matches) != 1:
+        description = "Main route requires a head unique to this open main PR."
+    elif is_promotion(repo, matches[0]):
+        status = "success"
+        description = "Promotion route. Full CI verifies the receipt."
+    elif any(label["name"] == EXCEPTION_LABEL for label in matches[0]["labels"]):
+        status = "success"
+        description = f"Exception route with {EXCEPTION_LABEL}. Full CI is still required."
+    else:
+        description = f"Target integration or obtain authorization for {EXCEPTION_LABEL}."
+
+    api(repo, f"statuses/{head}", "--method", "POST",
+        "-f", f"context={ROUTE_STATUS}", "-f", f"state={status}",
+        "-f", f"description={description}", "-f", f"target_url={run_url}")
+    print(f"{head} {ROUTE_STATUS}: {status}. {description}")
 
 
 def merged_receipt(repo, main, pull):
@@ -331,11 +359,16 @@ def main():
     finish = commands.add_parser("merge", help="merge a checked promotion or reconcile its receipt")
     finish.add_argument("number", type=int)
     commands.add_parser("verify", help="verify the GitHub pull request event")
+    route = commands.add_parser("main-route", help="publish the main route status for an open pull request")
+    route.add_argument("head")
+    route.add_argument("run_url")
     args = parser.parse_args()
     try:
         if args.command == "verify":
             with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
                 verify_event(json.load(stream), os.environ["GITHUB_REPOSITORY"])
+        elif args.command == "main-route":
+            publish_main_route(os.environ["GITHUB_REPOSITORY"], args.head, args.run_url)
         else:
             origin = git("remote", "get-url", "origin")
             require(origin == git("remote", "get-url", "--push", "origin"),

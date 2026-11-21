@@ -1,0 +1,53 @@
+name: main route
+
+on:
+  pull_request_target:
+    types: [opened, reopened, closed, synchronize, edited, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Full head SHA of an open main pull request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  publish-route-status:
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request_target' &&
+        ((github.event.action == 'edited' && github.event.changes.base.ref.from != '' &&
+          (github.event.pull_request.base.ref == 'main' || github.event.changes.base.ref.from == 'main')) ||
+         (github.event.pull_request.base.ref == 'main' &&
+          (contains(fromJSON('["opened", "reopened", "closed", "synchronize"]'), github.event.action) ||
+           (contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) &&
+            github.event.label.name == 'skip_integration')))))
+    strategy:
+      fail-fast: false
+      matrix:
+        head: >-
+          ${{ fromJSON(github.event.action == 'synchronize' && github.event.before != '' &&
+            github.event.before != github.event.pull_request.head.sha &&
+            format('[{0},{1}]', toJSON(github.event.pull_request.head.sha), toJSON(github.event.before)) ||
+            format('[{0}]', toJSON(github.event.pull_request.head.sha || inputs.head_sha))) }}
+    concurrency:
+      group: main-route-${{ matrix.head }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the trusted base
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Publish main route status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ matrix.head }}
+          ROUTE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 .github/scripts/promote-integration.py main-route "$HEAD_SHA" "$ROUTE_RUN_URL"
