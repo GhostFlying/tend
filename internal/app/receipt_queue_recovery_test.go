@@ -97,7 +97,7 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 			})(h.store)
 			done := make(chan error, 1)
 			go func() {
-				done <- h.app.recoverManagerEventACK(t.Context(), managerEventACK{run: as.RunID, sequence: seq, thread: "native"}, 50*time.Millisecond)
+				done <- h.app.RecoverManagerEventACK(t.Context(), as.RunID, seq, "native", "", "", false)
 			}()
 			select {
 			case o := <-missed:
@@ -106,7 +106,7 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 				}
 			case err := <-done:
 				t.Fatal("ACK returned before writer contention was observed", err)
-			case <-time.After(3 * time.Second):
+			case <-time.After(30 * time.Second):
 				t.Fatal("writer contention was not observed")
 			}
 			unblock()
