@@ -211,7 +211,7 @@ func (in managerProjectionInput) project(ctx context.Context, a *App, x *Exec, t
 	if n.ContextUsage != nil {
 		var newer bool
 		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_context_usage
- WHERE conversation_id=? AND (thread_id<>? OR updated_at>?))`, in.conversation, e.ThreadID, in.received).Scan(&newer); err != nil || newer {
+ WHERE conversation_id=? AND updated_at>?)`, in.conversation, in.received).Scan(&newer); err != nil || newer {
 			return Outcome{}, err
 		}
 		return Outcome{}, recordAgentUsage(ctx, tx, in.conversation, *n.ContextUsage, in.received)

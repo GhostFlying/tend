@@ -318,3 +318,56 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 		})
 	}
 }
+
+func TestFault_ManagerProjectionPreservesNewestContextUsage(t *testing.T) {
+	for _, existingIsNewer := range []bool{false, true} {
+		name := "replace_prior_thread_snapshot"
+		if existingIsNewer {
+			name = "preserve_later_thread_snapshot"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, _, _, as, _ := reviewManagerAssignment(t)
+			ctx := t.Context()
+			id := as.Manager.ConversationID
+			existing := protocol.AgentContextUsage{ThreadID: "other-thread", Revision: 1}
+			if !existingIsNewer {
+				if err := h.app.RecordAgentUsage(ctx, id, existing); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.clock.Advance(time.Second)
+			event := protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{
+ "thread_id":"original-thread","native":{"Kind":"context_usage","ContextUsage":{"thread_id":"original-thread","revision":1}}
+}`)}
+			if op := h.runAs(as, protocol.OpManagerNativeEvent, event, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if existingIsNewer {
+				h.clock.Advance(time.Second)
+				if err := h.app.RecordAgentUsage(ctx, id, existing); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original stopped", LastSequence: 1}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if err := h.app.projectManagerNativeEvent(ctx, as.RunID, 1); err != nil {
+				t.Fatal(err)
+			}
+			wantThread := "original-thread"
+			if existingIsNewer {
+				wantThread = existing.ThreadID
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				usage, err := store.ContextUsage(ctx, tx.Q(), id)
+				if err == nil && usage.ThreadID != wantThread {
+					t.Errorf("context usage thread %q, want %q", usage.ThreadID, wantThread)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, 1, 1)
+		})
+	}
+}
