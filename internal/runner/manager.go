@@ -373,7 +373,13 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		if event.Disconnected {
 			return r.flushManagerEvents(ctx, as)
 		}
-		return r.deliverActiveManagerEvents(ctx, as)
+		err := r.deliverActiveManagerEvents(liveSession, as)
+		if liveSession.Err() != nil {
+			// The event is already durable. Let forwarding drain and close
+			// record the final journal sequence without waiting for the peer.
+			return nil
+		}
+		return err
 	}
 	defer func() {
 		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
