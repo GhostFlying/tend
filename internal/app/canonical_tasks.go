@@ -160,6 +160,11 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if out.NoEffect {
 		return out, nil
 	}
+	if retry != nil {
+		if err := qualifyIndependentReviewHandoff(ctx, tx.Q(), retry.root, out.Result.(taskResult).TaskID); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := consumeIndependentReviewRetry(ctx, x, tx, retry, out.Result.(taskResult).Actions); err != nil {
 		return Outcome{}, err
 	}
