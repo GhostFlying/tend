@@ -234,9 +234,15 @@ func prepareRestartJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 		}
 		if j.primary && ctl.Mode != protocol.RunnerMaintenance {
 			// Entering maintenance enables the runner's fixed Run watchdog.
-			// Check its retained bounds before publishing that control.
-			if _, err := restartLocalDeadline(j, now, batch.RestartMillis); err != nil {
+			// Leave a runner freshness window to restore normal control if
+			// the replacement was not authorized while that bound still fit.
+			reserve := max(batch.RestartMillis, RunnerOfflineAfter.Milliseconds())
+			deadline, err := restartLocalDeadline(j, now, reserve)
+			if err != nil {
 				return err
+			}
+			if deadline != 0 {
+				batch.Deadline = min(batch.Deadline, deadline-reserve)
 			}
 		}
 		grant, err := issueJournalCoverage(ctx, x, tx, *batch, j)

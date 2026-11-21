@@ -380,6 +380,100 @@ func TestUpgradeChecksRetainedCoverageBeforeEnteringMaintenance(t *testing.T) {
 	}
 }
 
+func TestUpgradeBoundsWaitingForMaintenanceBeforeServerAuthorization(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		scoped     bool
+		authorized bool
+	}{
+		{name: "legacy acknowledgement arrives too late"},
+		{name: "scoped acknowledgement arrives too late", scoped: true},
+		{name: "original stop authorization remains bound", scoped: true, authorized: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			h, c, rt := restartAuthorityFixture(t, "journal", protocol.CurrentRunnerProtocol)
+			original := claimRestartWork(t, h, rt, "original delegated work")
+			if op := startPreparedTestUpgrade(h, "bounded-ack", c); op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			ack := upgradeAck(h, "linux-1", protocol.RunnerNormal)
+			ack.Sequence++
+			now := h.clock.Now()
+			deadline := now.Add(125 * time.Second).UnixMilli()
+			ack.AuthorizationID, ack.AuthorizationDeadlineMillis = "retained-grant", deadline
+			if tc.scoped {
+				ack.Capabilities = append(ack.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage)
+				ack.MaintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: map[string]int64{original.RunID: deadline}}
+			}
+			if _, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+				t.Fatal(err)
+			}
+			observation := ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256}
+			if v := upgradeTick(h, observation); v.Phase != "server_ready" {
+				t.Fatal(v)
+			}
+			waiting := upgradeRead(h)
+			waitDeadline := now.Add(5 * time.Second).UnixMilli()
+			if waiting.Deadline != waitDeadline || waiting.ServerProcess != "" {
+				t.Fatal("maintenance wait ignored the retained cutoff", waiting.Deadline, waiting.ServerProcess)
+			}
+			ctl := upgradeCtl(h, "linux-1")
+			ack.Sequence++
+			ack.Mode, ack.UpgradeID, ack.AppliedControlRevision = ctl.Mode, ctl.UpgradeID, ctl.Revision
+			if tc.authorized {
+				h.clock.Advance(time.Second)
+			} else {
+				h.clock.Advance(6 * time.Second)
+			}
+			if _, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+				t.Fatal(err)
+			}
+			b := restartTestBinding(c, "bounded-ack")
+			grant, err := h.app.ServerUpgradeAuthorize(ctx, b)
+			if tc.authorized {
+				if err != nil || !grant.Allowed || grant.ExpiresAt.UnixMilli() != waitDeadline {
+					t.Fatal(grant, err)
+				}
+				h.clock.Advance(5 * time.Second)
+				if v := upgradeTick(h, observation); v.Status != "running" || v.Phase != "server_ready" {
+					t.Fatal("original stop authorization was treated as unissued", v)
+				}
+				if row := upgradeRead(h); row.ServerProcess != b.ProcessInstanceID || row.ServerGrantDeadline != waitDeadline || row.Deadline != deadline || upgradeCtl(h, "linux-1").Mode != protocol.RunnerMaintenance {
+					t.Fatal("original replacement lost its bound authority or fence", row)
+				}
+				return
+			}
+			if protocol.CodeOf(err) != protocol.CodeInvalidTransition || grant.Allowed || !strings.Contains(err.Error(), "preparation expired") {
+				t.Fatal("late acknowledgement obtained an authorization", grant, err)
+			}
+			originalLease := h.lease(original.RunID)
+			if v := upgradeTick(h, observation); v.Status != "attention" {
+				t.Fatal("expired pre-authorization wait was not stopped", v)
+			}
+			got := upgradeCtl(h, "linux-1")
+			if got.Mode != protocol.RunnerNormal || got.Revision <= ctl.Revision || got.UpgradeID != "" ||
+				upgradeRead(h).ServerProcess != "" || h.lease(original.RunID) != originalLease || h.run(original.RunID).ObservedState != protocol.RunRunning {
+				t.Fatal("late acknowledgement left the original execution under maintenance", got)
+			}
+			ack.Mode, ack.UpgradeID, ack.AppliedControlRevision = got.Mode, got.UpgradeID, got.Revision
+			for h.clock.Now().UnixMilli() <= deadline {
+				ack.Sequence++
+				response, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{
+					Runtime: &ack, Runs: []protocol.LeaseRef{{RunID: original.RunID, LeaseID: original.LeaseID}},
+				})
+				if err != nil || response.Control == nil || response.Control.Mode != protocol.RunnerNormal || len(response.Runs) != 1 || !response.Runs[0].Renewed {
+					t.Fatal("runner did not retain the original execution under restored control", response, err)
+				}
+				h.clock.Advance(30 * time.Second)
+			}
+			if op := h.runAs(original, protocol.OpRunsSubmitArtifact, testArtifact(h.task(original.TaskID).WorkspaceName), SubmitArtifact{}); op.Error != nil {
+				t.Fatal("the original execution lost its result path", op.Error)
+			}
+		})
+	}
+}
+
 func TestUpgradeKeepsUncoveredRenewableRunLapsedAfterAuthorization(t *testing.T) {
 	ctx := t.Context()
 	h, c, rt := restartAuthorityFixture(t, "original-journal", protocol.MinimumRunnerProtocol)

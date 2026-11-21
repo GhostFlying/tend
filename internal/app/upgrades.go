@@ -554,13 +554,13 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 						break
 					}
 					r.ServerPreviousHash = c.Observation.BinarySHA256
+					r.Deadline = capUpgradeDeadline(&r, now+r.GrantMillis)
 					for i := range r.Hosts {
 						if err := prepareRestartJournals(ctx, x, tx, &r, &r.Hosts[i]); err != nil {
 							return Outcome{}, err
 						}
 					}
 					r.View.Phase = "server_ready"
-					r.Deadline = capUpgradeDeadline(&r, now+r.GrantMillis)
 				}
 			case "server_ready", "server_checking":
 				reason, err := reconcileServerCandidate(ctx, x, tx, &r, c.Observation)
