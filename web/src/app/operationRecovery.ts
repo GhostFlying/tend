@@ -238,8 +238,17 @@ export async function recoverOperation(sender: OpSender, e: Envelope): Promise<O
       id
     ) {
       const currentAttention = await sender.get<AttentionView>(`/api/v1/attentions/${encoded}`);
-      return currentAttention?.attention_id === id &&
-        newerRevision(currentAttention.revision, e.expected_control_revision)
+      if (currentAttention?.attention_id !== id) return unknown();
+      const responsibilityAdvanced =
+        e.operation === "attentions.withdraw" &&
+        payload.mode === "not_needed" &&
+        typeof payload.expected_responsibility_revision === "number" &&
+        newerRevision(
+          currentAttention.responsibility?.revision,
+          payload.expected_responsibility_revision,
+        );
+      return newerRevision(currentAttention.revision, e.expected_control_revision) ||
+        responsibilityAdvanced
         ? { kind: "stale", message: stale, currentAttention }
         : unknown();
     }

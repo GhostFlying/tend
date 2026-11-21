@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -441,5 +442,44 @@ func TestAttentionDismissAndConfirmHaveOneWinner(t *testing.T) {
 	e.op(token, dismiss)
 	if st := e.do("GET", path, token, nil, &detail); st != http.StatusOK || detail.Status != want || detail.Revision != a.Revision+1 {
 		t.Fatal(st, detail)
+	}
+}
+
+func TestAttentionCLIDismissTimeoutPrintsOriginalResponsibilityRevision(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	e.configure()
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	cliEnv, stderr, run := newAttentionCLI(t, e, token)
+	var action protocol.Attention
+	created := run("create", "--data", `{"kind":"action","title":"Optional follow-up","action_class":"ordinary","issue_id":"`+issue.IssueID+`"}`)
+	if err := json.Unmarshal(created.Operation.Result, &action); err != nil || action.Responsibility == nil {
+		t.Fatal(err, action)
+	}
+
+	var submitted protocol.Envelope
+	cliEnv.HTTP = &http.Client{Transport: issueTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodPost && req.URL.Path == "/api/v1/ops" {
+			if err := json.NewDecoder(req.Body).Decode(&submitted); err != nil {
+				return nil, err
+			}
+			return nil, context.DeadlineExceeded
+		}
+		return http.DefaultTransport.RoundTrip(req)
+	})}
+	stderr.Reset()
+	if code := cli.Main(t.Context(), cliEnv, []string{"attention", "withdraw", action.AttentionID, "--not-needed"}); code == 0 {
+		t.Fatal("expected transport timeout")
+	}
+	var payload protocol.WithdrawAttentionPayload
+	if err := json.Unmarshal(submitted.Payload, &payload); err != nil || payload.ExpectedResponsibilityRevision == nil ||
+		*payload.ExpectedResponsibilityRevision != action.Responsibility.Revision {
+		t.Fatal(err, submitted)
+	}
+	for _, original := range []string{submitted.RequestID, "--not-needed", "--revision " + strconv.FormatInt(action.Revision, 10),
+		"--responsibility-revision " + strconv.FormatInt(action.Responsibility.Revision, 10)} {
+		if !strings.Contains(stderr.String(), original) {
+			t.Fatalf("missing original input %q in %s", original, stderr)
+		}
 	}
 }

@@ -389,6 +389,15 @@ func sendIssueEnvelope(ctx context.Context, o owner, env protocol.Envelope) erro
 	if control.Epoch > 0 {
 		fmt.Fprintf(o.e.Stderr, " --epoch %d", control.Epoch)
 	}
+	if env.Operation == "attentions.withdraw" {
+		var withdrawal protocol.WithdrawAttentionPayload
+		if json.Unmarshal(env.Payload, &withdrawal) == nil && withdrawal.Mode == protocol.AttentionWithdrawalNotNeeded {
+			fmt.Fprint(o.e.Stderr, " --not-needed")
+			if withdrawal.ExpectedResponsibilityRevision != nil {
+				fmt.Fprintf(o.e.Stderr, " --responsibility-revision %d", *withdrawal.ExpectedResponsibilityRevision)
+			}
+		}
+	}
 	fmt.Fprintf(o.e.Stderr, "; %s\n", businessRecovery(env))
 	response, err := o.sendEnvelope(ctx, env)
 	if err != nil {
