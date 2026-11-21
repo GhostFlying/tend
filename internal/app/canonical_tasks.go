@@ -136,7 +136,15 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err != nil {
 		return Outcome{}, err
 	}
-	if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, input.TaskID); err != nil {
+	retry, err := handoffIndependentReviewRetry(ctx, x, tx.Q(), current, target, p.Relations)
+	if err != nil {
+		return Outcome{}, err
+	}
+	var approvedRoot string
+	if retry != nil {
+		approvedRoot = retry.root
+	}
+	if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, input.TaskID, approvedRoot); err != nil {
 		return Outcome{}, err
 	} else if !allowed {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "resolve the original independent review Task for this candidate")
@@ -151,6 +159,9 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	if out.NoEffect {
 		return out, nil
+	}
+	if err := consumeIndependentReviewRetry(ctx, tx, retry, out.Result.(taskResult).Actions); err != nil {
+		return Outcome{}, err
 	}
 	if deliveryDuty != nil {
 		task := out.Result.(taskResult).TaskID

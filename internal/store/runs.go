@@ -59,8 +59,9 @@ func ClaimActionIDsForHost(ctx context.Context, q Querier, host string) ([]strin
 	 WHERE a.status='pending' AND a.kind IN ('implement','accept')
 	 AND t.lifecycle NOT IN ('draft','completed','cancelled') AND t.control_mode='managed' AND t.block_reason='none'
 
-	 AND NOT EXISTS (SELECT 1 FROM independent_review_failures f
-	     WHERE f.task_id=a.task_id AND f.role=a.kind AND f.artifact_id=COALESCE(a.target_artifact_id,'') AND f.retry_action_id IS NULL)
+	 AND NOT EXISTS (SELECT 1 FROM independent_review_failures f JOIN runs failed USING(run_id)
+	     JOIN plan_actions failed_action ON failed_action.action_id=failed.action_id
+	     WHERE failed_action.target_spec_version=a.target_spec_version AND f.task_id=a.task_id AND f.role=a.kind AND f.artifact_id=COALESCE(a.target_artifact_id,'') AND f.retry_action_id IS NULL)
 	 AND a.target_spec_version=t.spec_version
 	 AND (a.kind<>'implement' OR a.generation=t.implement_generation)
 	 AND (a.kind<>'accept' OR (t.lifecycle='awaiting_acceptance' AND a.target_artifact_id=t.current_artifact_id))
