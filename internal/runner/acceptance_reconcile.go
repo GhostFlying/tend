@@ -59,6 +59,13 @@ func (r *Runner) reconcileAcceptanceVerdict(ctx context.Context, as protocol.Ass
 	if err != nil {
 		return true, fmt.Errorf("%w: %v", harness.ErrRetainedResumePending, err)
 	}
+	outcome, err := r.restoreWorkerOutcome(ctx, as, run, p)
+	if err != nil {
+		return true, err
+	}
+	if recovered, err := r.settleFailedWorker(ctx, as, run, execution, p, outcome); recovered {
+		return true, err
+	}
 	evidence := &acceptanceEvidence{r: r, as: as, prepared: p}
 	result, err := reconciler.ReconcileAcceptanceVerdict(ctx, harness.WorkerSpec{
 		RunID: as.RunID, Role: as.Role, Dir: p.Dir, StateDir: p.StateDir,

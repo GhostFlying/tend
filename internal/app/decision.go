@@ -152,7 +152,11 @@ func insertActions(ctx context.Context, x *Exec, tx *store.Tx, drafts []domain.A
 		return nil, fmt.Errorf("app: encode trigger: %w", err)
 	}
 	var out []actionResult
+	retryRun, _ := trigger["independent_review_failed_run"].(string)
 	for _, a := range drafts {
+		if err := guardIndependentReviewAction(ctx, tx.Q(), a, retryRun); err != nil {
+			return nil, err
+		}
 		row := store.ActionRow{
 			ActionID: x.IDs.New(protocol.PrefixAction), TaskID: a.TaskID, Kind: a.Kind, EffectKey: a.EffectKey(),
 			TriggerJSON: string(triggerJSON), TargetSpecVersion: a.SpecVersion, TargetArtifactID: a.ArtifactID,

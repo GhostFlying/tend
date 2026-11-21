@@ -233,6 +233,9 @@ func (SubmitArtifact) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		d = domain.ArtifactSubmittedWithAcceptance(task, rc.fact(), artifactID, policy == nil || policy.Required)
 		d.Events = append(started, d.Events...)
 	}
+	if err := settleIndependentReviewRetry(ctx, tx, rc); err != nil {
+		return Outcome{}, err
+	}
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "artifact.submitted", "artifact_id": artifactID})
 	if err != nil {
 		return Outcome{}, err
@@ -359,6 +362,9 @@ func (SubmitAcceptance) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 		if err != nil {
 			return Outcome{}, err
 		}
+	}
+	if err := settleIndependentReviewRetry(ctx, tx, rc); err != nil {
+		return Outcome{}, err
 	}
 	actions, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "acceptance.submitted", "acceptance_id": acceptanceID})
 	if err != nil {

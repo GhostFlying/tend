@@ -173,15 +173,21 @@ func TestImplementationOutcomeSurvivesAcknowledgedEventsCloseFailureAndRunnerShu
 			if historyErr != nil || history.Attempts != 1 || history.Thread != "owned-thread" {
 				t.Fatal("recovery replayed an original native attempt", history, historyErr)
 			}
-			if len(finals) != 1 || recovery.starts != 0 || len(recovery.seen) != 1 || workers.starts != 1 || spaces.mutations != 1 {
+			if len(finals) != 1 || recovery.starts != 0 || workers.starts != 1 || spaces.mutations != 1 {
 				t.Fatal("recovery duplicated work or publication", finals, recovery, workers, spaces)
 			}
 			if status == "failed" {
+				if len(recovery.seen) != 0 || len(recovery.observed) != 1 {
+					t.Fatal("failed execution depended on a report to confirm closure", recovery)
+				}
 				var release protocol.ReleasePayload
 				if finals[0].Operation != protocol.OpRunsRelease || json.Unmarshal(finals[0].Payload, &release) != nil || release.Reason != "worker_failed" {
 					t.Fatal("failed native turn was promoted to an artifact", finals)
 				}
 			} else {
+				if len(recovery.seen) != 1 || len(recovery.observed) != 0 {
+					t.Fatal("successful execution did not reconcile its actual report", recovery)
+				}
 				var artifact protocol.ArtifactPayload
 				if finals[0].Operation != protocol.OpRunsSubmitArtifact || json.Unmarshal(finals[0].Payload, &artifact) != nil || !reflect.DeepEqual(&artifact, recovery.result.Result) || len(artifact.Files) != 13 {
 					t.Fatal("close-only error discarded the original successful result", finals, artifact)
@@ -513,5 +519,79 @@ func TestImplementationUnexpectedNativeInterruptionIsFailure(t *testing.T) {
 				t.Fatal("unexpected native interruption replayed work", saved, err)
 			}
 		})
+	}
+}
+
+func TestFault_KnownWorkerFailureNeedsActualStopAndReusesReleaseReceipt(t *testing.T) {
+	r, as, recovery, spaces, path := implementationReconcileFixture(t)
+	firstImplementationAttempt(t, r, as, spaces, path)
+	event := workerTerminalEvent("owned-thread", "original-turn", "failed")
+	var body map[string]any
+	if err := json.Unmarshal(event.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	failure := protocol.AgentFailure{Code: "cyberPolicy"}
+	body["failure"] = failure
+	event.Body, _ = json.Marshal(body)
+	worker := &normalResultWorkers{events: []harness.WorkerEvent{event},
+		err: errors.New("original native turn failed"), onStop: func() error { return harness.ErrOwnedWorkerUnconfirmed }}
+	r.cfg.Workers = worker
+	r.cfg.Workspaces = &normalResultSpaces{implementationReconcileSpaces: spaces}
+	var submissions []protocol.Envelope
+	releaseReady := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+			t.Error(err)
+			return
+		}
+		if env.Operation == protocol.OpRunsRelease {
+			run, err := r.cfg.Journal.Run(req.Context(), as.RunID)
+			if err != nil || !run.StoppedConfirmed || run.Attempts != 1 || run.Thread != "owned-thread" {
+				t.Error("release lost confirmed original process identity", run, err)
+			}
+			submissions = append(submissions, env)
+			releaseReady <- struct{}{}
+			if len(submissions) == 1 {
+				http.Error(w, "response lost", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded}})
+	}))
+	defer server.Close()
+	r.c.base, r.c.http = server.URL, server.Client()
+	activeRun := &active{as: as, desired: protocol.DesiredRun}
+	if err := r.work(t.Context(), t.Context(), as, activeRun); !isCompletionPending(err) {
+		t.Fatal("initial closure uncertainty was not retained", err)
+	}
+	reopenOutcomeJournal(t, r, path)
+	r.cfg.Workers = recovery
+	recovery.recoveryErr = harness.ErrNoImplementationResult
+	recovery.observeErr = harness.ErrOwnedWorkerUnconfirmed
+	if err := r.execute(t.Context(), t.Context(), as.RunID, activeRun); !isOwnedRecoveryUncertain(err) {
+		t.Fatal("native failure was treated as process exit", err)
+	}
+	held, err := r.cfg.Journal.Run(t.Context(), as.RunID)
+	if err != nil || held.StoppedConfirmed || held.Phase != journal.PhaseStarted || len(releaseReady) != 0 {
+		t.Fatal("original unresolved Run changed before stop proof", held, err)
+	}
+
+	reopenOutcomeJournal(t, r, path)
+	recovery.observeErr = nil
+	if err := r.execute(t.Context(), t.Context(), as.RunID, activeRun); err != nil {
+		t.Fatal(err)
+	}
+	history, err := r.cfg.Journal.HistoricalRun(t.Context(), as.RunID)
+	if err != nil || !history.StoppedConfirmed || history.Phase != journal.PhaseDone || history.Attempts != 1 {
+		t.Fatal("the original failed run did not settle", history, err)
+	}
+	if len(releaseReady) != 2 || len(submissions) != 2 || !reflect.DeepEqual(submissions[0], submissions[1]) ||
+		worker.starts != 1 || recovery.starts != 0 || len(recovery.seen) != 0 {
+		t.Fatal("settlement repeated native work or changed release identity", submissions, worker.starts, recovery)
+	}
+	var release protocol.ReleasePayload
+	if err := json.Unmarshal(submissions[0].Payload, &release); err != nil || !reflect.DeepEqual(protocol.ParseWorkerFailureReason(release.Reason), &failure) {
+		t.Fatal("release did not preserve the provider's typed terminal failure", release, err)
 	}
 }
