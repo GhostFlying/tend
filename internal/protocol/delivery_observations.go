@@ -5,6 +5,7 @@ const (
 	OpDeliveriesReport                  = "runner.deliveries_report"
 	OpRefreshDelivery                   = "work_items.refresh_delivery"
 	CapabilityDeliveryTargetLineage     = "delivery-target-lineage-v1"
+	CapabilityDeliveryPRWaitEvidence    = "delivery-pr-wait-evidence-v1"
 	CapabilityDeliveryCandidateIdentity = "delivery-candidate-identity-v1"
 	CapabilityDeliveryGitHub            = "delivery-observer-github-v1"
 	CapabilityDeliveryCodebase          = "delivery-observer-codebase-v1"
@@ -21,6 +22,7 @@ type DeliverySnapshot struct {
 	LineageErrorKind    string         `json:"lineage_error_kind,omitempty"`
 	Mergeability        string         `json:"mergeability,omitempty"`
 	CI                  *DeliveryCI    `json:"ci,omitempty"`
+	TargetRef           string         `json:"target_ref,omitempty"`
 	TargetSHA           string         `json:"target_sha,omitempty"`
 	TargetContainsMerge bool           `json:"target_contains_merge,omitempty"`
 	BaseSHA             string         `json:"base_sha,omitempty"`
@@ -38,18 +40,26 @@ type DeliverySnapshot struct {
 // DeliveryCI is tied to the immutable commit actually inspected. Unknown,
 // skipped and truncated checks never imply success for a different candidate.
 type DeliveryCI struct {
-	ErrorKind string          `json:"error_kind,omitempty"`
-	HeadSHA   string          `json:"head_sha"`
-	State     string          `json:"state"`
-	Checks    []DeliveryCheck `json:"checks"`
-	Truncated bool            `json:"truncated,omitempty"`
+	// AttemptChecks contains proof requested for an explicit workflow attempt.
+	// Checks remains the provider's current commit rollup.
+	AttemptChecks []DeliveryCheck `json:"attempt_checks,omitempty"`
+	ErrorKind     string          `json:"error_kind,omitempty"`
+	HeadSHA       string          `json:"head_sha"`
+	State         string          `json:"state"`
+	Checks        []DeliveryCheck `json:"checks"`
+	Truncated     bool            `json:"truncated,omitempty"`
 }
 
 type DeliveryCheck struct {
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	Conclusion string `json:"conclusion,omitempty"`
-	URL        string `json:"url,omitempty"`
+	ID            string `json:"id,omitempty"`
+	Source        string `json:"source,omitempty"`
+	App           string `json:"app,omitempty"`
+	WorkflowRunID int64  `json:"workflow_run_id,omitempty"`
+	Attempt       int    `json:"attempt,omitempty"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	Conclusion    string `json:"conclusion,omitempty"`
+	URL           string `json:"url,omitempty"`
 }
 
 // DeliveryConflict is the first observation of a conflict for this candidate
@@ -100,13 +110,25 @@ type DeliveryPollPayload struct {
 	InstanceID string `json:"instance_id"`
 }
 type DeliveryAssignment struct {
-	TargetLineage     bool          `json:"target_lineage,omitempty"`
-	CandidateIdentity bool          `json:"candidate_identity,omitempty"`
-	WorkItemID        string        `json:"work_item_id"`
-	Delivery          IssueDelivery `json:"delivery"`
-	Generation        int64         `json:"generation"`
-	Nonce             string        `json:"nonce"`
+	PRWaitEvidence    bool             `json:"pr_wait_evidence,omitempty"`
+	PRChecks          bool             `json:"pr_checks,omitempty"`
+	CheckAttempts     []PRCheckAttempt `json:"check_attempts,omitempty"`
+	TargetLineage     bool             `json:"target_lineage,omitempty"`
+	CandidateIdentity bool             `json:"candidate_identity,omitempty"`
+	WorkItemID        string           `json:"work_item_id"`
+	Delivery          IssueDelivery    `json:"delivery"`
+	Generation        int64            `json:"generation"`
+	Nonce             string           `json:"nonce"`
 }
+
+// PRCheckAttempt limits provider enrichment to a live, explicit subscription.
+type PRCheckAttempt struct {
+	HeadSHA       string `json:"head_sha"`
+	Name          string `json:"name"`
+	WorkflowRunID int64  `json:"workflow_run_id"`
+	Attempt       int    `json:"attempt"`
+}
+
 type DeliveryPollResult struct {
 	Assignments []DeliveryAssignment `json:"assignments"`
 }

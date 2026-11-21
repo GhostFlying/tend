@@ -60,12 +60,31 @@ func (WaitExternal) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
+	if p.Kind == "pr" {
+		if p.IssueID == "" {
+			if run.Role == protocol.RoleIssueManager {
+				manager, err := store.GetIssueManagerTask(ctx, tx.Q(), run.TaskID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				p.IssueID = manager.IssueID
+			} else {
+				p.IssueID, err = store.GetTaskIssueOwner(ctx, tx.Q(), run.TaskID)
+				if err != nil {
+					return Outcome{}, errNotFound(err, "worker pr waits require an associated Issue")
+				}
+			}
+		}
+	}
+	if receipt, err := readSatisfiedPRWait(ctx, tx.Q(), run.RunID, p); err != nil || receipt != nil {
+		return Outcome{Result: receipt}, err
+	}
 	prior, err := store.GetExternalWait(ctx, tx.Q(), run.RunID)
 	if err != nil {
 		return Outcome{}, err
 	}
 	if prior != nil {
-		if prior.WaitExternalPayload != p {
+		if !prior.WaitExternalPayload.Equal(p) {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "this execution already has a different external wait")
 		}
 		return Outcome{Result: prior}, nil
@@ -87,15 +106,46 @@ func (WaitExternal) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, err
 		}
 	}
-	if p.WaitKey == reportFollowOnWaitKey {
+	if p.WaitKey == reportFollowOnWaitKey || p.Kind == "pr" {
 		v.NextReminderAtMillis = 0
 	}
 	if p.DeadlineAtMillis > 0 {
 		v.NextReminderAtMillis = p.DeadlineAtMillis
 	}
-	_, _, err = observeExternalWait(ctx, tx.Q(), &v)
+	if p.Kind == "pr" {
+		current, err := store.RunIssueResponsibilityCurrent(ctx, tx.Q(), run.RunID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !current {
+			return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "pr waits require the current Issue responsibility")
+		}
+		if err := bindPRWait(ctx, tx.Q(), &v); err != nil {
+			return Outcome{}, err
+		}
+	} else if p.Condition != nil {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "condition requires a pr wait")
+	}
+	ready, _, err := observeExternalWait(ctx, tx.Q(), &v)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if p.Kind == "pr" && ready && v.PREvidence != nil {
+		v.Status, v.WakeReason = protocol.ExternalWaitSatisfied, v.PREvidence.Reason
+		return Outcome{Result: v, Events: []Event{{ObjectType: "run", ObjectID: run.RunID, Kind: protocol.EventPRWaitSatisfied, Body: map[string]any{"wait": v}}}}, nil
+	}
+	if p.Kind == "pr" {
+		row, err := store.GetDeliveryObservation(ctx, tx.Q(), v.IssueID, v.TargetID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		// A new subscription can need attempt or check evidence absent from an
+		// earlier provider snapshot. Reuse the ordinary deduplicated refresh.
+		if !row.Observation.RefreshPending {
+			if err := queueDeliveryObservationRefresh(ctx, x, tx, &row); err != nil {
+				return Outcome{}, err
+			}
+		}
 	}
 	if err := tx.PutExternalWait(ctx, v, x.Now.UnixMilli()); err != nil {
 		return Outcome{}, err
@@ -138,7 +188,7 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 		return protocol.Errorf(protocol.CodeForbidden, "wait target is outside this Issue")
 	}
 	switch p.Kind {
-	case "checks":
+	case "checks", "pr":
 		if !allowed[p.IssueID] {
 			return protocol.Errorf(protocol.CodeForbidden, "checks require an associated Issue")
 		}
@@ -213,7 +263,7 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 		}
 		return nil
 	default:
-		return protocol.Errorf(protocol.CodeInvalidRequest, "wait kind must be checks, review, answer, task or upgrade")
+		return protocol.Errorf(protocol.CodeInvalidRequest, "wait kind must be pr, checks, review, answer, task or upgrade")
 	}
 }
 
@@ -221,6 +271,8 @@ func externalWaitScope(ctx context.Context, q store.Querier, run store.RunRow, p
 // failure wakes the owner to decide, never restarts the external operation.
 func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.ExternalWait) (bool, string, error) {
 	switch v.Kind {
+	case "pr":
+		return observePRWait(ctx, q, v)
 	case "checks":
 		row, err := store.GetDeliveryObservation(ctx, q, v.IssueID, v.TargetID)
 		if err != nil {
@@ -384,7 +436,11 @@ func settleExternalWaitStopped(ctx context.Context, x *Exec, tx *store.Tx, r sto
 		}
 		events[0].Body["wait"] = v
 	}
-	if err := refreshExternalWaits(ctx, x, tx); err != nil {
+	if v.Kind == "pr" {
+		if _, err := refreshExternalWaitsChanged(ctx, x, tx, nil, v.RunID); err != nil {
+			return Outcome{}, err
+		}
+	} else if err := refreshExternalWaits(ctx, x, tx); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Result: v, Events: events}, nil
@@ -395,14 +451,17 @@ func refreshExternalWaits(ctx context.Context, x *Exec, tx *store.Tx) error {
 	return err
 }
 
-func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end func(int)) (bool, error) {
+func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end func(int), ids ...string) (bool, error) {
 	changed := false
-	ids, err := store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM run_external_waits WHERE status='waiting' AND next_check_at<=? ORDER BY next_check_at,run_id LIMIT 100`, x.Now.UnixMilli())
-	if err != nil {
-		if end != nil {
-			end(-1)
+	if len(ids) == 0 {
+		var err error
+		ids, err = store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM run_external_waits WHERE status='waiting' AND next_check_at<=? ORDER BY next_check_at,run_id LIMIT 100`, x.Now.UnixMilli())
+		if err != nil {
+			if end != nil {
+				end(-1)
+			}
+			return false, err
 		}
-		return false, err
 	}
 	if end != nil {
 		defer end(len(ids))
@@ -412,7 +471,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 		if err != nil {
 			return false, err
 		}
-		if !v.Stopped {
+		if v == nil || !v.Stopped || v.Status != "waiting" {
 			continue
 		}
 		r, err := store.GetRun(ctx, tx.Q(), id)
@@ -683,11 +742,18 @@ func (RecordSessionStop) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outc
 }
 
 func recordExternalWaitWake(ctx context.Context, x *Exec, tx *store.Tx, r store.RunRow, v *protocol.ExternalWait) error {
+	event := x.IDs.New(protocol.PrefixEvent)
+	var message string
+	if r.Role == protocol.RoleIssueManager {
+		message = x.IDs.New(protocol.PrefixMessage)
+	}
+	if v.Kind == "pr" {
+		v.SourceEvent, v.SourceMessage = event, message
+	}
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	event := x.IDs.New(protocol.PrefixEvent)
 	if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: event, Source: "app", ObjectType: "task", ObjectID: r.TaskID, Kind: "task.external_wait_ready", BodyJSON: string(raw), CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return err
 	}
@@ -698,10 +764,16 @@ func recordExternalWaitWake(ctx context.Context, x *Exec, tx *store.Tx, r store.
 	if err != nil {
 		return err
 	}
-	message := x.IDs.New(protocol.PrefixMessage)
 	body := "External wait returned to this Issue owner: " + v.Kind + " " + v.TargetID + " (" + v.WakeReason + "). Original Task: " + v.TaskID + "; wait: " + v.WaitID + ". Recovery: " + v.Recovery + ". Read current facts, decide the next useful action, and preserve unknown outcomes. No external operation was repeated and no authorization was granted."
 	if v.ResumeReason != "" {
 		body += " Resume reason: " + v.ResumeReason
+	}
+	if v.PREvidence != nil {
+		evidence, err := json.Marshal(v.PREvidence)
+		if err != nil {
+			return err
+		}
+		body += " Provider evidence: " + string(evidence)
 	}
 	if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: message, ConversationID: m.ConversationID, Author: "system", Body: body, CreatedAt: x.Now.UnixMilli()}); err != nil {
 		return err
