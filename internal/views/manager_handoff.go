@@ -78,12 +78,13 @@ UNION ALL SELECT n.issue_id,3,'old_manager_events',r.run_id FROM needed n
  WHERE EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
 ORDER BY 1,2,4`
 
-// A physical close or a fully applied observation tail is not a receipt
-// for an already dispatched native business request.
+// The original close and callback result have their own request receipts.
+// Turn start and delivery remain governed by the hosted turn history, which
+// can prove their outcome independently of an uncertain transport response.
 const unresolvedManagerNativeForTask = `EXISTS(
  SELECT 1 FROM runs r JOIN manager_native_requests n USING(run_id)
  WHERE r.task_id=m.task_id AND r.observed_state IN ('failed','finished')
- AND n.method NOT IN ('models','find','usage')
+ AND n.method IN ('close','tool_result')
  AND (n.status IN ('pending','started','unknown')
       OR (n.status='completed' AND n.completion_error<>'' AND n.completion_rejected=0))
 )`
