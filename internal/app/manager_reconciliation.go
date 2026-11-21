@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -88,7 +90,19 @@ func managerRunReconciliation(ctx context.Context, q store.Querier, task, run st
 	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0),COALESCE(SUM(CASE WHEN applied=0 THEN 1 ELSE 0 END),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&out.EventLastSequence, &out.UnappliedEvents); err != nil {
 		return out, err
 	}
-	if out.CloseLastSequence != out.EventLastSequence || out.UnappliedEvents != 0 {
+	out.EventAppliedSequence, err = managerAppliedCursor(ctx, q, run)
+	if err != nil {
+		return out, err
+	}
+	var failure protocol.ManagerEventApplicationFailure
+	if err := q.QueryRowContext(ctx, `SELECT f.seq,f.attempts,f.retry_at,f.failure_code
+ FROM manager_event_apply_failures f JOIN manager_native_events e USING(run_id,seq)
+ WHERE f.run_id=? AND e.applied=0`, run).Scan(&failure.Sequence, &failure.Attempts, &failure.RetryAt, &failure.Code); err == nil {
+		out.EventApplicationFailure = &failure
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return out, err
+	}
+	if out.CloseLastSequence != out.EventLastSequence || out.EventAppliedSequence != out.EventLastSequence {
 		out.Blockers = append(out.Blockers, "native_events_unreconciled")
 	}
 	rows, err := q.QueryContext(ctx, `SELECT method,status,COUNT(*) FROM manager_native_requests WHERE run_id=? AND (status IN ('pending','started','unknown') OR (status='completed' AND COALESCE(json_extract(result_json,'$.error'),'')<>'' AND COALESCE(json_extract(result_json,'$.rejected'),0)=0)) GROUP BY method,status`, run)

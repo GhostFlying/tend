@@ -12862,6 +12862,31 @@
       "title": "MaintenanceTimeoutPolicy",
       "type": "object"
     },
+    "ManagerEventApplicationFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "type": "integer"
+        },
+        "code": {
+          "type": "string"
+        },
+        "retry_at": {
+          "type": "integer"
+        },
+        "sequence": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sequence",
+        "attempts",
+        "retry_at",
+        "code"
+      ],
+      "title": "ManagerEventApplicationFailure",
+      "type": "object"
+    },
     "ManagerMigrationPayload": {
       "additionalProperties": false,
       "properties": {
@@ -12918,6 +12943,12 @@
         },
         "close_result_sha256": {
           "type": "string"
+        },
+        "event_application_failure": {
+          "$ref": "#/definitions/ManagerEventApplicationFailure"
+        },
+        "event_applied_sequence": {
+          "type": "integer"
         },
         "event_last_sequence": {
           "type": "integer"
@@ -12976,6 +13007,7 @@
         "observed",
         "close_last_sequence",
         "stopped_last_sequence",
+        "event_applied_sequence",
         "event_last_sequence",
         "unapplied_events",
         "unresolved_native_requests",

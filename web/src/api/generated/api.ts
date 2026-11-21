@@ -6205,6 +6205,8 @@ export interface ManagerRunReconciliation {
   close_last_sequence: number;
   close_request_id?: string;
   close_result_sha256?: string;
+  event_application_failure?: ManagerEventApplicationFailure;
+  event_applied_sequence: number;
   event_last_sequence: number;
   execution?: RunExecutionPin;
   host_id: string;
@@ -6220,6 +6222,16 @@ export interface ManagerRunReconciliation {
   unapplied_events: number;
   unresolved_native_requests: number;
   unresolved_read_requests?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "ManagerEventApplicationFailure".
+ */
+export interface ManagerEventApplicationFailure {
+  attempts: number;
+  code: string;
+  retry_at: number;
+  sequence: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
