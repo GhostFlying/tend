@@ -416,8 +416,9 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 		return err
 	}
 	// The asynchronous sender includes older facts in the same ordered stream.
+	// Legacy startup is bounded before the reverse claim loop can receive close.
 	if !as.EventSync {
-		if err = r.deliverActiveManagerEvents(liveSession, as); err != nil {
+		if err = r.flushManagerEvents(liveSession, as); err != nil {
 			return err
 		}
 	}
