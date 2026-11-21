@@ -98,7 +98,7 @@ func backgroundOutputBatch(ctx context.Context, x *Exec, tx *store.Tx, message, 
 
 // Tool records share the deferred arrival sequence with prose. They are always
 // retained in the audit transcript, including after a silent check-in.
-func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload, deliveryTurn string) (bool, Outcome, error) {
+func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload, deliveryTurn string, preserveInterrupted bool) (bool, Outcome, error) {
 	if deliveryTurn == "" {
 		deliveryTurn = p.TurnID
 	}
@@ -112,10 +112,15 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 		return true, Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
+	if preserveInterrupted && old == string(protocol.ToolInterrupted) && p.Status == protocol.ToolRunning {
+		p.Status = protocol.ToolInterrupted
+	}
 	if err == nil && old != string(protocol.ToolRunning) && (old != string(protocol.ToolInterrupted) || p.Status == protocol.ToolRunning) {
 		return true, out, nil
 	}
-	if old == string(p.Status) {
+	// A published reply can keep the prior status after its cached body
+	// has been retired. In that case the visible tool handles equality.
+	if old == string(p.Status) && oldRecord != "" {
 		original, err := store.ResolveToolRecord(ctx, tx.Q(), oldRecord)
 		if err != nil {
 			return true, Outcome{}, err
@@ -196,7 +201,7 @@ func publishBackgroundReplies(ctx context.Context, x *Exec, tx *store.Tx, b prot
 				return err
 			}
 			retained.Status = p.Status
-			out, err = recordVisibleToolUse(ctx, &copy, tx, retained)
+			out, err = recordVisibleToolUse(ctx, &copy, tx, retained, false)
 			if err == nil {
 				_, err = tx.Exec(ctx, `UPDATE background_replies SET status=? WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, string(p.Status), b.BatchID, r.thread, r.turn, r.item)
 			}

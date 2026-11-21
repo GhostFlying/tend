@@ -1042,8 +1042,9 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 // Its request ID is derived from the item and the phase, so a repeated
 // event records it once.
 type RecordToolUse struct {
-	DeliveryTurn     string
-	interruptRunning bool
+	DeliveryTurn        string
+	interruptRunning    bool
+	preserveInterrupted bool
 }
 
 type recordToolUsePayload struct {
@@ -1080,15 +1081,18 @@ func (c RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		p.Status = protocol.ToolInterrupted
 	}
 	p.Input = protocol.RedactOwnerToolInput(p.Tool, p.Input)
-	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn); handled || err != nil {
+	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn, c.preserveInterrupted); handled || err != nil {
 		return out, err
 	}
-	return recordVisibleToolUse(ctx, x, tx, p)
+	return recordVisibleToolUse(ctx, x, tx, p, c.preserveInterrupted)
 }
 
-func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload) (Outcome, error) {
+func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload, preserveInterrupted bool) (Outcome, error) {
 	now := x.Now.UnixMilli()
 	u, err := store.GetToolUse(ctx, tx.Q(), p.TurnID, p.ItemID)
+	if preserveInterrupted && u.Status == string(protocol.ToolInterrupted) && p.Status == protocol.ToolRunning {
+		p.Status = protocol.ToolInterrupted
+	}
 	var seq int64
 	switch {
 	case errors.Is(err, store.ErrNotFound):

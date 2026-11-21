@@ -420,7 +420,7 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 }
 
 func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing.T) {
-	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection"} {
+	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection", "interrupted-before-close"} {
 		t.Run(scenario, func(t *testing.T) {
 			testManagerProjectionInterruptedTool(t, scenario)
 		})
@@ -446,16 +446,25 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: request, ConversationID: id, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, Selection: selection, CreatedAt: now}); err != nil {
 			return err
 		}
-		unrelated := h.ids.New(protocol.PrefixMessage)
-		if _, err := tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: unrelated, ConversationID: id, Author: "main_agent", ReplyTo: source, CreatedAt: now}); err != nil {
-			return err
-		}
-		if err := tx.PutToolUse(ctx, store.ToolUseRow{MessageID: unrelated, ThreadID: thread, TurnID: turn, ItemID: "unrelated", Tool: "shell", Status: string(protocol.ToolRunning)}); err != nil {
-			return err
-		}
 		return tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, ThreadID: thread, TurnID: turn, MessageID: source, Status: store.TurnInterrupted}, now)
 	}); err != nil {
 		t.Fatal(err)
+	}
+	putUnrelated := func() {
+		t.Helper()
+		if err := h.store.Write(ctx, func(tx *store.Tx) error {
+			unrelated := h.ids.New(protocol.PrefixMessage)
+			if _, err := tx.InsertMessage(ctx, store.MessageRow{Kind: store.KindToolUse, MessageID: unrelated, ConversationID: id, Author: "main_agent", ReplyTo: source, CreatedAt: now}); err != nil {
+				return err
+			}
+			return tx.PutToolUse(ctx, store.ToolUseRow{MessageID: unrelated, ThreadID: thread, TurnID: turn, ItemID: "unrelated", Tool: "shell", Status: string(protocol.ToolRunning)})
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	attachmentInterrupted := scenario == "interrupted-before-close"
+	if !attachmentInterrupted {
+		putUnrelated()
 	}
 	facts := []string{
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"unfinished","ItemType":"commandExecution","Tool":{"Name":"shell","Input":"retained command","Status":"running"},"Raw":{"status":"inProgress"}}}`,
@@ -495,17 +504,32 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		if err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq); err != nil {
 			t.Fatal(err)
 		}
+		if attachmentInterrupted && seq == 2 {
+			if err := h.app.SettleOpenTurns(ctx, thread); err != nil {
+				t.Fatal(err)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background' AND status='interrupted' AND output=''`) != 1 ||
+				h.countWhere(`SELECT COUNT(*) FROM runs WHERE run_id=? AND native_closed_at=0`, as.RunID) != 1 ||
+				h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE run_id=? AND method='close' AND status='started'`, as.RunID) != 1 {
+				t.Fatal("the attachment must have interrupted the tool before the original close settled")
+			}
+			putUnrelated()
+		}
 	}
 	assertManagerProjectionWatermarks(t, h, as.RunID, last, last)
 	if scenario != "stop-before-projection" {
-		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unfinished' AND status='running'`) != 1 {
+		if !attachmentInterrupted && h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unfinished' AND status='running'`) != 1 {
 			t.Fatal("the restored start should still be running while the original close is unresolved")
 		}
-		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses
- WHERE item_id IN ('background','background-observation') AND status='running' AND output<>''`) != 2 {
-			t.Fatal("backgrounded observations should retain output while the original close is unresolved")
+		backgroundStatus := string(protocol.ToolRunning)
+		if attachmentInterrupted {
+			backgroundStatus = string(protocol.ToolInterrupted)
 		}
-		if scenario == "close-reply-after-projection" {
+		if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background' AND status=? AND output='original aggregated output'`, backgroundStatus) != 1 ||
+			h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background-observation' AND status='running' AND output<>''`) != 1 {
+			t.Fatal("backgrounded observations should retain their output and interruption state while the original close is unresolved")
+		}
+		if scenario == "close-reply-after-projection" || attachmentInterrupted {
 			if op := h.runAs(as, protocol.OpManagerNativeReply, protocol.ManagerNativeReply{ID: closeID, LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}

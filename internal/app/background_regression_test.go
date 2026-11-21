@@ -199,13 +199,13 @@ func TestBackgroundInterruptedToolAcceptsLateResultWithoutReordering(t *testing.
 	w := h.createWork(workPlan())
 	h.followup(w, protocol.FollowupSpec{Kind: "at", At: h.clock.Now().UnixMilli()})
 	_, turn := h.startBackground()
-	record := func(status protocol.ToolStatus, output string) {
-		op := h.exec(mainAgent, h.env("conversation.record_tool_use", protocol.Target{Type: "conversation"}, recordToolUsePayload{ReplyTo: turn.MessageID, TurnID: turn.TurnID, ItemID: "tool", Tool: "tasks_list", Status: status, Output: output}, nil), RecordToolUse{})
+	record := func(status protocol.ToolStatus, output string, preserveInterrupted bool) {
+		op := h.exec(mainAgent, h.env("conversation.record_tool_use", protocol.Target{Type: "conversation"}, recordToolUsePayload{ReplyTo: turn.MessageID, TurnID: turn.TurnID, ItemID: "tool", Tool: "tasks_list", Status: status, Output: output}, nil), RecordToolUse{preserveInterrupted: preserveInterrupted})
 		if op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
 	}
-	record(protocol.ToolRunning, "")
+	record(protocol.ToolRunning, "", false)
 	turn.Status = store.TurnInterrupted
 	if err := h.app.PutMainTurn(t.Context(), turn); err != nil {
 		t.Fatal(err)
@@ -227,8 +227,19 @@ func TestBackgroundInterruptedToolAcceptsLateResultWithoutReordering(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	record(protocol.ToolCompleted, "retained late result")
-	record(protocol.ToolRunning, "stale start")
+	record(protocol.ToolRunning, "recovered nonterminal output", true)
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		u, err := store.GetToolUse(t.Context(), tx.Q(), turn.TurnID, "tool")
+		if err == nil && (u.Status != string(protocol.ToolInterrupted) || u.Output != "recovered nonterminal output") {
+			t.Fatal(u)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	record(protocol.ToolCompleted, "retained late result", false)
+	record(protocol.ToolRunning, "stale start", false)
+	record(protocol.ToolRunning, "older recovered observation", true)
 	if h.count("conversation_messages") != before {
 		t.Fatal("late tool duplicated its transcript item")
 	}
