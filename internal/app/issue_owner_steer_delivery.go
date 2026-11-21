@@ -250,68 +250,72 @@ func (a *App) ConsumeIssueOwnerSteer(ctx context.Context, conversation, thread, 
 	if item == "" || text == "" || turn == "" {
 		return nil
 	}
+	err := a.write(ctx, func(tx *store.Tx) error {
+		return a.consumeIssueOwnerSteer(ctx, tx, conversation, thread, turn, text, item, a.now().UnixMilli())
+	})
+	if err == nil {
+		a.notifyChange()
+	}
+	return err
+}
+
+func (a *App) consumeIssueOwnerSteer(ctx context.Context, tx *store.Tx, conversation, thread, turn, text, item string, now int64) error {
+	if item == "" || text == "" || turn == "" {
+		return nil
+	}
 	var message string
-	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT s.message_id FROM issue_owner_steers s
+	err := tx.Q().QueryRowContext(ctx, `SELECT s.message_id FROM issue_owner_steers s
  JOIN conversation_messages m USING(message_id) WHERE m.conversation_id=? AND s.thread_id=?
  AND s.turn_id=? AND s.input_sha256=? AND s.status IN ('sending','accepted','unknown')`,
-			conversation, thread, turn, issueSteerInputDigest(text)).Scan(&message)
-	})
+		conversation, thread, turn, issueSteerInputDigest(text)).Scan(&message)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	err = a.write(ctx, func(tx *store.Tx) error {
-		res, err := tx.Exec(ctx, `UPDATE issue_owner_steers SET native_item_id=? WHERE message_id=?
+	res, err := tx.Exec(ctx, `UPDATE issue_owner_steers SET native_item_id=? WHERE message_id=?
  AND status IN ('sending','accepted','unknown')`, item, message)
-		if err != nil {
-			return err
-		}
-		updated, err := res.RowsAffected()
-		if err != nil || updated == 0 {
-			return err
-		}
-		now := a.now().UnixMilli()
-		if err := writeIssueSteerState(ctx, tx, a.ids, message, "consumed", "", now); err != nil {
-			return err
-		}
-		var source string
-		err = tx.Q().QueryRowContext(ctx, `SELECT source_message_id FROM issue_owner_consumed_inputs WHERE receipt_message_id=?`, message).Scan(&source)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO conversation_blocks(message_id) VALUES(?)`, source); err != nil {
-			return err
-		}
-		var unstarted bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o
+	if err != nil {
+		return err
+	}
+	updated, err := res.RowsAffected()
+	if err != nil || updated == 0 {
+		return err
+	}
+	if err := writeIssueSteerState(ctx, tx, a.ids, message, "consumed", "", now); err != nil {
+		return err
+	}
+	var source string
+	err = tx.Q().QueryRowContext(ctx, `SELECT source_message_id FROM issue_owner_consumed_inputs WHERE receipt_message_id=?`, message).Scan(&source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT OR IGNORE INTO conversation_blocks(message_id) VALUES(?)`, source); err != nil {
+		return err
+	}
+	var unstarted bool
+	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o
  WHERE o.status IN ('pending','sending') AND json_extract(o.payload_json,'$.message_id')=? AND `+store.IssueOwnerConsumptionMatchesOutbox+`
  AND NOT EXISTS(SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected'))`, source).Scan(&unstarted); err != nil {
-			return err
-		}
-		if unstarted {
-			if err := a.restoreDisplacedRecovery(ctx, tx, source, "was delivered urgently", now); err != nil {
-				return err
-			}
-		}
-		// Refresh the original from its versioned receipt. Ordinary message
-		// states belong to their own execution and must survive a late receipt.
-		body, err := json.Marshal(map[string]string{"receipt_message_id": message})
-		if err != nil {
-			return err
-		}
-		_, err = tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread",
-			ObjectType: "message", ObjectID: source, Kind: "conversation.urgent_consumed", BodyJSON: string(body), CreatedAt: now})
 		return err
-	})
-	if err == nil {
-		a.notifyChange()
 	}
+	if unstarted {
+		if err := a.restoreDisplacedRecovery(ctx, tx, source, "was delivered urgently", now); err != nil {
+			return err
+		}
+	}
+	// Refresh the original from its versioned receipt. Ordinary message
+	// states belong to their own execution and must survive a late receipt.
+	body, err := json.Marshal(map[string]string{"receipt_message_id": message})
+	if err != nil {
+		return err
+	}
+	_, err = tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread",
+		ObjectType: "message", ObjectID: source, Kind: "conversation.urgent_consumed", BodyJSON: string(body), CreatedAt: now})
 	return err
 }
 

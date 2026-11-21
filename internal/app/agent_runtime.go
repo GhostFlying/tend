@@ -19,15 +19,20 @@ func (a *App) RegisterAgentThread(ctx context.Context, id, thread string) error 
 }
 func (a *App) RecordAgentUsage(ctx context.Context, id string, usage protocol.AgentContextUsage) error {
 	return a.write(ctx, func(tx *store.Tx) error {
-		usage.UpdatedAt = a.now().UnixMilli()
-		raw, err := json.Marshal(usage)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO agent_context_usage(conversation_id,thread_id,revision,snapshot_json,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET thread_id=excluded.thread_id,revision=excluded.revision,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at WHERE agent_context_usage.thread_id<>excluded.thread_id OR agent_context_usage.revision<=excluded.revision`, store.ConversationID(id), usage.ThreadID, usage.Revision, string(raw), usage.UpdatedAt)
-		return err
+		return recordAgentUsage(ctx, tx, id, usage, a.now().UnixMilli())
 	})
 }
+
+func recordAgentUsage(ctx context.Context, tx *store.Tx, id string, usage protocol.AgentContextUsage, when int64) error {
+	usage.UpdatedAt = when
+	raw, err := json.Marshal(usage)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO agent_context_usage(conversation_id,thread_id,revision,snapshot_json,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(conversation_id) DO UPDATE SET thread_id=excluded.thread_id,revision=excluded.revision,snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at WHERE agent_context_usage.thread_id<>excluded.thread_id OR agent_context_usage.revision<=excluded.revision`, store.ConversationID(id), usage.ThreadID, usage.Revision, string(raw), usage.UpdatedAt)
+	return err
+}
+
 func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, kind string, data json.RawMessage) error {
 	if len(data) == 0 {
 		data = json.RawMessage(`{}`)
@@ -37,19 +42,26 @@ func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, ki
 		return err
 	}
 	return a.write(staged, func(tx *store.Tx) error {
-		if stableRolloutEvent(thread, turn, item, kind) {
-			recorded, err := rolloutAlreadyRecorded(staged, tx.Q(), id, thread, turn, item, kind, data)
-			if err != nil || recorded {
-				return err
-			}
-		}
-		body, err := tx.RetainEventJSON(staged, string(data))
-		if err != nil {
+		return recordRolloutEvent(staged, tx, id, thread, turn, item, kind, data, a.now().UnixMilli())
+	})
+}
+
+func recordRolloutEvent(ctx context.Context, tx *store.Tx, id, thread, turn, item, kind string, data json.RawMessage, when int64) error {
+	if len(data) == 0 {
+		data = json.RawMessage(`{}`)
+	}
+	if stableRolloutEvent(thread, turn, item, kind) {
+		recorded, err := rolloutAlreadyRecorded(ctx, tx.Q(), id, thread, turn, item, kind, data)
+		if err != nil || recorded {
 			return err
 		}
-		_, err = tx.Exec(staged, `INSERT INTO agent_rollout_events(conversation_id,thread_id,turn_id,item_id,kind,data_json,created_at) VALUES(?,?,?,?,?,?,?)`, store.ConversationID(id), thread, turn, item, kind, body, a.now().UnixMilli())
+	}
+	body, err := tx.RetainEventJSON(ctx, string(data))
+	if err != nil {
 		return err
-	})
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO agent_rollout_events(conversation_id,thread_id,turn_id,item_id,kind,data_json,created_at) VALUES(?,?,?,?,?,?,?)`, store.ConversationID(id), thread, turn, item, kind, body, when)
+	return err
 }
 
 type CompactConversation struct{}
