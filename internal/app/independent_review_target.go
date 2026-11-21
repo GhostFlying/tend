@@ -99,7 +99,7 @@ func filterIndependentReviewCandidates(ctx context.Context, q store.Querier, row
 		if err != nil {
 			return nil, nil, err
 		}
-		if approvedRoot != "" && original.key != "" && target != original {
+		if approvedRoot != "" && original.key != "" && !matchesIndependentReviewRetryTarget(original, target) {
 			continue
 		}
 		ok, err := canStartIndependentReviewTarget(ctx, q, target, excludeTask, approvedRoot)
@@ -160,6 +160,12 @@ func boundIndependentReviewTarget(ctx context.Context, q store.Querier, rc runCo
 		return independentReviewTarget{}, err
 	}
 	return independentReviewPRTarget(ref, head, base), nil
+}
+
+// A registered target remains the same obligation when its first provider
+// observation arrives after the failed attempt.
+func matchesIndependentReviewRetryTarget(original, current independentReviewTarget) bool {
+	return original.key == current.key && (original.head == "" || original == current)
 }
 
 func approvedIndependentReviewRetry(ctx context.Context, q store.Querier, action store.ActionRow) (string, independentReviewTarget, error) {

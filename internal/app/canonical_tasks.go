@@ -160,7 +160,7 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if out.NoEffect {
 		return out, nil
 	}
-	if err := consumeIndependentReviewRetry(ctx, tx, retry, out.Result.(taskResult).Actions); err != nil {
+	if err := consumeIndependentReviewRetry(ctx, x, tx, retry, out.Result.(taskResult).Actions); err != nil {
 		return Outcome{}, err
 	}
 	if deliveryDuty != nil {

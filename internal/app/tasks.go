@@ -802,7 +802,7 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := consumeIndependentReviewRetry(ctx, tx, retry, actions); err != nil {
+	if err := consumeIndependentReviewRetry(ctx, x, tx, retry, actions); err != nil {
 		return Outcome{}, err
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
