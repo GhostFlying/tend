@@ -33,15 +33,18 @@ func TestRunnerManagedIssueOwnerDefersPRBaseUpdate(t *testing.T) {
 		"Target advancement alone does not trigger a rebase, push, or check rerun",
 		"Resolve an actual conflict early if it blocks review or validation",
 		"first confirm the applicable authorization and that the other delivery conditions allow proceeding. Then read the current target tip and PR head",
-		"already an ancestor of the head and the required evidence applies, proceed directly through the protected rebase merge",
-		"If the head is behind, rebase and push, then validate the final combination and required CI",
-		"Apply the existing review applicability and candidate approval rules",
+		"repository instructions and the provider's rules for the actual target branch",
+		"Update a behind branch when the target requires it or a source conflict prevents the provider from merging it",
+		"keep an eligible head and proceed through the repository's protected merge path",
+		"existing review applicability and candidate approval rules",
 		"If the target advances during validation or the provider rejects a stale merge attempt, refresh the candidate and reassess under the same protections",
-		"GitHub strict where enabled",
 	} {
 		if !strings.Contains(instructions, guidance) {
 			t.Errorf("runner-managed Issue owner guidance lacks %q", guidance)
 		}
+	}
+	if strings.Contains(instructions, "If the head is behind, rebase and push") {
+		t.Error("runner-managed Issue owner guidance imposes a repository-specific rebase rule")
 	}
 }
 

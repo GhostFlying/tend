@@ -95,9 +95,10 @@ capability-check:
 	$(GO) test ./internal/cli -run '^TestCapability' -count=1
 
 .PHONY: ci-check
-## ci-check: verify bounded CI cache retention
+## ci-check: verify CI cache retention and integration promotion
 ci-check:
 	node --test .github/scripts/*.test.cjs
+	python3 -m unittest discover -s .github/scripts -p 'promote_integration_test.py'
 
 .PHONY: impact-quality test-plan
 ## test-plan: show source-bound affected checks without executing them

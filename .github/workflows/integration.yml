@@ -1,0 +1,37 @@
+name: integration
+
+on:
+  pull_request:
+    branches: [integration]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  integration-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-go
+        with:
+          role: e2e
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: build Go and embedded Web
+        run: make web && make build
+      - name: exercise runner task and acceptance
+        shell: bash
+        run: |
+          go test -race -count=1 -json ./internal/e2e -run '^TestEndToEnd_RunnerCompletesTask$' | tee "$RUNNER_TEMP/p0.json"
+          jq -se 'any(.[]; .Action == "pass" and .Test == "TestEndToEnd_RunnerCompletesTask")' "$RUNNER_TEMP/p0.json"
