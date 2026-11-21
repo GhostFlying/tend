@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -223,4 +224,55 @@ func TestMessagingMessagingAssociationEvent(t *testing.T) {
 		t.Fatalf("input IssueIDs changed and processing is now %s, but messaging SSE emitted no event", m.Processing)
 	}
 	t.Log(events)
+}
+
+func TestMessagingEventsProjectSharedTurnRefresh(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	e.say("Original input")
+	e.say("Clarification answer")
+	page, err := e.app.MessagingMessages(ctx, 0, "", "", "")
+	if err != nil || len(page.Items) != 2 {
+		t.Fatal(page, err)
+	}
+	first, second := page.Items[0].MessageID, page.Items[1].MessageID
+	const turn = "shared-turn"
+	var after int64
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		var err error
+		after, err = store.LatestEventSeq(ctx, tx.Q())
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO logical_turns(logical_turn_id,message_id,status,updated_at)
+			VALUES(?,?,'processing',1)`, turn, second); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO logical_turn_messages(logical_turn_id,message_id) VALUES (?,?),(?,?) ON CONFLICT DO NOTHING`, turn, first, turn, second); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE logical_turns SET status='unknown',updated_at=2 WHERE logical_turn_id=?`, turn)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.Read(ctx, func(tx *store.ReadTx) error {
+		_, projected, err := readMessagingEvents(ctx, tx.Q(), after)
+		if err != nil {
+			return err
+		}
+		if len(projected) != 1 {
+			t.Fatalf("want one scoped stream event, got %v", projected)
+		}
+		for seq, event := range projected {
+			if event.EventSeq != seq || seq <= after || event.Kind != "messaging.turn_processing" ||
+				event.ObjectType != "logical_turn" || event.ObjectID != turn || len(event.MessageIDs) != 2 ||
+				!slices.Contains(event.MessageIDs, first) || !slices.Contains(event.MessageIDs, second) {
+				t.Fatalf("unexpected shared turn event: %+v", event)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

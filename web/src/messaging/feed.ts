@@ -41,7 +41,7 @@ export class MessagingFeed {
         this.connected = true;
         this.reset ||= fresh || !this.initialized;
         this.forward = true;
-        if (fresh) this.quote?.invalidate();
+        this.quote?.invalidate();
         void this.read();
       },
       onEvent: (event) => this.handleEvent(event),
@@ -126,6 +126,15 @@ export class MessagingFeed {
         this.workTimer = undefined;
         void this.read();
       }, workRefreshMs);
+      return;
+    }
+    if (event.kind === "messaging.turn_processing") {
+      const loaded = new Set(items.map((m) => m.message_id));
+      for (const id of event.message_ids ?? []) {
+        if (this.quote?.id === id) this.quote.invalidate();
+        if (loadingPage || loaded.has(id)) this.dirty.add(id);
+      }
+      void this.read();
       return;
     }
     if (event.object_type !== "message") return;
