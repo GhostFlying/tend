@@ -17,7 +17,10 @@ const serverDeliveryLease = 90 * time.Second
 
 // Terminal merges are eligible only while an existing bounded failed read has
 // a retry scheduled. Successful or exhausted terminal facts never poll forever.
-const serverDeliveryAutomaticMember = `(r.active=1 AND (COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<j.fact_revision OR COALESCE(json_extract(j.observation_json,'$.state'),'') NOT IN ('merged','closed') OR (json_extract(j.observation_json,'$.state')='merged' AND COALESCE(json_extract(j.observation_json,'$.error_kind'),'')<>'' AND COALESCE(json_extract(j.observation_json,'$.retry_at'),0)>0)))`
+const serverDeliveryAutomaticMember = `(r.active=1 AND (COALESCE(json_extract(o.query_json,'$.observed_revision'),0)<j.fact_revision
+ OR COALESCE(json_extract(j.observation_json,'$.state'),'') NOT IN ('merged','closed')
+ OR (json_extract(j.observation_json,'$.state')='merged' AND COALESCE(json_extract(j.observation_json,'$.error_kind'),'')<>'' AND COALESCE(json_extract(j.observation_json,'$.retry_at'),0)>0)
+ OR ` + prWaitForMemberSQL + `))`
 
 // WithServerDeliveryObservations transfers new read ownership explicitly. The
 // legacy runner request formats remain valid; old in-flight reads are fenced by
@@ -27,10 +30,11 @@ func WithServerDeliveryObservations(enabled bool) Option {
 }
 
 type ServerDeliveryQuery struct {
-	ID         string `json:"id"`
-	Provider   string `json:"provider"`
-	Repository string `json:"repository"`
-	Number     int64  `json:"number"`
+	ID            string                    `json:"id"`
+	Provider      string                    `json:"provider"`
+	Repository    string                    `json:"repository"`
+	Number        int64                     `json:"number"`
+	CheckAttempts []protocol.PRCheckAttempt `json:"check_attempts,omitempty"`
 }
 
 type claimServerDelivery struct{}
@@ -234,6 +238,13 @@ func (claimServerDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 		return out, nil
+	}
+	if q.Provider == "github" {
+		ref := protocol.IssueDelivery{Provider: "github", Repository: q.Repository, Number: q.Number}
+		_, q.CheckAttempts, err = deliveryPRObservationNeeds(ctx, tx.Q(), ref)
+		if err != nil {
+			return Outcome{}, err
+		}
 	}
 	return Outcome{Result: &q}, nil
 }
@@ -500,7 +511,16 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 		return Outcome{}, err
 	}
 	if shared.State == "merged" && shared.RetryAt == 0 {
-		next = int64(9223372036854775807)
+		var subscribed bool
+		err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM server_delivery_references r
+ WHERE r.provider=? AND r.repository=? AND r.number=? AND r.active=1 AND `+prWaitForMemberSQL+`)`,
+			ref.Provider, ref.Repository, ref.Number).Scan(&subscribed)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if !subscribed {
+			next = int64(9223372036854775807)
+		}
 	}
 	if more {
 		next = now
@@ -518,7 +538,14 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	if _, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET status=?,finished_at=? WHERE query_id=?`, status, now, id); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Events: events}, nil
+	if err := capturePRWaits(ctx, x, tx, ref); err != nil {
+		return Outcome{}, err
+	}
+	merged, err := deliveryMergeEvents(ctx, x, tx, ref, shared.State)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Events: append(events, merged...)}, nil
 }
 
 func deliveryObservationError(kind string) string {

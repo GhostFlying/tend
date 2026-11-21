@@ -144,6 +144,10 @@ func TestEndToEndManagerExternalWaitHandsOriginalReceiptToHistory(t *testing.T) 
 	runRunnerManager(t, false, false, false, "external_wait")
 }
 
+func TestEndToEndManagerPRWaitReturnsTypedEvidenceAfterPhysicalStop(t *testing.T) {
+	runRunnerManager(t, false, false, false, "pr_wait")
+}
+
 func TestEndToEndRunnerManagerClaimsReviewsAndReleasesSlot(t *testing.T) {
 	runRunnerManager(t, false, false, false, "")
 }
@@ -223,9 +227,13 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return st, err
 		}
 	}
-	s := startServer(t, 10*time.Second, filepath.Join(t.TempDir(), "tend.db"), now, openFixture, app.WithFollowups(true))
+	prWait := archiveMode == "pr_wait"
+	prHead, prBase := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	prReference := protocol.IssueDelivery{DeliveryID: "original-pr", Provider: "github", Repository: "example/project", Number: 7, URL: "https://example.com/project/pull/7"}
+	prReturned := make(chan string, 1)
+	s := startServer(t, 10*time.Second, filepath.Join(t.TempDir(), "tend.db"), now, openFixture, app.WithFollowups(true), app.WithServerDeliveryObservations(prWait))
 	archiveFault := archiveMode == "foreign" || archiveMode == "receipt"
-	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated"
+	externalWait := archiveMode == "external_wait" || archiveMode == "external_wait_migrated" || prWait
 	var migration sync.Once
 	if delivery {
 		s.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"tend"}, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
@@ -429,6 +437,25 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 			return "failed"
 		}
 		if externalWait {
+			if prWait && s.count(`SELECT COUNT(*) FROM run_external_waits WHERE status='continued'`) > 0 {
+				var read struct {
+					Outcome protocol.BackgroundSourcePage `json:"outcome"`
+				}
+				if !invoke("background_sources", map[string]any{}, &read) {
+					return "failed"
+				}
+				for _, source := range read.Outcome.Sources {
+					var proof protocol.ExternalWait
+					if source.Kind == "task.external_wait_ready" && json.Unmarshal(source.Data, &proof) == nil &&
+						proof.SourceEvent == source.EventID && proof.WakeReason == "check_completed" && proof.PREvidence != nil &&
+						proof.PREvidence.Check != nil && proof.PREvidence.Check.Conclusion == "failure" && proof.PREvidence.HeadSHA == prHead {
+						prReturned <- proof.TaskID
+						return "completed"
+					}
+				}
+				failures <- "resumed owner did not receive its exact failed check source"
+				return "failed"
+			}
 			waitOwnerRunning <- item.IssueID
 			select {
 			case <-allowWait:
@@ -451,20 +478,26 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 				return "failed"
 			}
 			waitFile <- file
-			if err := s.store.Write(ctx, func(tx *store.Tx) error {
-				if err := tx.InsertTask(ctx, store.TaskRow{TaskID: "wait-dependency", Title: "Existing independent review", Project: "default", Lifecycle: protocol.TaskWaiting, ControlMode: protocol.ControlPaused, SpecVersion: 1}); err != nil {
-					return err
-				}
-				if err := tx.InsertSpec(ctx, "wait-dependency", 1, `{"goal":"Read existing review evidence","workspace":{"mode":"temporary"}}`, "", s.now().UnixMilli()); err != nil {
-					return err
-				}
-				_, err := tx.Exec(ctx, `INSERT INTO task_work_item_owners(task_id,work_item_id,source_spec_version) VALUES('wait-dependency',?,1)`, item.IssueID)
-				return err
-			}); err != nil {
-				failures <- err.Error()
-				return "failed"
-			}
+
 			payload := protocol.WaitExternalPayload{WaitKey: "original-review", Kind: "task", TargetID: "wait-dependency", Reason: "Wait for evidence before continuing the responsibility", Recovery: "Read original history and continue the same Task"}
+			if prWait {
+				payload.Kind, payload.TargetID = "pr", prReference.DeliveryID
+				payload.Condition = &protocol.PRWaitCondition{Kind: protocol.PRWaitCheckCompleted, HeadSHA: prHead, Name: "integration-check"}
+			} else {
+				if err := s.store.Write(ctx, func(tx *store.Tx) error {
+					if err := tx.InsertTask(ctx, store.TaskRow{TaskID: "wait-dependency", Title: "Existing independent review", Project: "default", Lifecycle: protocol.TaskWaiting, ControlMode: protocol.ControlPaused, SpecVersion: 1}); err != nil {
+						return err
+					}
+					if err := tx.InsertSpec(ctx, "wait-dependency", 1, `{"goal":"Read existing review evidence","workspace":{"mode":"temporary"}}`, "", s.now().UnixMilli()); err != nil {
+						return err
+					}
+					_, err := tx.Exec(ctx, `INSERT INTO task_work_item_owners(task_id,work_item_id,source_spec_version) VALUES('wait-dependency',?,1)`, item.IssueID)
+					return err
+				}); err != nil {
+					failures <- err.Error()
+					return "failed"
+				}
+			}
 			result := th.CallTool(ctx, turn, "external-wait", "runs_wait_external", map[string]any{"effect_seq": 1, "payload": payload})
 			// The stop can beat delivery of the tool result. The committed wait,
 			// not a fabricated successful callback, proves the original effect.
@@ -703,10 +736,28 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}, RestartDelay: time.Millisecond * 20, Log: log}), nil
 	}}
 	wg.Go(func() { pool.Run(ctx) })
-	created := execute("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: protocol.IssuePlan{Title: "Coordinate an intent", Project: "default", Intent: "Retain continuing responsibility"}}, nil, app.CanonicalOwnerIssueCommand{Action: "create"})
+	plan := protocol.IssuePlan{Title: "Coordinate an intent", Project: "default", Intent: "Retain continuing responsibility"}
+	if prWait {
+		plan.Deliveries = []protocol.IssueDelivery{prReference}
+	}
+	created := execute("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{Plan: plan}, nil, app.CanonicalOwnerIssueCommand{Action: "create"})
 	var issue protocol.Issue
 	if err = json.Unmarshal(created.Result, &issue); err != nil {
 		t.Fatal(err)
+	}
+	prSnapshot := protocol.DeliverySnapshot{State: "open", HeadSHA: prHead, BaseSHA: prBase, TargetSHA: prBase, TargetRef: "integration", URL: prReference.URL,
+		CI: &protocol.DeliveryCI{HeadSHA: prHead, State: "pending", Checks: []protocol.DeliveryCheck{
+			{ID: "original-check", Source: "github_check_run", Name: "integration-check", State: "in_progress"},
+		}}}
+	recordPR := func() {
+		t.Helper()
+		q, err := s.app.ClaimServerDelivery(ctx)
+		if err != nil || q == nil {
+			t.Fatal(q, err)
+		}
+		if err := s.app.RecordServerDelivery(ctx, q.ID, &prSnapshot, ""); err != nil {
+			t.Fatal(err)
+		}
 	}
 	selected := execute(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Delegate by category"}, &issue.Revision, app.RequestIssueManager{})
 	if err := json.Unmarshal(selected.Result, &issue); err != nil {
@@ -715,6 +766,9 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	admitted := execute("issues.set_status", protocol.Target{Type: "issue", ID: issue.IssueID}, protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueTodo}, &issue.Revision, app.CanonicalOwnerIssueCommand{Action: "set_status"})
 	if err := json.Unmarshal(admitted.Result, &issue); err != nil {
 		t.Fatal(err)
+	}
+	if prWait {
+		recordPR()
 	}
 	var textCLI *ownerCLI
 	var textRun string
@@ -899,6 +953,26 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}
 		if recoveredWaitFiles.Load() == 0 || s.count(`SELECT COUNT(*) FROM deliverable_files WHERE run_id=?`, original) != 1 || s.count(`SELECT COUNT(*) FROM deliverable_files`) != 1 {
 			t.Fatal("history handoff lost or reuploaded the original evidence", recoveredWaitFiles.Load())
+		}
+		if prWait {
+			var current protocol.WorkItem
+			if err := s.store.Read(ctx, func(tx *store.ReadTx) error {
+				var err error
+				current, err = store.GetIssue(ctx, tx.Q(), issue.IssueID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			execute(protocol.OpRefreshDelivery, protocol.Target{Type: "work_item", ID: issue.IssueID}, protocol.RefreshDeliveryPayload{DeliveryID: prReference.DeliveryID}, &current.Revision, app.RefreshDelivery{})
+			prSnapshot.CI.State = "failure"
+			check := &prSnapshot.CI.Checks[0]
+			check.State, check.Conclusion = "completed", "failure"
+			recordPR()
+			task := await("original Task reads exact PR result", 2*time.Minute, prReturned)
+			if s.count(`SELECT COUNT(*) FROM runs WHERE task_id=? AND role='issue_manager' AND run_id<>?`, task, original) != 1 ||
+				s.count(`SELECT COUNT(*) FROM events WHERE object_id=? AND kind='task.external_wait_ready'`, task) != 1 {
+				t.Fatal("native continuation was duplicated or selected a different Task", task)
+			}
 		}
 		return
 	}

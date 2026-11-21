@@ -108,8 +108,8 @@ func validateWaitSelection(query url.Values) error {
 	if query.Has("run_id") && (runID == "" || strings.TrimSpace(runID) != runID) {
 		return usagef("--run must be a nonempty original Run ID")
 	}
-	if query.Has("status") && !slices.Contains([]string{"stopping", "waiting", "continued", "cancelled"}, status) {
-		return usagef("--status must be one of stopping, waiting, continued or cancelled")
+	if query.Has("status") && !slices.Contains([]string{"stopping", "waiting", "continued", "cancelled", protocol.ExternalWaitSatisfied}, status) {
+		return usagef("--status must be one of stopping, waiting, continued, cancelled or satisfied")
 	}
 	return nil
 }
@@ -175,8 +175,10 @@ delivery_authorization provides no evidence of permission.
 		return `Usage: tend task waits <task-id> [--run <run-id>] [--status <status>] [--json]
 
 Read recorded external waits, including the condition, stopped flag and
-recovery action. Filter by exact original Run or status, or combine both.
-Status values: stopping, waiting, continued, cancelled. Omit the filters
+recovery action. For PR subscriptions, condition and pr_evidence identify
+the requested check and original provider result. Filter by Run or status,
+or combine both.
+Status values: stopping, waiting, continued, cancelled, satisfied. Omit the filters
 for all waits on the Task. Results are JSON and have no pagination.
 The CLI also applies the selection when a server returns the full list.
 
