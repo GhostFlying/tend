@@ -2549,9 +2549,8 @@ try {
       await check.waitFor();
 
       const scroll = page.locator("[data-issue-scroll]");
-      await scroll.evaluate((node) => {
-        node.scrollTop = 0;
-      });
+      // The Issue summary can fill the mobile viewport before the discussion begins.
+      await page.locator("[data-history-boundary]").scrollIntoViewIfNeeded();
       await page
         .locator('[data-history-boundary][aria-busy="true"]')
         .waitFor({ state: "attached" });
