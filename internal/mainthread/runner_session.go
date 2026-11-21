@@ -297,7 +297,9 @@ func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event,
 		return errors.New("manager event has no original receipt identity")
 	}
 	draining, _ := ctx.Value(managerACKDrainKey{}).(bool)
-	if origin.run == t.run && !origin.historical && !draining && !e.Disconnected &&
+	// A callback is acknowledged only after its result was accepted or
+	// rejected. Its original receipt can settle even while close is in flight.
+	if origin.run == t.run && !origin.historical && !draining && !e.Disconnected && e.Call == nil &&
 		(e.Native == nil || e.Native.Kind != harness.EventCoordinatorHistoryEnd) {
 		return t.app.RecoverManagerEventACK(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
 	}
