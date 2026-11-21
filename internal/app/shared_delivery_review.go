@@ -238,20 +238,28 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			// not settle recurring finding IDs in the next actual review.
 			r.Dispositions = nil
 		case "record":
-			if r.Status != "reviewing" || len(r.Rounds) == 0 {
+			if (r.Status != "reviewing" && r.Status != "waiting") || len(r.Rounds) == 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
 			}
 			last := &r.Rounds[len(r.Rounds)-1]
 			previousAcceptance, previousVerdict := last.AcceptanceID, last.AcceptanceVerdict
 			inputRound := protocol.SharedReviewInputRound(*last)
+			waiting := r.Status == "waiting"
+			if waiting && (last.Result != nil || inputRound.ReviewerRole == protocol.RoleAccept) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
+			}
 			var result *protocol.SharedReviewResult
 			var run, artifact string
 			if inputRound.ReviewerRole == protocol.RoleAccept {
 				result, run, artifact, err = store.ReadSharedAcceptanceResult(ctx, tx.Q(), r, &inputRound)
 				last.AcceptanceID, last.AcceptanceVerdict = inputRound.AcceptanceID, inputRound.AcceptanceVerdict
 			} else {
+				previousRun := inputRound.RunID
 				inputRound, err = independentReviewRetryResultRound(ctx, tx.Q(), r, inputRound)
 				if err == nil {
+					if waiting && inputRound.RunID == previousRun {
+						return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the waiting review has no completed authorized retry")
+					}
 					result, run, artifact, err = store.ReadSharedReviewResult(ctx, tx.Q(), r, inputRound)
 				}
 			}
