@@ -72,7 +72,7 @@ func progressDeliveryApplicability(ctx context.Context, q store.Querier, issue p
 func attentionApplicability(ctx context.Context, q store.Querier, v *protocol.AttentionView) error {
 	// A pending action, decision or unknown outcome needs its original resolution,
 	// even when its originating Issue has ended or responsibility moved.
-	if v.Kind != "information" || v.BlocksClose {
+	if v.Kind != "information" || v.BlocksClose || v.IssueTransition != nil {
 		return nil
 	}
 	issue := v.IssueID

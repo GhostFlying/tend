@@ -13,8 +13,20 @@ assert(output, "Set an isolated screenshot output directory");
 await mkdir(output, { recursive: true });
 let count = 0;
 let more = false;
+let showTransition = false;
+const transition = {
+  attention_id: "attn_ci-fixture",
+  kind: "information",
+  status: "open",
+  title: "Waiting for CI",
+  issue_title: "Candidate CI",
+  issue_id: "wi_ci-fixture",
+  created_at: 1_790_000_000_000,
+  issue_transition: { state: "waiting_ci", delivery: { repository: "example/project", number: 7 } },
+};
 const server = createServer(async (req, res) => {
-  const path = new URL(req.url!, "http://localhost").pathname;
+  const url = new URL(req.url!, "http://localhost");
+  const path = url.pathname;
   const json = (value: unknown) => {
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify(value));
@@ -30,7 +42,10 @@ const server = createServer(async (req, res) => {
       scope: "owner",
       deployment_id: "badge",
     });
-  if (path === "/api/v1/inbox")
+  if (path === "/api/v1/attentions/" + transition.attention_id) return json(transition);
+  if (path === "/api/v1/inbox") {
+    if (showTransition && !url.searchParams.has("actionable_only"))
+      return json({ items: [transition], more: false });
     return json({
       items: Array.from({ length: count }, (_, i) => ({
         attention_id: `att_fixture_${i}`,
@@ -43,6 +58,7 @@ const server = createServer(async (req, res) => {
       })),
       more,
     });
+  }
   if (path === "/api/v1/events") {
     res.setHeader("Content-Type", "text/event-stream");
     res.write('event: start\ndata: {"event_seq":1}\n\n');
@@ -74,6 +90,48 @@ const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 const browser = await chromium.launch({ headless: true });
 const results: unknown[] = [];
 try {
+  showTransition = true;
+  for (const width of [390, 1280]) {
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      serviceWorkers: "block",
+    });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(error.message));
+      await page.goto(origin + "/inbox");
+      assert.equal(await page.title(), "tend");
+      await page.getByRole("heading", { name: "收件箱" }).waitFor();
+      await page.getByRole("tab", { name: "通知", exact: true }).click();
+      const row = page.locator("article").filter({ hasText: "Candidate CI" });
+      const notice = row.getByRole("button", { name: /等待 CI/ });
+      await notice.waitFor();
+      assert.equal(await row.getByLabel("未读", { exact: true }).count(), 0);
+      assert.equal(await row.locator("[data-unread]").count(), 0);
+      assert.equal(
+        await row.getByRole("link", { name: /查看 Issue/ }).getAttribute("href"),
+        "/issues/wi_ci-fixture",
+      );
+      const tab = page.locator('nav a[href="/inbox"]').filter({ visible: true });
+      assert.equal(await tab.first().getAttribute("aria-description"), "0 项待处理");
+      await notice.click();
+      await page.getByRole("heading", { name: "等待 CI", exact: true }).waitFor();
+      assert.equal(await page.getByText(/example\/project #7/).count(), 1);
+      assert.equal(await page.getByRole("button", { name: /标记.*读/ }).count(), 0);
+      await page.screenshot({ path: join(output, `issue-transition-${width}.png`) });
+      await page
+        .getByRole("link", { name: /查看 Issue/ })
+        .filter({ visible: true })
+        .last()
+        .click();
+      await page.waitForURL(origin + "/issues/wi_ci-fixture");
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  }
+  showTransition = false;
   for (const width of [320, 390]) {
     for (const colorScheme of ["light", "dark"] as const) {
       for (const value of [0, 1, 2, 10, 99, 100, 1000]) {

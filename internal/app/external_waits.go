@@ -226,22 +226,8 @@ func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.Exter
 		if err != nil {
 			return false, "", err
 		}
-		o := row.Observation
-		oldHead := v.ObservedHead
-		v.ObservedRevision = row.FactRevision
-		v.ObservedHead = o.HeadSHA
-		v.ObservedBase, v.ObservedTarget = o.BaseSHA, o.TargetSHA
-		v.ObservedState = o.State
-		if oldHead != "" && o.HeadSHA != "" && oldHead != o.HeadSHA {
-			return true, "candidate_changed", nil
-		}
-		if o.State == "closed" || o.State == "merged" {
-			return true, "pull_request_" + o.State, nil
-		}
-		if o.CI != nil && o.CI.HeadSHA == o.HeadSHA && !o.RefreshPending && (o.CI.State == "success" || o.CI.State == "failure" || o.CI.State == "cancelled" || o.CI.State == "skipped") {
-			v.ObservedState = o.CI.State
-			return true, "checks_" + o.CI.State, nil
-		}
+		ready, reason := store.ApplyChecksWaitObservation(v, row)
+		return ready, reason, nil
 	case "review":
 		var raw string
 		if err := q.QueryRowContext(ctx, `SELECT body_json FROM shared_delivery_reviews WHERE review_id=?`, v.TargetID).Scan(&raw); err != nil {
@@ -491,6 +477,11 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 			}
 		}
 		if !ready {
+			created, err := recordChecksWaitInInbox(ctx, x, tx, v)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || created
 			if err := tx.PutExternalWait(ctx, *v, now+5000); err != nil {
 				return false, err
 			}

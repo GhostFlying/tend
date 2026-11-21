@@ -73,7 +73,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `GET /api/v1/files/{id}/metadata` | `file metadata` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/hosted-agents` | `agents hosted` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/hosts/{id}/agents` | `agents show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
-| `GET /api/v1/inbox` | `inbox list` | issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit | Web | CLI/HTTP；读取无写入 |
+| `GET /api/v1/inbox` | `inbox list` | issue=issue_id kind status actionable-only=actionable_only include-archived=include_archived after limit | Web | `inbox list --kind information --issue <id> --json` 读取流转通知。沿 `next` 分页。 `--actionable-only` 保留原需处理条目。 |
 | `GET /api/v1/issue-notification-settings` | `issue notifications show` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues` | `issue list` | 按命令帮助选择身份；已有参数保留 | Web | CLI/HTTP；读取无写入 |
 | `GET /api/v1/issues/{id}` | `issue show` | --revision 选择历史版本，--fields 选择 CLI 输出键 | Web | CLI/HTTP；读取无写入 |
