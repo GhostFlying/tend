@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/GhostFlying/tend/internal/agentconfig"
@@ -277,6 +278,22 @@ func settleIndependentReviewRetry(ctx context.Context, tx *store.Tx, rc runConte
 	return err
 }
 
+func sharedReviewRetryActive(ctx context.Context, q store.Querier, round protocol.SharedDeliveryReviewRound) (bool, error) {
+	if round.ArtifactID != "" || round.ImplementGeneration <= 0 {
+		return false, nil
+	}
+	var active bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM independent_review_failures root
+		JOIN runs failed ON failed.run_id=root.run_id
+		JOIN plan_actions original ON original.action_id=failed.action_id
+		JOIN independent_review_failures f ON f.root_run_id=root.run_id
+		JOIN plan_actions retry ON retry.action_id=f.retry_action_id
+		WHERE root.root_run_id=root.run_id AND root.resolution_run_id IS NULL AND root.task_id=? AND root.role='implement'
+		 AND original.target_spec_version=? AND original.generation=? AND (?='' OR failed.run_id=?)
+		 AND retry.status IN ('pending','dispatched'))`, round.TaskID, round.SpecVersion, round.ImplementGeneration, round.RunID, round.RunID).Scan(&active)
+	return active, err
+}
+
 // independentReviewRetryResultRound resolves an existing failed binding to an
 // actual outcome from its approved retry. All ordinary review qualification
 // still uses the frozen candidate, requirements, profile and reviewer.
@@ -305,6 +322,9 @@ func independentReviewRetryResultRound(ctx context.Context, q store.Querier, rev
 	pin, err := store.GetRunExecution(ctx, q, run)
 	if err != nil {
 		return round, err
+	}
+	if round.ReviewerProfile != nil && *round.ReviewerProfile != pin.Profile {
+		return round, protocol.Errorf(protocol.CodeForbidden, "the review retry must keep the formal review's frozen model and reasoning effort")
 	}
 	if round.ExecutionRequirements != nil {
 		if err := store.RequireSharedReviewExecutionProfile(round.ExecutionRequirements, pin.Profile); err != nil {
@@ -407,7 +427,18 @@ func qualifyIndependentReviewHandoff(ctx context.Context, q store.Querier, faile
 	if err != nil {
 		return err
 	}
-	bound, err := bindSharedReviewTask(ctx, q, review, replacement, "", round.ExecutionRequirements)
+	requirements := round.ExecutionRequirements
+	if profile := round.ReviewerProfile; profile != nil {
+		if requirements == nil {
+			requirements, err = store.SharedReviewExecutionRequirements(ctx, q, review)
+			if err != nil {
+				return err
+			}
+		}
+		profiles := append(slices.Clone(requirements.Profiles), protocol.SharedReviewExecutionProfile{Model: profile.Model, Effort: profile.Effort, Exact: true})
+		requirements = &protocol.SharedReviewExecutionRequirements{Profiles: profiles}
+	}
+	bound, err := bindSharedReviewTask(ctx, q, review, replacement, "", requirements)
 	if err != nil {
 		return err
 	}

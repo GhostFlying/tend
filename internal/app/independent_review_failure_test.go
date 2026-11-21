@@ -340,10 +340,13 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 	if original.Status != protocol.OpSucceeded || task == "" {
 		t.Fatal(original)
 	}
-	review := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: task}))
 	run := ownerWorkerClaim(t, h, runtime, protocol.RoleImplement)
 	if run.TaskID != task {
 		t.Fatal(run)
+	}
+	review := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: task}))
+	if review.Rounds[0].ReviewerProfile == nil {
+		t.Fatal("the original Run did not freeze a reviewer profile", review)
 	}
 	typed := protocol.WorkerFailureReason(&protocol.AgentFailure{Code: "server_overloaded"})
 	if op := h.runAs(run, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: typed}, Release{}); op.Status != protocol.OpSucceeded {
@@ -367,6 +370,13 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 	if op, _ := create(current, "implementer", task); op.Error == nil || op.Error.Code != protocol.CodeForbidden {
 		t.Fatal("the original reviewer identity used an unqualified execution category", op)
 	}
+	if !approveBeforeHandoff {
+		changeSharedReviewerDefaults(t, h, runtime, protocol.ExecutionProfile{Model: "different-model", Effort: "medium"})
+		if op, _ := create(current, "reviewer", task); op.Error == nil || op.Error.Code != protocol.CodeForbidden {
+			t.Fatal("the same reviewer could replace the frozen profile", op)
+		}
+		changeSharedReviewerDefaults(t, h, runtime, *review.Rounds[0].ReviewerProfile)
+	}
 	retry, replacement := create(current, "reviewer", task)
 	if retry.Status != protocol.OpSucceeded || replacement == "" || replacement == task {
 		t.Fatal("the new current owner could not explicitly recover the original obligation", retry)
@@ -377,6 +387,14 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 		  AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.action_id=old.action_id)`, originalApproval) != 1 {
 		t.Fatal("handoff lost the superseded approval or started its original action", originalApproval)
 	}
+	if !approveBeforeHandoff {
+		if op := h.exec(owner, h.env("tasks.cancel", taskTarget(task), map[string]any{}, rev(h.task(task).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if resource := h.resourceForTask(task); !h.releaseResource(task, resource.WorkspaceID) {
+			t.Fatal("the original Task workspace was not released")
+		}
+	}
 	// A responsibility handoff returns the Issue to backlog. Re-admit it
 	// through its ordinary board control before the runner can claim work.
 	moveBoardIssue(t, h, canonicalTaskIssue(t, h, current.IssueID), protocol.IssueTodo)
@@ -385,13 +403,20 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 		t.Fatal("the retry used the wrong Task or responsibility", as, run)
 	}
 	if !approveBeforeHandoff {
+		wait := protocol.UpdateSharedDeliveryReviewPayload{Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: &review.Revision}
+		if op := sharedReviewAction(t, h, issue.IssueID, wait); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+			t.Fatal("the original Task release allowed waiting during its approved replacement Run", op)
+		}
 		submitSharedReviewForTest(t, h, as, review, "changes_requested")
-		if op := sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: &review.Revision}); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+		if op := sharedReviewAction(t, h, issue.IssueID, wait); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
 			t.Fatal("waiting could hide the qualified reviewer's submitted result", op)
 		}
 		recorded := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
 		if len(recorded.Rounds) != 1 || recorded.Rounds[0].RunID != as.RunID || recorded.Rounds[0].TaskID != replacement || recorded.Status != "changes_requested" {
 			t.Fatal("the valid replacement report did not settle the existing round", recorded)
+		}
+		if recorded.Rounds[0].ReviewerProfile == nil || *recorded.Rounds[0].ReviewerProfile != *review.Rounds[0].ReviewerProfile {
+			t.Fatal("registration changed the original qualified profile", recorded)
 		}
 		return
 	}
