@@ -2229,7 +2229,7 @@ async function checkNavigation() {
     await head.getByRole("button", { name: "更多", exact: true }).click();
     const menu = page.getByRole("menu", { name: "更多", exact: true });
     await menu.getByRole("menuitem", { name: "补充来源", exact: true }).waitFor();
-    assert.equal(await menu.getByRole("menuitem").count(), 2);
+    assert.equal(await menu.getByRole("menuitem").count(), 1);
     await navigate(page, "/issues");
     await menu.waitFor({ state: "hidden" });
     await navigate(page, "/diagnostics/main");

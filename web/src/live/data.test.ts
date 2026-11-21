@@ -3,6 +3,7 @@ import { ApiError } from "../api/client.ts";
 import type {
   WorkItemChoice,
   ConversationItem,
+  IssueMessageAssociations,
   LedgerEvent,
   TaskDetail,
   TaskSummary,
@@ -45,8 +46,9 @@ class FakeApi implements Reader {
   }
 
   /** Answers the oldest pending read of a path starting with prefix. */
-  async answer(prefix: string, value: unknown): Promise<void> {
-    const i = this.waiting.findIndex((w) => w.path.startsWith(prefix));
+  async answer(prefix: string, value: unknown, { newest = false } = {}): Promise<void> {
+    const matches = (w: { path: string }) => w.path.startsWith(prefix);
+    const i = newest ? this.waiting.findLastIndex(matches) : this.waiting.findIndex(matches);
     if (i < 0) {
       throw new Error(`no pending read of ${prefix}; pending: ${this.pending().join(", ")}`);
     }
@@ -1082,6 +1084,59 @@ test("raw stream content preserves canonical links until the scoped HTTP associa
   });
   await live.stop();
 });
+
+test.each(["latest", "earlier"])(
+  "reconciles association changes received before the %s history page arrives",
+  async (page) => {
+    const api = new FakeApi();
+    const live = new LiveData(api);
+    const association = {
+      message_id: "msg_1",
+      revision: 3,
+      content_revision: 1,
+      disposition: "linked",
+      facts_reviewed: true,
+      owner_locked: true,
+      items: [{ issue_id: "issue-old", title: "Old Issue", source: "owner", owner_locked: true }],
+    } satisfies IssueMessageAssociations;
+    const path = "/api/v1/messages/msg_1/associations?projection=issues";
+    const stale = owner(1, "replied");
+    const older = owner(2, "replied");
+    const reload = live.reload();
+    await api.answer("/api/v1/snapshot", snapshot);
+    let history = reload;
+    if (page === "earlier") {
+      await api.answer("/api/v1/conversation", {
+        items: [owner(99, "replied")],
+        more: true,
+        event_seq: 8,
+      });
+      await reload;
+      history = live.loadEarlier();
+    }
+
+    live.apply(messageEvent(9, older, "conversation.associations_changed"));
+    live.apply(messageEvent(11, stale, "conversation.associations_changed"));
+    live.apply(messageEvent(12, owner(3, "replied"), "conversation.associations_changed"));
+    expect(api.pending()).not.toContain(path);
+    await api.answer("/api/v1/conversation", {
+      items: [{ ...stale, associations: association }, older],
+      more: false,
+      event_seq: 10,
+    });
+    await history;
+    expect(api.pending().filter((url) => url.includes("/associations"))).toEqual([path]);
+
+    live.apply(messageEvent(13, stale, "conversation.associations_changed"));
+    const latest = { ...association, revision: 5, disposition: "unassigned", items: [] };
+    await api.answer(path, latest, { newest: true });
+    await api.answer(path, { ...association, revision: 4 });
+    expect(
+      live.conversation.get().items.find((item) => item.message_id === "msg_1")?.associations,
+    ).toEqual(latest);
+    await live.stop();
+  },
+);
 
 test("followup changes refresh opened canonical rule and history reads without opening hidden pages", async () => {
   const api = new FakeApi(),
