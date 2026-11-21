@@ -162,12 +162,16 @@ export class EventStream<Event extends Pick<LedgerEvent, "event_seq"> = LedgerEv
       const parser = new SseParser();
       for (;;) {
         const { value, done } = await reader.read();
+        // An aborted fetch can already have handed the reader a chunk.
+        // Leave its unprocessed frames available after the retained cursor.
+        ctrl.signal.throwIfAborted();
         if (done) {
           return { kind: "lost", reason: "事件流已结束", started, traceID };
         }
         arm();
         this.call(() => this.options.onAlive?.());
         for (const m of parser.feed(decoder.decode(value, { stream: true }))) {
+          ctrl.signal.throwIfAborted();
           if (m.event === "reset") {
             // A coalesced refresh position expired while connected. Rebuild
             // current views on the next cursor-free start, not from stale deltas.
