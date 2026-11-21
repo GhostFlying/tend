@@ -127,7 +127,11 @@ func (r *Runner) executeManager(lifetime, runCtx context.Context, a *active) (re
 	if readErr != nil {
 		return readErr
 	}
-	env, readErr := r.newEnvelope(protocol.OpManagerNativeStopped, runTarget(as), protocol.ManagerStoppedPayload{Reason: "manager native process stopped; reconcile pending operations", LastSequence: last})
+	reason := "manager native process stopped; reconcile pending operations"
+	if errors.Is(context.Cause(attempt), errManagerTransportLease) {
+		reason = protocol.ManagerStoppedTransportLease
+	}
+	env, readErr := r.newEnvelope(protocol.OpManagerNativeStopped, runTarget(as), protocol.ManagerStoppedPayload{Reason: reason, LastSequence: last})
 	if readErr != nil {
 		return readErr
 	}

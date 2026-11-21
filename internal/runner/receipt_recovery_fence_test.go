@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +24,12 @@ import (
 // This half exercises the real watchdog and manager cleanup rather than
 // fabricating a stopped receipt or assuming that coordinator death is harmless.
 func TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop(t *testing.T) {
+	t.Run("ordinary deadline", func(t *testing.T) { testReceiptRecoveryLeaseFence(t, false) })
+	t.Run("transport deadline", func(t *testing.T) { testReceiptRecoveryLeaseFence(t, true) })
+}
+
+func testReceiptRecoveryLeaseFence(t *testing.T, disconnect bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	clock := testkit.NewClock()
@@ -65,6 +74,33 @@ func TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop(t *testing.T) {
 	defer server.Close()
 	resolver := &closeRecoveryResolver{native: testkit.NewHarness()}
 	r := New(Config{Journal: j, Executions: resolver, Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), ServerURL: server.URL, HTTPClient: server.Client(), RequestTimeout: time.Second, RetryDelay: time.Millisecond, Log: slog.New(slog.DiscardHandler)})
+	var partition atomic.Bool
+	offlineObserved := make(chan struct{}, 1)
+	originalTransport := server.Client().Transport
+	r.c.http = &http.Client{Transport: uploadRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if partition.Load() {
+			raw, err := io.ReadAll(req.Body)
+			_ = req.Body.Close()
+			if err != nil {
+				return nil, err
+			}
+			req.Body = io.NopCloser(bytes.NewReader(raw))
+			var env protocol.Envelope
+			if err := json.Unmarshal(raw, &env); err != nil {
+				return nil, err
+			}
+			if env.Operation == protocol.OpManagerNativeClaim {
+				err := errors.New("fixture transport partition")
+				r.c.unreachable(req.Context(), err)
+				select {
+				case offlineObserved <- struct{}{}:
+				default:
+				}
+				return nil, err
+			}
+		}
+		return originalTransport.RoundTrip(req)
+	})}
 	r.setTTL(100)
 	attempt, fence := context.WithCancelCause(ctx)
 	a := &active{ctx: attempt, cancel: fence, as: as, desired: protocol.DesiredRun, deadline: r.fenceDeadline(clock.Now())}
@@ -85,6 +121,14 @@ func TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("manager did not attach before simulated outage")
 	}
+	if disconnect {
+		partition.Store(true)
+		select {
+		case <-offlineObserved:
+		case <-ctx.Done():
+			t.Fatal("runner did not see the transport partition")
+		}
+	}
 	clock.Advance(time.Second)
 	select {
 	case err := <-executeDone:
@@ -100,8 +144,11 @@ func TestReceiptRecoveryLeaseFenceRetainsOriginalPhysicalStop(t *testing.T) {
 		t.Fatal("unknown stop changed its original request identity or payload")
 	}
 	var stopped protocol.ManagerStoppedPayload
-	if err := json.Unmarshal(first.Payload, &stopped); err != nil || first.Target.ID != as.RunID || stopped.LastSequence != 1 || context.Cause(attempt) != errFenced {
+	if err := json.Unmarshal(first.Payload, &stopped); err != nil || first.Target.ID != as.RunID || stopped.LastSequence != 1 || !errors.Is(context.Cause(attempt), errFenced) {
 		t.Fatal(first, stopped, err, context.Cause(attempt))
+	}
+	if got := stopped.Reason == protocol.ManagerStoppedTransportLease; got != disconnect {
+		t.Fatal("physical stop carried the wrong cause", stopped.Reason, context.Cause(attempt))
 	}
 	if resolver.opens.Load() != 1 || len(resolver.native.Starts()) != 0 {
 		t.Fatal("physical stop restarted a model or opened another native process")

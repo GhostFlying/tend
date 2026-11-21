@@ -194,6 +194,10 @@ type IssueManagerView struct {
 	QueueReason           *QueueWaitReason    `json:"queue_reason,omitempty"`
 }
 
+// ManagerStoppedTransportLease records a legacy manager watchdog trip while
+// Tend was unreachable. A reason is not proof that a successor is safe.
+const ManagerStoppedTransportLease = "manager transport unavailable at lease deadline"
+
 // ManagerStoppedPayload confirms process exit only after all earlier events.
 // It does not turn an uncertain business operation into a successful result.
 type ManagerStoppedPayload struct {

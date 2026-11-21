@@ -67,6 +67,12 @@ func (c *client) reached(ctx context.Context) {
 	}
 }
 
+func (c *client) disconnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.downSince.IsZero()
+}
+
 func (c *client) host() credential { return credential{token: c.token} }
 
 func runCredential(as protocol.Assignment) credential {
