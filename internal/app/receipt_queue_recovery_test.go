@@ -58,34 +58,47 @@ func TestFault_ManagerEventACKDeadlineKeepsOriginalEventForNormalSettlement(t *t
 }
 
 func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
-	for _, expire := range []bool{false, true} {
-		name := "recovers"
-		if expire {
-			name = "lease expired"
-		}
-		t.Run(name, func(t *testing.T) {
-			h, _, _, as, _ := reviewManagerAssignment(t)
+	for _, tc := range []struct {
+		name        string
+		version     int64
+		maintenance bool
+		blocked     bool
+	}{
+		{name: "delegated Run remains current after old deadline", version: protocol.CurrentRunnerProtocol},
+		{name: "legacy lease expires", version: protocol.MinimumRunnerProtocol, blocked: true},
+		{name: "delegated Run is fenced at explicit maintenance deadline", version: protocol.CurrentRunnerProtocol, maintenance: true, blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, as, _ := reviewManagerAssignment(t, tc.version)
+			if as.Protocol != tc.version {
+				t.Fatal("unexpected negotiated protocol", as.Protocol)
+			}
 			const seq = 1
 			event := protocol.ManagerNativeEvent{Sequence: seq, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"item_started","TurnID":"turn","ItemID":"reply"}}`)}
 			if op := h.runAs(as, protocol.OpManagerNativeEvent, event, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
+			lease := h.lease(as.RunID)
+			if tc.maintenance {
+				deadline := lease.ExpiresAt + 1
+				control := protocol.RunnerControl{Mode: protocol.RunnerMaintenance, Revision: 1, Authorization: &protocol.MaintenanceAuthorization{
+					ID: "manager-ack-maintenance", DeadlineMillis: deadline, RunIDs: []string{as.RunID},
+				}}
+				if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+					return tx.PutHostControl(t.Context(), lease.HostID, control, h.clock.Now().UnixMilli())
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.clock.Advance(time.UnixMilli(lease.ExpiresAt).Sub(h.clock.Now()) + time.Second)
+			lease = h.lease(as.RunID)
+			if lease.Current(h.clock.Now().UnixMilli()) == tc.blocked || lease.MaintenanceExpired(h.clock.Now().UnixMilli()) != tc.maintenance {
+				t.Fatal("fixture did not reach the expected execution boundary", lease)
+			}
 			entered, release := make(chan struct{}), make(chan struct{})
 			held := make(chan error, 1)
 			unblock := sync.OnceFunc(func() { close(release) })
 			defer unblock()
-			go func() {
-				held <- h.store.Write(t.Context(), func(tx *store.Tx) error {
-					close(entered)
-					<-release
-					if expire {
-						_, err := tx.Exec(t.Context(), `UPDATE leases SET expires_at=0 WHERE run_id=?`, as.RunID)
-						return err
-					}
-					return nil
-				})
-			}()
-			<-entered
 			missed := make(chan store.WriteObservation, 1)
 			store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
 				if o.Source.Operation == "manager.event.ack" && o.Outcome == "deadline_exceeded" {
@@ -95,6 +108,14 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 					}
 				}
 			})(h.store)
+			go func() {
+				held <- h.store.Write(t.Context(), func(*store.Tx) error {
+					close(entered)
+					<-release
+					return nil
+				})
+			}()
+			<-entered
 			done := make(chan error, 1)
 			go func() {
 				done <- h.app.RecoverManagerEventACK(t.Context(), as.RunID, seq, "native", "", "", false)
@@ -115,10 +136,10 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 			}
 			err := <-done
 			want := int64(1)
-			if expire {
+			if tc.blocked {
 				want = 0
 				if protocol.CodeOf(err) != protocol.CodeForbidden {
-					t.Fatal("retry bypassed lease expiry", err)
+					t.Fatal("retry bypassed the lease fence", err)
 				}
 			} else if err != nil {
 				t.Fatal(err)
