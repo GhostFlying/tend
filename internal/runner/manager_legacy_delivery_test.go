@@ -22,10 +22,20 @@ import (
 	"github.com/GhostFlying/tend/internal/testkit"
 )
 
-func TestLegacyManagerDeliversOriginalFactsAfterRequestBudget(t *testing.T) {
+func TestLegacyManagerRetriesOriginalDelivery(t *testing.T) {
 	const budget = 100 * time.Millisecond
-	for _, operation := range []string{protocol.OpManagerNativeEvent, protocol.OpManagerNativeReply} {
-		t.Run(operation, func(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		operation   string
+		outage      time.Duration
+		wantTimeout bool
+	}{
+		{name: "event outlasts request budget", operation: protocol.OpManagerNativeEvent, outage: budget},
+		{name: "reply recovers within budget", operation: protocol.OpManagerNativeReply, outage: 20 * time.Millisecond},
+		{name: "reply remains pending after budget", operation: protocol.OpManagerNativeReply, outage: 10 * budget, wantTimeout: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			operation := tc.operation
 			j, err := journal.Open(t.Context(), filepath.Join(t.TempDir(), "journal.db"), time.Now)
 			if err != nil {
 				t.Fatal(err)
@@ -86,7 +96,7 @@ func TestLegacyManagerDeliversOriginalFactsAfterRequestBudget(t *testing.T) {
 						t.Error("retry changed the original envelope, Run or order")
 						return managerReceiptHTTPResponse(http.StatusConflict, rpcResponse{Error: protocol.Errorf(protocol.CodeConflictPayload, "changed original")})
 					}
-					if time.Since(started) <= budget {
+					if time.Since(started) <= tc.outage {
 						return nil, errors.New("connection temporarily lost")
 					}
 					if !reportedUnknown {
@@ -109,8 +119,16 @@ func TestLegacyManagerDeliversOriginalFactsAfterRequestBudget(t *testing.T) {
 				} else {
 					got = r.deliverActiveManagerReceipt(ctx, ctx, as, &first)
 				}
+				if tc.wantTimeout {
+					pending, err := j.ManagerControlRequests(ctx, as.RunID)
+					if !errors.Is(got, context.DeadlineExceeded) || err != nil || len(pending) != 1 ||
+						pending[0].Envelope.RequestID != first.RequestID || len(delivered) != 0 || acknowledged {
+						t.Fatal("bounded legacy reply lost or acknowledged its original envelope", got, pending, delivered, err)
+					}
+					return
+				}
 				if got != nil || !slices.Equal(delivered, want) || acknowledged != (operation == protocol.OpManagerNativeReply) {
-					t.Fatal("original delivery did not recover after one request budget", delivered, got)
+					t.Fatal("original delivery did not recover", delivered, got)
 				}
 			})
 		})
