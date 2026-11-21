@@ -37,6 +37,15 @@ type managerEventOrigin struct {
 
 type managerACKDrainKey struct{}
 
+// Receipt-only startup can drain the original close tail before the Runner's
+// physical stop is recorded. That tail can settle without live Run authority.
+func acknowledgeRunnerAttachmentEvent(ctx context.Context, acknowledger harness.EventAcknowledger, event harness.Event, receiptOnly bool) error {
+	if receiptOnly {
+		ctx = context.WithValue(ctx, managerACKDrainKey{}, true)
+	}
+	return acknowledger.AcknowledgeEvent(ctx, event)
+}
+
 type runnerTransport struct {
 	attachment  context.Context
 	mu          sync.Mutex
