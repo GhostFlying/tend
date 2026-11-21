@@ -198,10 +198,7 @@ func hydrateMessagingLinks(ctx context.Context, q store.Querier, keys string, in
 
 const messagingTurnPredicate = `(t.message_id=? OR t.request_id IN (SELECT e.request_id FROM logical_turn_executions e JOIN logical_turn_messages m USING(logical_turn_id) WHERE m.message_id=?) OR EXISTS(SELECT 1 FROM main_steers s WHERE s.message_id=? AND s.thread_id=t.thread_id AND s.turn_id=t.turn_id) OR EXISTS(SELECT 1 FROM background_batches b JOIN background_sources s USING(batch_id) WHERE b.message_id=t.message_id AND s.message_id=? AND s.cancelled_at=0))`
 
-func hydrateMessagingProcessing(ctx context.Context, q store.Querier, keys string, index map[string]*protocol.MessagingMessage) error {
-	// Start from each input's indexed links so unrelated Main history is not
-	// scanned once for every input. UNION deduplicates overlapping routes.
-	rows, err := q.QueryContext(ctx, `WITH inputs(id) AS (SELECT value FROM json_each(?)),
+const messagingProcessingSQL = `WITH inputs(id) AS (SELECT value FROM json_each(?)),
 		turns(id, request_id) AS MATERIALIZED (
 			SELECT i.id,t.request_id FROM inputs i CROSS JOIN main_turns t ON t.message_id=i.id
 			UNION SELECT i.id,e.request_id FROM inputs i CROSS JOIN logical_turn_messages m ON m.message_id=i.id JOIN logical_turn_executions e USING(logical_turn_id)
@@ -212,10 +209,18 @@ func hydrateMessagingProcessing(ctx context.Context, q store.Querier, keys strin
 			COALESCE((SELECT json_extract(body_json,'$.state') FROM events WHERE object_type='message' AND object_id=i.id AND kind='conversation.message_state' ORDER BY event_seq DESC LIMIT 1),''),
 			COALESCE((SELECT t.status FROM turns v JOIN main_turns t USING(request_id) WHERE v.id=i.id ORDER BY t.updated_at DESC,t.rowid DESC LIMIT 1),''),
 			COALESCE((SELECT l.status FROM turns v JOIN main_turns t USING(request_id) JOIN logical_turn_executions e USING(request_id) JOIN logical_turns l USING(logical_turn_id) WHERE v.id=i.id AND l.resumed_by IS NULL ORDER BY CASE WHEN l.status IN ('completed','stopped') THEN 1 ELSE 0 END,l.updated_at DESC,l.rowid DESC LIMIT 1),''),
-			EXISTS(SELECT 1 FROM message_work_items w JOIN task_work_item_owners o USING(work_item_id) JOIN decisions d USING(task_id) WHERE w.message_id=i.id AND w.active=1 AND d.status='open'),
+			EXISTS(SELECT 1 FROM message_work_items w
+				CROSS JOIN task_work_item_owners o ON o.work_item_id=w.work_item_id
+				CROSS JOIN decisions d ON d.task_id=o.task_id
+				WHERE w.message_id=i.id AND w.active=1 AND d.status='open'),
 			EXISTS(SELECT 1 FROM message_work_items w JOIN task_work_item_owners o USING(work_item_id) JOIN tasks t USING(task_id) WHERE w.message_id=i.id AND w.active=1 AND t.kind='execution' AND t.lifecycle IN ('queued','running','waiting','awaiting_acceptance','changes_required')),
 			EXISTS(SELECT 1 FROM message_work_items w JOIN issue_controls c ON c.issue_id=w.work_item_id WHERE w.message_id=i.id AND w.active=1 AND (c.assignee_kind<>'agent' OR c.assignment_state<>'active'))
-		FROM inputs i`, keys)
+		FROM inputs i`
+
+func hydrateMessagingProcessing(ctx context.Context, q store.Querier, keys string, index map[string]*protocol.MessagingMessage) error {
+	// Start from each input's indexed links so unrelated Main history is not
+	// scanned once for every input. UNION deduplicates overlapping routes.
+	rows, err := q.QueryContext(ctx, messagingProcessingSQL, keys)
 	if err != nil {
 		return err
 	}
