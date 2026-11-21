@@ -150,3 +150,80 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 		})
 	}
 }
+
+func TestFault_LiveManagerACKSettlesAfterCloseTransition(t *testing.T) {
+	for _, transition := range []string{"physical stop", "close in flight"} {
+		t.Run(transition, func(t *testing.T) {
+			h, _, _, as, _ := reviewManagerAssignment(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			event := protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"item_started","TurnID":"turn","ItemID":"reply"}}`)}
+			if op := h.runAs(as, protocol.OpManagerNativeEvent, event, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error { return h.app.requireManagerEventACKLease(ctx, tx.Q(), as.RunID) }); err != nil {
+				t.Fatal("not originally live", err)
+			}
+			release, entered := make(chan struct{}), make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			defer unblock()
+			held := make(chan error, 1)
+			go func() {
+				held <- h.store.Write(ctx, func(*store.Tx) error {
+					close(entered)
+					select {
+					case <-release:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				})
+			}()
+			<-entered
+			missed, transitioned := make(chan struct{}, 1), make(chan struct{})
+			finishTransition := sync.OnceFunc(func() { close(transitioned) })
+			defer finishTransition()
+			store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
+				if o.Source.Operation == "manager.event.ack" && o.Source.RunID == as.RunID && o.Source.EventSequence == 1 && o.Outcome == "deadline_exceeded" && o.Stage == "connection_wait" {
+					select {
+					case missed <- struct{}{}:
+					default:
+					}
+					select {
+					case <-transitioned:
+					case <-ctx.Done():
+					}
+				}
+			})(h.store)
+			done := make(chan error, 1)
+			go func() { done <- h.app.RecoverManagerEventACK(ctx, as.RunID, 1, "native", "turn", "reply", false) }()
+			select {
+			case <-missed:
+			case err := <-done:
+				t.Fatal("did not wait", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			unblock()
+			if err := <-held; err != nil {
+				t.Fatal(err)
+			}
+			if transition == "physical stop" {
+				op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original native process stopped", LastSequence: 1}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
+				if op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			} else {
+				if _, err := h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			finishTransition()
+			err := <-done
+			cursor, readErr := h.app.ManagerAppliedCursor(ctx, as.RunID)
+			if err != nil || readErr != nil || cursor != 1 {
+				t.Errorf("already handled original receipt failed after %s: err=%v cursor=%d readErr=%v", transition, err, cursor, readErr)
+			}
+		})
+	}
+}

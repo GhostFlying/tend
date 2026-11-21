@@ -26,9 +26,9 @@ func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64
 }
 
 // RecoverManagerEventACK holds the original receipt while its handler stays
-// finished. Only the live attachment may retry a write that never reached its
-// transaction callback under current business authority. Historical and close
-// drain ACKs instead use AcknowledgeManagerEvent to settle their original facts.
+// finished. A retry that never reached its transaction callback rechecks the
+// live authority or the original Run's transition to receipt settlement.
+// Historical and close drain readers use AcknowledgeManagerEvent directly.
 func (a *App) RecoverManagerEventACK(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
 	ack := managerEventACK{run: run, sequence: seq, thread: thread, turn: turn, item: item, flush: flush}
 	return a.recoverManagerEventACK(ctx, ack, true)
@@ -90,13 +90,13 @@ func (ack managerEventACK) deltaArgs() []any {
 	return []any{ack.run, ack.sequence, ack.thread, ack.thread, ack.turn, ack.turn, ack.item, ack.item}
 }
 
-func (a *App) writeManagerEventACK(ctx context.Context, ack managerEventACK, requireActive bool) (bool, error) {
+func (a *App) writeManagerEventACK(ctx context.Context, ack managerEventACK, recheckAuthority bool) (bool, error) {
 	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, ack.run, ack.sequence), "manager.event.ack")
 	started, changed, scheduling := false, false, false
 	err := a.write(ctx, func(tx *store.Tx) error {
 		started = true
-		if requireActive {
-			if err := a.requireManagerEventACKLease(ctx, tx.Q(), ack.run); err != nil {
+		if recheckAuthority {
+			if err := a.requireManagerEventACKRetry(ctx, tx.Q(), ack); err != nil {
 				return err
 			}
 		}
@@ -141,6 +141,27 @@ func (a *App) writeManagerEventACK(ctx context.Context, ack managerEventACK, req
 		}
 	}
 	return started, err
+}
+
+// Recheck in the same writer transaction as the ACK. While the writer was
+// unavailable, this already handled event may have become part of the
+// original Run's closing tail. The receipt does not resume native business.
+func (a *App) requireManagerEventACKRetry(ctx context.Context, q store.Querier, ack managerEventACK) error {
+	_, sequence, stopped, err := store.ManagerNativeClose(ctx, q, ack.run)
+	if err != nil {
+		return err
+	}
+	if stopped {
+		if ack.sequence <= sequence {
+			return nil
+		}
+		return protocol.Errorf(protocol.CodeForbidden, "manager event is beyond the original physical stop")
+	}
+	closing, err := managerRunClosing(ctx, q, ack.run)
+	if err != nil || closing {
+		return err
+	}
+	return a.requireManagerEventACKLease(ctx, q, ack.run)
 }
 
 func (a *App) requireManagerEventACKLease(ctx context.Context, q store.Querier, run string) error {
