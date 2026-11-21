@@ -311,6 +311,75 @@ func TestUpgradeObservesRunnerLocalCoverageAfterServerClearsGrant(t *testing.T) 
 	}
 }
 
+func TestUpgradeChecksRetainedCoverageBeforeEnteringMaintenance(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		scoped  bool
+		missing bool
+		stale   bool
+		budget  time.Duration
+	}{
+		{name: "expired legacy grant", budget: -time.Second},
+		{name: "expired per-Run grant", scoped: true, budget: -time.Second},
+		{name: "per-Run grant shorter than the restart", scoped: true, budget: 45 * time.Second},
+		{name: "missing scoped evidence", scoped: true, missing: true},
+		{name: "stale scoped evidence", scoped: true, stale: true, budget: 8 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			h, c, rt := restartAuthorityFixture(t, "journal", protocol.CurrentRunnerProtocol)
+			a := claimRestartWork(t, h, rt, "original delegated work")
+			if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			ack := upgradeAck(h, "linux-1", protocol.RunnerNormal)
+			if tc.scoped {
+				ack.Capabilities = append(ack.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage)
+			}
+			ack.Sequence++
+			if !tc.missing {
+				deadline := h.clock.Now().Add(tc.budget).UnixMilli()
+				ack.AuthorizationID, ack.AuthorizationDeadlineMillis = "retained-grant", deadline
+				if tc.scoped {
+					ack.MaintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: map[string]int64{a.RunID: deadline}}
+				}
+			}
+			if _, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.stale {
+				h.clock.Advance(RunnerOfflineAfter)
+				ack.Sequence++
+				ack.MaintenanceCoverage = nil
+				if op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"},
+					protocol.HelloPayload{Runtime: &ack, WorkspaceProtocol: 1, Held: []protocol.HeldRun{{
+						RunID: a.RunID, LeaseID: a.LeaseID, Observed: protocol.RunRunning,
+					}}}, nil), Hello{}); op.Error != nil {
+					t.Fatal(op.Error)
+				}
+			}
+			before := upgradeCtl(h, "linux-1")
+			originalLease := h.lease(a.RunID)
+			observation := ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256}
+			if _, err := h.app.TickUpgrade(ctx, observation); protocol.CodeOf(err) != protocol.CodeInvalidTransition {
+				t.Fatal("published maintenance without enough coverage", err)
+			}
+			if got := upgradeCtl(h, "linux-1"); got.Mode != protocol.RunnerNormal || got.Revision != before.Revision || got.Authorization != nil {
+				t.Fatal("rejected replacement changed the original control", got)
+			}
+			if upgradeRead(h).View.Phase != "server_draining" || h.run(a.RunID).ObservedState != protocol.RunRunning || h.lease(a.RunID) != originalLease {
+				t.Fatal("rejected replacement changed the original execution")
+			}
+			if op := h.runAs(a, protocol.OpRunsSubmitArtifact, testArtifact(h.task(a.TaskID).WorkspaceName), SubmitArtifact{}); op.Error != nil {
+				t.Fatal("original running execution could not submit its result", op.Error)
+			}
+			if v := upgradeTick(h, observation); v.Phase != "server_ready" {
+				t.Fatal("settled execution still blocked replacement", v)
+			}
+		})
+	}
+}
+
 func TestUpgradeKeepsUncoveredRenewableRunLapsedAfterAuthorization(t *testing.T) {
 	ctx := t.Context()
 	h, c, rt := restartAuthorityFixture(t, "original-journal", protocol.MinimumRunnerProtocol)
@@ -352,15 +421,22 @@ func TestUpgradePreservesFreshScopedCoverageAcrossHello(t *testing.T) {
 	if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
 		t.Fatal(op.Error)
 	}
-	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256})
-	ack := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+	deadline := h.clock.Now().Add(4 * time.Minute).UnixMilli()
+	ack := upgradeAck(h, "linux-1", protocol.RunnerNormal)
 	ack.Capabilities = rt.Capabilities
 	ack.Sequence++
-	firstSeen := h.clock.Now().UnixMilli()
-	deadline := h.clock.Now().Add(4 * time.Minute).UnixMilli()
 	ack.AuthorizationID = "original-grant"
 	ack.AuthorizationDeadlineMillis = deadline
 	ack.MaintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: map[string]int64{original.RunID: deadline}}
+	if _, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Second)
+	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256})
+	ctl := upgradeCtl(h, "linux-1")
+	ack.Mode, ack.UpgradeID, ack.AppliedControlRevision = ctl.Mode, ctl.UpgradeID, ctl.Revision
+	ack.Sequence++
+	firstSeen := h.clock.Now().UnixMilli()
 	response, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack})
 	if err != nil || !response.MaintenanceCoverage {
 		t.Fatal("heartbeat did not negotiate scoped observation", response, err)

@@ -222,14 +222,22 @@ func checkRestartGrant(j restartJournal) error {
 }
 
 func prepareRestartJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow, host *store.UpgradeHost) error {
-	journals, err := restartJournals(ctx, tx.Q(), *batch, *host, x.Now.UnixMilli())
+	now := x.Now.UnixMilli()
+	journals, err := restartJournals(ctx, tx.Q(), *batch, *host, now)
 	if err != nil {
 		return err
 	}
 	for _, j := range journals {
 		ctl := j.control
-		if j.primary && (ctl.UpgradeID != "" && ctl.UpgradeID != batch.View.UpgradeID || ctl.Authorization != nil && ctl.Authorization.DeadlineMillis > x.Now.UnixMilli()) {
+		if j.primary && (ctl.UpgradeID != "" && ctl.UpgradeID != batch.View.UpgradeID || ctl.Authorization != nil && ctl.Authorization.DeadlineMillis > now) {
 			return protocol.Errorf(protocol.CodeConflictPayload, "host %s has another restart authority", host.HostID)
+		}
+		if j.primary && ctl.Mode != protocol.RunnerMaintenance {
+			// Entering maintenance enables the runner's fixed Run watchdog.
+			// Check its retained bounds before publishing that control.
+			if _, err := restartLocalDeadline(j, now, batch.RestartMillis); err != nil {
+				return err
+			}
 		}
 		grant, err := issueJournalCoverage(ctx, x, tx, *batch, j)
 		if err != nil {
@@ -247,7 +255,7 @@ func prepareRestartJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 			}
 			ctl.ReleaseID = batch.View.ReleaseID
 			ctl.Authorization = grant
-			if err := tx.PutHostControl(ctx, host.HostID, ctl, x.Now.UnixMilli()); err != nil {
+			if err := tx.PutHostControl(ctx, host.HostID, ctl, now); err != nil {
 				return err
 			}
 		} else if grant != nil && grant != ctl.Authorization {
@@ -281,6 +289,32 @@ func uncoveredRestartReattachment(ctx context.Context, q store.Querier, lease st
 	}), nil
 }
 
+func restartLocalDeadline(j restartJournal, now, restartMillis int64) (int64, error) {
+	if !j.delegated {
+		return 0, nil
+	}
+	rt := j.runtime.Runtime
+	scope := rt.MaintenanceCoverage
+	if slices.Contains(rt.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) &&
+		(scope == nil || scope.ObservedAtMillis == 0 || now-scope.ObservedAtMillis >= RunnerOfflineAfter.Milliseconds()) {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has no fresh acknowledgement of its local Run coverage", rt.InstanceID)
+	}
+	deadline := j.localCutoff
+	if scope == nil && rt.AuthorizationID != "" {
+		// Legacy runners report aggregate coverage. A live fixed execution
+		// can still be subject to that bound even after the server cleared
+		// the old control; do not assume the scope was empty.
+		deadline = rt.AuthorizationDeadlineMillis
+		if deadline == 0 {
+			return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has unresolved retained restart coverage", rt.InstanceID)
+		}
+	}
+	if deadline != 0 && deadline-now <= restartMillis {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s local Run coverage cannot fit the restart budget", rt.InstanceID)
+	}
+	return deadline, nil
+}
+
 func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff int64) (int64, error) {
 	if !j.primary && !j.live {
 		return cutoff, nil
@@ -294,23 +328,12 @@ func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff 
 		!rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart fence is not confirmed", rt.Runtime.InstanceID)
 	}
-	scope := rt.Runtime.MaintenanceCoverage
-	if j.delegated && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) &&
-		(scope == nil || scope.ObservedAtMillis == 0 || now-scope.ObservedAtMillis >= RunnerOfflineAfter.Milliseconds()) {
-		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has no fresh acknowledgement of its local Run coverage", rt.Runtime.InstanceID)
+	localDeadline, err := restartLocalDeadline(j, now, batch.RestartMillis)
+	if err != nil {
+		return 0, err
 	}
-	localCutoff := j.localCutoff
-	if j.delegated && rt.Runtime.MaintenanceCoverage == nil && rt.Runtime.AuthorizationID != "" {
-		// Legacy runners report aggregate coverage. A live fixed execution
-		// can still be subject to that bound even after the server cleared
-		// the old control; do not assume the scope was empty.
-		localCutoff = rt.Runtime.AuthorizationDeadlineMillis
-		if localCutoff <= now {
-			return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has unresolved retained restart coverage", rt.Runtime.InstanceID)
-		}
-	}
-	if localCutoff != 0 {
-		cutoff = min(cutoff, localCutoff-batch.RestartMillis)
+	if localDeadline != 0 {
+		cutoff = min(cutoff, localDeadline-batch.RestartMillis)
 	}
 	if len(j.renewals) == 0 && !j.fixed {
 		return cutoff, nil
