@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -190,10 +191,10 @@ func (in managerProjectionInput) project(ctx context.Context, a *App, x *Exec, t
 	e := in.event
 	if e.Disconnected || e.Call != nil {
 		if e.Disconnected && e.Native == nil && e.Call == nil {
-			return Outcome{}, verifyManagerProjectionDisconnect(ctx, tx.Q(), in)
+			return Outcome{}, requireManagerProjectionStop(ctx, tx.Q(), in)
 		}
 		if !e.Disconnected && e.Native == nil {
-			return Outcome{}, verifyManagerProjectionCall(ctx, tx.Q(), in)
+			return Outcome{}, projectManagerCallback(ctx, tx, in)
 		}
 		return Outcome{}, errManagerProjectionUnsupported
 	}
@@ -383,23 +384,38 @@ func (in managerProjectionInput) originalSource(ctx context.Context, q store.Que
 	return source, false, nil
 }
 
-func verifyManagerProjectionCall(ctx context.Context, q store.Querier, in managerProjectionInput) error {
+func projectManagerCallback(ctx context.Context, tx *store.Tx, in managerProjectionInput) error {
 	call := in.event.Call
 	if call.ThreadID == "" || call.ThreadID != in.event.ThreadID || call.TurnID == "" || call.CallID == "" {
 		return errManagerProjectionUnsupported
 	}
-	var settled bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversation_tool_uses u
- WHERE u.native_run_id=? AND u.thread_id=? AND u.turn_id=? AND u.item_id=? AND u.native_delivery_id<>''
- AND u.native_delivery_status IN ('delivered','rejected',?))`,
-		in.run, call.ThreadID, call.TurnID, call.CallID, store.NativeDeliveryRejectedCurrentTask).Scan(&settled)
-	if err == nil && !settled {
+	var delivery, status string
+	err := tx.Q().QueryRowContext(ctx, `SELECT native_delivery_id,native_delivery_status FROM conversation_tool_uses
+ WHERE native_run_id=? AND thread_id=? AND turn_id=? AND item_id=? AND native_delivery_id<>''`,
+		in.run, call.ThreadID, call.TurnID, call.CallID).Scan(&delivery, &status)
+	if errors.Is(err, sql.ErrNoRows) {
 		return errManagerProjectionUnsupported
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "delivered", "rejected", store.NativeDeliveryRejectedCurrentTask:
+		return nil
+	case "produced":
+		// Older stops may have saved the rejection without promoting the
+		// bound delivery fact. Recover only from its retained original receipt.
+		if err := requireManagerProjectionStop(ctx, tx.Q(), in); err != nil {
+			return err
+		}
+		if rejected, err := reconcileRejectedManagerToolDelivery(ctx, tx, in.run, delivery); err != nil || rejected {
+			return err
+		}
+	}
+	return errManagerProjectionUnsupported
 }
 
-func verifyManagerProjectionDisconnect(ctx context.Context, q store.Querier, in managerProjectionInput) error {
+func requireManagerProjectionStop(ctx context.Context, q store.Querier, in managerProjectionInput) error {
 	id, sequence, stopped, err := store.ManagerNativeClose(ctx, q, in.run)
 	if err == nil && (!stopped || id == "" || sequence < in.sequence) {
 		return errManagerProjectionUnsupported
