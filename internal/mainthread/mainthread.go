@@ -451,7 +451,7 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		ack := func() error {
 			if acknowledger, ok := th.(harness.EventAcknowledger); ok {
 				if named && selected.RunnerManaged {
-					return acknowledger.AcknowledgeEvent(ctx, ev)
+					return acknowledgeRunnerAttachmentEvent(ctx, acknowledger, ev, receiptOnly)
 				}
 				return acknowledgeAppliedEvent(ctx, acknowledger, ev)
 			}

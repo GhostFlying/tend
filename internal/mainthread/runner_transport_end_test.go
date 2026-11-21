@@ -282,3 +282,144 @@ func TestFault_RunnerTransportSettlesReleasedRunTailAfterWriterTimeout(t *testin
 	}
 	t.Logf("stopped original Run settled its retained tail at applied cursor %d", applied)
 }
+
+func TestFault_ReceiptOnlyStartupSettlesClosingRunAfterWriterTimeout(t *testing.T) {
+	e := newEnv(t, testkit.NewHarness())
+	e.stop()
+	e.m.named = receiptOnlySelection()
+	e.m.named.RequireReceiptReader = false
+	if err := e.app.SetMainThread(t.Context(), e.m.bindingInstance(), "original-thread"); err != nil {
+		t.Fatal(err)
+	}
+	const run = "receipt-reader-run"
+	seedClosingReceiptMetadata(t, e, "completed", true)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	if err := e.store.Write(ctx, func(tx *store.Tx) error {
+		now := time.Now().UnixMilli()
+		actor := protocol.Principal{Kind: protocol.PrincipalOwner, Subject: "owner@example.com", Client: "cli-review-fixture"}
+		issue := protocol.Issue{
+			IssueControl: protocol.IssueControl{IssueID: e.ids.New(protocol.PrefixWorkItem), State: protocol.IssueActive, WorkStatus: protocol.IssueTodo,
+				Assignee: protocol.IssueAssignee{Kind: protocol.IssueAssigneeOwner, Ref: actor.Subject}, AssignmentEpoch: 1, AssignmentState: "active"},
+			Revision: 1, Plan: protocol.IssuePlan{Title: "Closing original responsibility", Project: "default", Intent: "Retain close and original tail", Stages: []protocol.IssueStage{}},
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := tx.SaveCanonicalIssue(ctx, issue, 0, store.IssueRevisionProvenance{Actor: actor, RequestID: e.ids.New(protocol.PrefixRequest), Reason: map[string]string{"reason": "original owner fixture"}}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO issue_manager_tasks(task_id,issue_id,category_id,expected_epoch,assignment_epoch,conversation_id,host_id,state,request_id,created_at,updated_at) VALUES('task_cached',?,'investigation',1,1,?,'tail-fixture-host','assigned','fixture',?,?)`, issue.IssueID, "issue:"+issue.IssueID, now, now); err != nil {
+			return err
+		}
+		if err := tx.InsertSpec(ctx, "task_cached", 1, `{}`, "", now); err != nil {
+			return err
+		}
+		const host = "tail-fixture-host"
+		if err := tx.UpsertHost(ctx, store.HostRow{HostID: host, OS: "linux", Arch: "amd64", Slots: 1}, time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE runs SET host_id=?,observed_state='running' WHERE run_id=?`, host, run); err != nil {
+			return err
+		}
+		if err := tx.InsertLease(ctx, store.LeaseRow{LeaseID: "tail-fixture-lease", RunID: run, HostID: host, ExpiresAt: time.Now().Add(time.Minute).UnixMilli()}, time.Now().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='started' WHERE request_id='close_cached'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO manager_native_events(run_id,seq,body_json) VALUES('receipt-reader-run',1,'{"thread_id":"original-thread","native":{"Kind":"item_started","TurnID":"original-turn","ItemID":"original-tail"}}')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if ended, err := e.app.ManagerRunEnded(ctx, run); ended || err != nil {
+		t.Fatal("fixture requires original close in flight before physical stop reaches server", ended, err)
+	}
+	raw, err := json.Marshal(protocol.ManagerNativeReply{ID: "close_cached", Result: json.RawMessage(`null`), LastSequence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportClose := func() (protocol.Operation, error) {
+		return e.app.Execute(ctx, protocol.Principal{Kind: protocol.PrincipalSystem}, &protocol.Envelope{
+			RequestID: e.ids.New(protocol.PrefixRequest), Operation: protocol.OpManagerNativeReply,
+			Target: protocol.Target{Type: "run", ID: run}, Payload: raw,
+		}, app.ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
+	}
+	missing, err := reportClose()
+	if protocol.CodeOf(err) != protocol.CodeUnknownOutcome && (missing.Error == nil || missing.Error.Code != protocol.CodeUnknownOutcome) {
+		t.Fatal("original close did not wait for its unapplied tail", missing, err)
+	}
+	t.Log("original close is awaiting its original applied tail")
+	session := coordination.New(ctx, &runnerTransport{app: e.app, run: run})
+	defer func() { cancel(); <-session.Done() }()
+	th, err := e.m.openThread(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.m.historyAttachment || e.count(`SELECT COUNT(*) FROM manager_native_requests`) != 1 {
+		t.Fatal("expected receipt-only attachment following the one original close")
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	missed := make(chan store.WriteObservation, 1)
+	held := make(chan error, 1)
+	store.WithWriteObserver(time.Now, 0, func(o store.WriteObservation) {
+		if o.Source.Operation == "manager.event.ack" && o.Stage == "connection_wait" && o.Outcome == "deadline_exceeded" {
+			select {
+			case missed <- o:
+				close(release)
+			default:
+			}
+		}
+	})(e.store)
+	go func() {
+		held <- e.store.Write(ctx, func(*store.Tx) error {
+			close(entered)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	<-entered
+	acknowledger := th.(harness.EventAcknowledger)
+	handled := make(chan struct{})
+	err = drainStartupEvents(ctx, th.Events(), func(ctx context.Context, event harness.Event) error {
+		if event.OriginRunID != run || event.OriginSequence != 1 || event.ItemID != "original-tail" {
+			t.Error("expected same-Run close tail", event)
+		}
+		ackErr := acknowledgeRunnerAttachmentEvent(ctx, acknowledger, event, e.m.historyAttachment)
+		close(handled)
+		return ackErr
+	}, func(ctx context.Context) error {
+		select {
+		case <-handled:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	select {
+	case o := <-missed:
+		if o.Source.RunID != run || o.Source.EventSequence != 1 {
+			t.Fatal("unexpected timeout identity", o.Source)
+		}
+		t.Logf("writer timed out before BEGIN for original run=%s seq=%d", o.Source.RunID, o.Source.EventSequence)
+	case <-ctx.Done():
+		t.Fatal("ACK did not observe writer contention", err)
+	}
+	if holdErr := <-held; holdErr != nil {
+		t.Fatal(holdErr)
+	}
+	outcome, closeErr := reportClose()
+	t.Logf("original close after startup ACK: status=%s protocol_error=%v error=%v", outcome.Status, outcome.Error, closeErr)
+	applied, readErr := e.app.ManagerAppliedCursor(ctx, run)
+	if err != nil || readErr != nil || applied != 1 {
+		t.Fatalf("receipt-only startup could not settle its retained tail: ack=%v cursor=%d read=%v", err, applied, readErr)
+	}
+	if closeErr != nil || outcome.Status != protocol.OpSucceeded {
+		t.Fatal("original close failed to settle after the tail applied", outcome, closeErr)
+	}
+	t.Logf("receipt-only startup settled its retained tail at applied cursor %d", applied)
+}
