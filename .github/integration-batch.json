@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "main_base": "99d05075351109caf40e9b2ff711b6db86ca81c8",
+  "integration_from": "99d05075351109caf40e9b2ff711b6db86ca81c8",
+  "integration_through": "fd65c34fae9a88054305de05572c7e0d8f7d0ea8",
+  "pull_requests": [
+    {
+      "number": 399,
+      "merge_sha": "fd65c34fae9a88054305de05572c7e0d8f7d0ea8"
+    }
+  ]
+}
