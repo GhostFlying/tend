@@ -32,6 +32,10 @@ func queueEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID, event
 	return queueBackgroundSource(ctx, x, tx, messageID, eventID, kind, answer)
 }
 func queueSingleEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID, eventID, kind string, answer json.RawMessage) error {
+	return queueSingleEventDelivery(ctx, x, tx, x.IDs.New(protocol.PrefixRequest), messageID, eventID, kind, answer)
+}
+
+func queueSingleEventDelivery(ctx context.Context, x *Exec, tx *store.Tx, requestID, messageID, eventID, kind string, answer json.RawMessage) error {
 	payload, err := json.Marshal(HandleMessage{MessageID: messageID, EventID: eventID, EventKind: kind, DecisionAnswer: answer})
 	if err != nil {
 		return fmt.Errorf("app: encode event wake: %w", err)
@@ -41,7 +45,7 @@ func queueSingleEventTurn(ctx context.Context, x *Exec, tx *store.Tx, messageID,
 		return err
 	}
 	return tx.InsertOutbox(ctx, store.OutboxRow{
-		OutboxID: x.IDs.New(protocol.PrefixOutbox), RequestID: x.IDs.New(protocol.PrefixRequest),
+		OutboxID: x.IDs.New(protocol.PrefixOutbox), RequestID: requestID,
 		ParentRequestID: x.Env.RequestID, Destination: store.ConversationDestination(conversation), Operation: OpHandleEvent,
 		PayloadJSON: string(payload), CreatedAt: x.Now.UnixMilli(),
 	})

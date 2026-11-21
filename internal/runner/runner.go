@@ -139,10 +139,11 @@ type Config struct {
 // Why a worker is stopped, as the cause of its context. The harness's
 // causes tell a worker whose agent outlives it what to do with the agent.
 var (
-	errFenced  = errors.New("runner: the lease could not be renewed in time")
-	errStopped = fmt.Errorf("runner: %w", harness.ErrStopped)
-	errPaused  = fmt.Errorf("runner: %w", harness.ErrPaused)
-	errHeld    = fmt.Errorf("runner: %w", harness.ErrHeld)
+	errFenced                = errors.New("runner: the lease could not be renewed in time")
+	errManagerTransportLease = fmt.Errorf("%s: %w", protocol.ManagerStoppedTransportLease, errFenced)
+	errStopped               = fmt.Errorf("runner: %w", harness.ErrStopped)
+	errPaused                = fmt.Errorf("runner: %w", harness.ErrPaused)
+	errHeld                  = fmt.Errorf("runner: %w", harness.ErrHeld)
 )
 
 // active is a run with a live executor.
@@ -1300,13 +1301,19 @@ func (r *Runner) watchdog(ctx context.Context) {
 // fence stops a run's worker because its lease cannot be relied on, and
 // asks for reconciliation.
 func (r *Runner) fence(ctx context.Context, runID string, a *active, cause string) {
+	stopCause := errFenced
 	if context.Cause(a.ctx) == nil {
 		r.mu.Lock()
-		deadline := a.deadline
+		deadline, desired := a.deadline, a.desired
 		r.mu.Unlock()
+		if cause == "lease_deadline_elapsed" && a.as.Role == protocol.RoleIssueManager &&
+			!protocol.RunnerOwnsExecution(a.as.Protocol) && desired == protocol.DesiredRun &&
+			!r.maintenance() && r.c.disconnected() {
+			stopCause = errManagerTransportLease
+		}
 		r.cfg.Log.WarnContext(ctx, "fencing run", "run_id", runID, "cause", cause, "lease_deadline", deadline, "observed_at", r.cfg.Now())
 	}
-	a.cancel(errFenced)
+	a.cancel(stopCause)
 	r.requestReconcile()
 }
 

@@ -1,1 +1,1 @@
-{"current":7,"minimum":6,"adapters":[{"id":"renewal-bound-runs","protocol":6,"remove_in":8,"file":"internal/protocol/run_delegation.go","test":"internal/e2e/runner_test.go"}]}
+{"current":7,"minimum":6,"adapters":[{"id":"renewal-bound-runs","protocol":6,"remove_in":8,"file":"internal/protocol/run_delegation.go","test":"internal/e2e/runner_test.go"},{"id":"manager-transport-stop-recovery","protocol":6,"remove_in":8,"file":"internal/protocol/issue_manager.go","test":"internal/app/manager_transport_recovery_test.go"}]}

@@ -922,6 +922,9 @@ func finishStoppedManager(ctx context.Context, x *Exec, tx *store.Tx, run, reaso
 		if _, err = tx.Exec(ctx, `UPDATE tasks SET lifecycle='waiting',updated_at=? WHERE task_id=? AND lifecycle NOT IN ('completed','cancelled')`, x.Now.UnixMilli(), r.TaskID); err != nil {
 			return Outcome{}, err
 		}
+		if err := recordManagerTransportStop(ctx, x, tx, r, reason); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if err := settleStoppedManagerRequests(ctx, tx, run); err != nil {
 		return Outcome{}, err
