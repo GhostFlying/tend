@@ -20,6 +20,7 @@ type independentReviewFailure struct {
 	task, run, root, artifact, reason string
 	role                              protocol.RunRole
 	retries                           int
+	specVersion                       int64
 	retryAction                       string
 }
 
@@ -108,7 +109,7 @@ func recordIndependentReviewFailure(ctx context.Context, x *Exec, tx *store.Tx, 
 		VALUES(?,?,?,?,?,?,?)`, rc.run.RunID, rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID, reason, root, retries); err != nil {
 		return nil, err
 	}
-	f, err := pendingIndependentReviewFailure(ctx, tx.Q(), rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID)
+	f, err := pendingIndependentReviewFailure(ctx, tx.Q(), rc.task.TaskID, rc.run.Role, rc.action.TargetArtifactID, rc.action.TargetSpecVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +117,17 @@ func recordIndependentReviewFailure(ctx context.Context, x *Exec, tx *store.Tx, 
 	return f, nil
 }
 
-func pendingIndependentReviewFailure(ctx context.Context, q store.Querier, task string, role protocol.RunRole, artifact string) (*independentReviewFailure, error) {
+func pendingIndependentReviewFailure(ctx context.Context, q store.Querier, task string, role protocol.RunRole, artifact string, specVersion int64) (*independentReviewFailure, error) {
 	f := &independentReviewFailure{task: task, role: role, artifact: artifact}
-	err := q.QueryRowContext(ctx, `SELECT f.run_id,f.root_run_id,f.reason,f.retries,COALESCE(f.retry_action_id,'')
-		FROM independent_review_failures f JOIN runs r USING(run_id)
+	err := q.QueryRowContext(ctx, `SELECT f.run_id,f.root_run_id,f.reason,f.retries,COALESCE(f.retry_action_id,''),CASE WHEN f.task_id=? THEN a.target_spec_version ELSE retry.target_spec_version END
+		FROM independent_review_failures f JOIN runs r USING(run_id) JOIN plan_actions a USING(action_id)
 		JOIN independent_review_failures root ON root.run_id=f.root_run_id
-		WHERE f.task_id=? AND f.role=? AND f.artifact_id=? AND root.resolution_run_id IS NULL
-		ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`, task, role, artifact).Scan(&f.run, &f.root, &f.reason, &f.retries, &f.retryAction)
+		LEFT JOIN plan_actions retry ON retry.action_id=f.retry_action_id
+		WHERE f.role=? AND f.artifact_id=? AND root.resolution_run_id IS NULL
+		  AND ((f.task_id=? AND (?=0 OR a.target_spec_version=?))
+		    OR (retry.task_id=? AND (?=0 OR retry.target_spec_version=?)))
+		ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1`, task, role, artifact, task, specVersion, specVersion, task, specVersion, specVersion).
+		Scan(&f.run, &f.root, &f.reason, &f.retries, &f.retryAction, &f.specVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -181,7 +186,7 @@ func recordIndependentReviewFailureNotice(ctx context.Context, x *Exec, tx *stor
 	text := fmt.Sprintf("Issue %s 的独立审阅执行失败。审阅 Task %s，原 Run %s，失败原因 %s。已授权重试 %d/%d 次。当前负责人 %s。", issueID, f.task, f.run, class, f.retries, independentReviewRetryLimit, i.Assignee.Ref)
 	text += " 查阅原 Run 的终态和对账记录，保留已有审阅报告与 findings。"
 	if f.canRetry() {
-		text += " 如果原副作用已对账并且仍有审阅需要，请明确决定是否使用 actions_create 为这个 Task 请求下一代执行。"
+		text += " 如果原副作用已对账并且仍有审阅需要，请明确决定是否使用 actions_create 为这个 Task 请求下一代执行。若责任交接使原执行契约过期，当前负责人可用 follow_up 指向原 Task，在同一候选上建立接续契约。"
 	} else if f.retries == independentReviewRetryLimit {
 		runs, err := store.FollowupIDs(ctx, tx.Q(), `SELECT run_id FROM independent_review_failures WHERE root_run_id=? ORDER BY retries`, f.root)
 		if err != nil {
@@ -236,9 +241,24 @@ func guardIndependentReviewAction(ctx context.Context, q store.Querier, a domain
 	if a.Kind != protocol.ActionImplement && a.Kind != protocol.ActionAccept {
 		return nil
 	}
-	f, err := pendingIndependentReviewFailure(ctx, q, a.TaskID, protocol.RunRole(a.Kind), a.ArtifactID)
+	f, err := pendingIndependentReviewFailure(ctx, q, a.TaskID, protocol.RunRole(a.Kind), a.ArtifactID, 0)
 	if err != nil || f == nil || f.run == retryRun {
 		return err
+	}
+	if a.Kind == protocol.ActionImplement && a.SpecVersion != f.specVersion {
+		_, spec, err := loadTask(ctx, q, a.TaskID)
+		if err != nil {
+			return err
+		}
+		target, err := independentReviewTargetForTask(ctx, q, a.TaskID, spec)
+		if err != nil {
+			return err
+		}
+		if target.key != "" {
+			if allowed, err := canStartIndependentReviewTarget(ctx, q, target, "", ""); err != nil || allowed {
+				return err
+			}
+		}
 	}
 	return protocol.Errorf(protocol.CodeInvalidTransition, "the current Issue owner must resolve the retained independent review failure before another execution")
 }
@@ -252,4 +272,118 @@ func settleIndependentReviewRetry(ctx context.Context, tx *store.Tx, rc runConte
 			WHERE a.task_id=? AND a.kind=? AND a.target_spec_version=? AND COALESCE(a.target_artifact_id,'')=? AND a.generation=?)`,
 		rc.run.RunID, rc.task.TaskID, rc.action.Kind, rc.action.TargetSpecVersion, rc.action.TargetArtifactID, rc.action.Generation)
 	return err
+}
+
+// independentReviewRetryResultRound resolves an existing failed binding to an
+// actual outcome from its approved retry. All ordinary review qualification
+// still uses the frozen candidate, requirements, profile and reviewer.
+func independentReviewRetryResultRound(ctx context.Context, q store.Querier, round protocol.SharedDeliveryReviewRound) (protocol.SharedDeliveryReviewRound, error) {
+	if round.ArtifactID != "" || round.ImplementGeneration <= 0 {
+		return round, nil
+	}
+	var run, task string
+	var generation, spec int64
+	err := q.QueryRowContext(ctx, `SELECT completed.run_id,completed.task_id,completed_action.target_spec_version,completed_action.generation
+		FROM independent_review_failures f
+		JOIN runs failed ON failed.run_id=f.run_id
+		JOIN plan_actions failed_action ON failed_action.action_id=failed.action_id
+		JOIN runs completed ON completed.run_id=f.resolution_run_id
+		JOIN plan_actions completed_action ON completed_action.action_id=completed.action_id
+		WHERE f.root_run_id=f.run_id AND f.task_id=? AND f.role='implement'
+		 AND failed_action.target_spec_version=? AND failed_action.generation=?
+		 AND (?='' OR failed.run_id=?)`,
+		round.TaskID, round.SpecVersion, round.ImplementGeneration, round.RunID, round.RunID).Scan(&run, &task, &spec, &generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return round, nil
+	}
+	if err != nil {
+		return round, err
+	}
+	pin, err := store.GetRunExecution(ctx, q, run)
+	if err != nil {
+		return round, err
+	}
+	if round.ExecutionRequirements != nil {
+		if err := store.RequireSharedReviewExecutionProfile(round.ExecutionRequirements, pin.Profile); err != nil {
+			return round, err
+		}
+	}
+	round.RunID, round.TaskID, round.SpecVersion, round.ImplementGeneration = run, task, spec, generation
+	round.ReviewerProfile = &pin.Profile
+	return round, nil
+}
+
+// handoffIndependentReviewRetry uses an explicit follow-up of the old Task
+// when the new Issue owner needs a fresh execution agreement.
+func handoffIndependentReviewRetry(ctx context.Context, x *Exec, q store.Querier, issue protocol.Issue, target independentReviewTarget, relations []protocol.TaskRelation) (*independentReviewFailure, error) {
+	if target.key == "" || strings.HasPrefix(target.key, "delivery|") && target.head == "" {
+		return nil, nil
+	}
+	var selected *independentReviewFailure
+	for _, relation := range relations {
+		if relation.Kind != protocol.RelationFollowUp {
+			continue
+		}
+		source, err := store.GetTask(ctx, q, relation.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		primary, err := store.GetTaskIssueOwner(ctx, q, source.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if primary != issue.IssueID {
+			continue
+		}
+		f, err := pendingIndependentReviewFailure(ctx, q, source.TaskID, protocol.RoleImplement, "", source.SpecVersion)
+		if err != nil {
+			return nil, err
+		}
+		if f == nil {
+			continue
+		}
+		var original independentReviewTarget
+		err = q.QueryRowContext(ctx, `SELECT target_key,head_sha,base_sha FROM independent_review_run_targets WHERE run_id=?`, f.run).
+			Scan(&original.key, &original.head, &original.base)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && original != target {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		current, err := store.TaskOwnerContractCurrent(ctx, q, source.TaskID)
+		if err != nil || current {
+			return nil, err
+		}
+		if selected != nil {
+			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "name one original failed review in the follow-up")
+		}
+		if err := authorizeIndependentReviewRetry(ctx, x, q, source, *f); err != nil {
+			return nil, err
+		}
+		selected = f
+	}
+	return selected, nil
+}
+
+func consumeIndependentReviewRetry(ctx context.Context, tx *store.Tx, failure *independentReviewFailure, actions []actionResult) error {
+	if failure == nil {
+		return nil
+	}
+	if len(actions) != 1 {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "an independent review approval requires exactly one execution action")
+	}
+	result, err := tx.Exec(ctx, `UPDATE independent_review_failures SET retry_action_id=? WHERE run_id=? AND retry_action_id IS NULL`,
+		actions[0].ActionID, failure.run)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return protocol.Errorf(protocol.CodeStaleRevision, "the original review retry has already been decided")
+	}
+	return nil
 }
