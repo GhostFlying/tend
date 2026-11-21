@@ -436,3 +436,68 @@ func TestPRWaitPrefersCapableRunnerAndRetainsLegacyObservationFallback(t *testin
 		})
 	}
 }
+
+func TestPRWaitTerminalSharedReferencePreservesLegacyHostPin(t *testing.T) {
+	f := newPRWaitTest(t, false)
+	cfg := testConfig()
+	old := cfg.Hosts[0]
+	old.HostID = "linux-2"
+	cfg.Hosts = append(cfg.Hosts, old)
+	f.h.syncConfig(cfg)
+	other := observerItem(t, f.h)
+	o := prWaitSnapshot()
+	f.record(t, &o, "")
+	f.request(t, "check-after-merge", protocol.PRWaitCondition{Kind: protocol.PRWaitCheckCompleted, HeadSHA: o.HeadSHA, Name: prWaitCheck})
+	stopOwnerClaim(t, f.h, f.run)
+
+	// Only the subscribed reference remains eligible after merge. Its host
+	// pin is distinct from the stale pending job on the shared reference.
+	if err := f.h.store.Write(t.Context(), func(tx *store.Tx) error {
+		i, err := store.GetCanonicalIssue(t.Context(), tx.Q(), f.issue.IssueID)
+		if err != nil {
+			return err
+		}
+		i.Plan.Deliveries[0].HostID = "linux-2"
+		i.Revision++
+		return tx.SaveCanonicalIssue(t.Context(), i, i.Revision-1, store.IssueRevisionProvenance{
+			Actor: owner, RequestID: f.h.ids.New(protocol.PrefixRequest),
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := testRuntime("old-reader")
+	legacy.Capabilities = append(legacy.Capabilities, protocol.CapabilityDeliveryGitHub, protocol.CapabilityDeliveryCandidateIdentity)
+	if op := f.h.versionedHello("linux-2", legacy); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	as := pollDelivery(t, f.h, "linux-2", "old-reader")
+	if len(as) != 1 {
+		t.Fatal("original read pinned to legacy runner", as)
+	}
+	o.State, o.CI = "merged", nil
+	a := as[0]
+	report := protocol.DeliveryReportPayload{InstanceID: "old-reader", WorkItemID: a.WorkItemID,
+		DeliveryID: a.Delivery.DeliveryID, Generation: a.Generation, Nonce: a.Nonce, Snapshot: &o}
+	if !accepted(t, f.h.exec(runner("linux-2"), f.h.env(protocol.OpDeliveriesReport,
+		protocol.Target{Type: "host", ID: "linux-2"}, report, nil), ReportDelivery{})) {
+		t.Fatal("the legacy report did not publish the actual merged fact")
+	}
+	f.h.clock.Advance(5 * time.Minute)
+	f.rt.Sequence++
+	if op := f.h.versionedHello("linux-1", f.rt); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	legacy.Sequence++
+	if op := f.h.versionedHello("linux-2", legacy); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if as := pollDelivery(t, f.h, "linux-1", f.rt.InstanceID); len(as) != 0 {
+		t.Fatal("modern reader received an ineligible nonwaiting reference", as, other.WorkItemID)
+	}
+	if v := f.readWait(t); v.Status != "waiting" || v.PREvidence != nil {
+		t.Fatal("the unrelated merged status did not leave the check waiting", v)
+	}
+	if as := pollDelivery(t, f.h, "linux-2", "old-reader"); len(as) != 1 || as[0].WorkItemID != f.issue.IssueID {
+		t.Fatal("ineligible shared alias blocked the original legacy reader", as)
+	}
+}

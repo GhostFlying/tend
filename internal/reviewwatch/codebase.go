@@ -104,7 +104,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	if mr.Status == Closed {
 		out.ClosedBy = mr.ClosedBy.actor()
 	}
-	if c.cfg.IncludeChecks && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
+	if (c.cfg.IncludeChecks || ref.IncludeChecks) && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
 		confirmed, err := c.codebaseLineage(ctx, ref, out.TargetSHA, out.MergeSHA)
 		if err != nil {
 			out.LineageErrorKind = "query_failed"

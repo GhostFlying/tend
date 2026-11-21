@@ -299,7 +299,8 @@ func hasPRDeliveryWait(ctx context.Context, q store.Querier, issue, delivery str
 
 // Prefer a reader that can satisfy the shared observation when an exact PR
 // subscription is pending. An offline reader or different host pin does not
-// remove ordinary provider visibility from an existing legacy runner.
+// remove ordinary provider visibility from an existing legacy runner. The
+// modern reader must also have a member eligible for PollDeliveries now.
 func preferredPRDeliveryReader(ctx context.Context, q store.Querier, ref protocol.IssueDelivery, now int64) (bool, error) {
 	var preferred bool
 	err := q.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS(SELECT 1 FROM server_delivery_references r
@@ -308,12 +309,17 @@ func preferredPRDeliveryReader(ctx context.Context, q store.Querier, ref protoco
  JOIN work_items w ON w.work_item_id=r.issue_id
  JOIN json_each(w.body_json,'$.deliveries') d ON json_extract(d.value,'$.delivery_id')=r.delivery_id
  JOIN observation_jobs j ON j.issue_id=r.issue_id AND j.delivery_id=r.delivery_id AND j.status='pending'
+ JOIN server_delivery_jobs p USING(provider,repository,number)
  LEFT JOIN delivery_observations o ON o.work_item_id=r.issue_id AND o.delivery_id=r.delivery_id
  JOIN host_runtime rt ON rt.host_id=COALESCE(NULLIF(json_extract(d.value,'$.host_id'),''),rt.host_id)
  JOIN hosts h ON h.host_id=rt.host_id AND h.status='active'
  WHERE r.provider=?1 AND r.repository=?2 AND r.number=?3 AND rt.online=1
  AND rt.last_heartbeat_at>?4 AND rt.last_heartbeat_at<=?5 AND json_extract(rt.runtime_json,'$.mode')='normal'
- AND COALESCE(o.query_until,0)<=?5 AND COALESCE(o.next_check_at,0)<=?5
+ AND COALESCE(o.query_until,0)<=?5 AND COALESCE(o.next_check_at,0)<=?5 AND p.query_until<=?5
+ AND (o.refresh_requested=1 OR COALESCE(json_extract(o.query_json,'$.observed_revision'),0)>=p.fact_revision)
+ AND (o.refresh_requested=1
+      OR (w.status<>'closed' AND COALESCE(json_extract(p.observation_json,'$.state'),'') NOT IN ('merged','closed'))
+      OR (r.active=1 AND `+prWaitForMemberSQL+`))
  AND EXISTS(SELECT 1 FROM json_each(rt.runtime_json,'$.capabilities') cap WHERE cap.value=?6)
  AND EXISTS(SELECT 1 FROM json_each(rt.runtime_json,'$.capabilities') cap WHERE cap.value=?7))
  ELSE 0 END`, ref.Provider, ref.Repository, ref.Number, now-RunnerOfflineAfter.Milliseconds(), now,
