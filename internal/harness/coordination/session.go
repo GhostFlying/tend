@@ -335,6 +335,9 @@ func (s *Session) startToolLocked(t *thread, e Event) {
 	s.handlers.Add(1)
 	go func() {
 		defer s.handlers.Done()
+		if s.projectsHistoricalCallback(e) {
+			return
+		}
 		result := harness.ToolResult{Text: "Coordinator tool handler is unavailable"}
 		if e.Historical {
 			result = harness.ToolResult{Text: "Original callback result requires reconciliation; no tool was executed"}
@@ -384,7 +387,7 @@ func (s *Session) projectsHistoricalCallback(e Event) bool {
 }
 
 func (s *Session) deliver(t *thread, e Event) bool {
-	if e.Call != nil && !s.projectsHistoricalCallback(e) {
+	if e.Call != nil {
 		s.mu.Lock()
 		if s.ctx.Err() != nil {
 			s.mu.Unlock()

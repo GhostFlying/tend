@@ -231,6 +231,106 @@ func assertManagerProjectionWatermarks(t *testing.T, h *harness, run string, rec
 	}
 }
 
+func TestFault_ManagerAppliedCursorStopsAtFirstMissingSequence(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		present []int64
+		pending int64
+		want    int64
+	}{
+		{name: "empty"},
+		{name: "multiple leading gaps", present: []int64{3}},
+		{name: "multiple interior gaps", present: []int64{1, 4, 5}, want: 1},
+		{name: "earlier unapplied event", present: []int64{1, 2, 3, 6}, pending: 2, want: 1},
+		{name: "first gap before unapplied event", present: []int64{1, 4}, pending: 4, want: 1},
+		{name: "continuous", present: []int64{1, 2, 3}, want: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, as, _ := reviewManagerAssignment(t)
+			if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+				for _, seq := range tc.present {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO manager_native_events(run_id,seq,body_json,applied) VALUES(?,?,'{}',?)`, as.RunID, seq, seq != tc.pending); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var received int64
+			if len(tc.present) != 0 {
+				received = tc.present[len(tc.present)-1]
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, received, tc.want)
+		})
+	}
+}
+
+func TestFault_ManagerProjectionContinuesAfterOriginalUnclaimedCallbackRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		legacyRetained bool
+	}{
+		{name: "durable after receipt consumption"},
+		{name: "legacy stop with original receipt", legacyRetained: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, _, as, _ := reviewManagerAssignment(t)
+			ctx := t.Context()
+			original, err := h.app.QueueManagerNative(ctx, as.RunID, "tool_result", json.RawMessage(`{"thread_id":"native","turn_id":"original-turn","call_id":"original-call","tool_result":{"Success":false,"Text":"original failure"}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			facts := []string{
+				`{"thread_id":"native","call":{"ThreadID":"native","TurnID":"original-turn","CallID":"original-call","Tool":"existing_tool"}}`,
+				`{"thread_id":"native","native":{"Kind":"item_completed","TurnID":"original-turn","ItemID":"later","ItemType":"reasoning","Raw":{"id":"later"}}}`,
+			}
+			for i, raw := range facts {
+				p := protocol.ManagerNativeEvent{Sequence: int64(i + 1), Body: json.RawMessage(raw)}
+				if op := h.runAs(as, protocol.OpManagerNativeEvent, p, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original process stopped", LastSequence: 2}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, 2, 0)
+			if tc.legacyRetained {
+				if err := h.store.Write(ctx, func(tx *store.Tx) error {
+					// Older writers left the durable result in produced state
+					// even though the original request was definitively rejected.
+					_, err := tx.Exec(ctx, `UPDATE conversation_tool_uses SET native_delivery_status='produced',native_delivery_error=''
+ WHERE native_run_id=? AND native_delivery_id=?`, as.RunID, original)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				reply, ready, err := h.app.ManagerNativeResult(ctx, as.RunID, original)
+				if err != nil || !ready || !reply.Rejected || reply.ID != original {
+					t.Fatal("missing original rejection", ready, reply, err)
+				}
+				if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=?`, original) != 0 {
+					t.Fatal("fixture did not retire the consumed receipt")
+				}
+			}
+			for seq := int64(1); seq <= 2; seq++ {
+				if err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, 2, 2)
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE native_run_id=? AND native_delivery_id=?
+ AND native_delivery_status='rejected' AND native_delivery_error<>'' AND native_result_success=0 AND native_result_output='original failure'`, as.RunID, original) != 1 {
+				t.Fatal("recovery changed the original tool result or lost its delivery identity")
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM agent_rollout_events WHERE item_id='later'`) != 1 {
+				t.Fatal("the original unapplied tail did not advance")
+			}
+		})
+	}
+}
+
 func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 	for _, fault := range []string{"gap", "unknown"} {
 		t.Run(fault, func(t *testing.T) {

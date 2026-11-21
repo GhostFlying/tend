@@ -607,16 +607,12 @@ func settleClosedManagerToolResults(ctx context.Context, tx *store.Tx, run strin
 		return err
 	}
 	for _, id := range ids {
-		raw, err := json.Marshal(protocol.ManagerNativeReply{ID: id, Error: "Native process closed before tool result delivery", Rejected: true})
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error='Native process closed before tool result delivery',completion_rejected=1,runner_acked=1 WHERE request_id=?`, string(raw), id); err != nil {
+		if err := rejectUnclaimedManagerRequest(ctx, tx, run, id, "Native process closed before tool result delivery"); err != nil {
 			return err
 		}
 	}
 	_, err = tx.Exec(ctx, `UPDATE manager_native_events AS e SET applied=1 WHERE e.run_id=? AND e.applied=0 AND EXISTS(
-		SELECT 1 FROM manager_native_requests r WHERE r.run_id=e.run_id AND r.method='tool_result'
+		SELECT 1 FROM manager_native_requests r WHERE r.run_id=e.run_id AND r.method='tool_result' AND r.status='completed'
 		AND json_extract(r.payload_json,'$.thread_id')=json_extract(e.body_json,'$.call.ThreadID')
 		AND json_extract(r.payload_json,'$.turn_id')=json_extract(e.body_json,'$.call.TurnID')
 		AND json_extract(r.payload_json,'$.call_id')=json_extract(e.body_json,'$.call.CallID'))`, run)
@@ -893,10 +889,9 @@ func (a *App) ManagerAppliedCursor(ctx context.Context, run string) (int64, erro
 
 func managerAppliedCursor(ctx context.Context, q store.Querier, run string) (int64, error) {
 	var cursor int64
-	err := q.QueryRowContext(ctx, `SELECT MIN(COALESCE((SELECT MIN(seq)-1 FROM manager_native_events WHERE run_id=?1 AND applied=0), max_seq),
- COALESCE((SELECT MIN(e.seq)-2 FROM manager_native_events e WHERE e.run_id=?1 AND e.seq>1
-   AND NOT EXISTS(SELECT 1 FROM manager_native_events p WHERE p.run_id=e.run_id AND p.seq=e.seq-1)), max_seq))
- FROM (SELECT COALESCE(MAX(seq),0) AS max_seq FROM manager_native_events WHERE run_id=?1)`, run).Scan(&cursor)
+	err := q.QueryRowContext(ctx, `WITH ordered AS (
+ SELECT seq, applied, LAG(seq,1,0) OVER (ORDER BY seq) AS previous FROM manager_native_events WHERE run_id=?
+ ) SELECT COALESCE(MIN(CASE WHEN seq<>previous+1 THEN previous WHEN applied=0 THEN seq-1 END), MAX(seq), 0) FROM ordered`, run).Scan(&cursor)
 	return cursor, err
 }
 
@@ -953,25 +948,53 @@ func settleStoppedManagerRequests(ctx context.Context, tx *store.Tx, run string)
 	if err != nil {
 		return err
 	}
+	const reason = "Native process stopped; reconcile the original operation before continuing"
 	for _, id := range ids {
 		var status string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT status FROM manager_native_requests WHERE request_id=? AND run_id=?`, id, run).Scan(&status); err != nil {
 			return err
 		}
-		unclaimed := status == "pending"
-		raw, err := json.Marshal(protocol.ManagerNativeReply{ID: id, Error: "Native process stopped; reconcile the original operation before continuing", Rejected: unclaimed})
+		if status == "pending" {
+			if err := rejectUnclaimedManagerRequest(ctx, tx, run, id, reason); err != nil {
+				return err
+			}
+			continue
+		}
+		raw, err := json.Marshal(protocol.ManagerNativeReply{ID: id, Error: reason})
 		if err != nil {
 			return err
 		}
-		next := "unknown"
-		if unclaimed {
-			next = "completed"
-		}
-		if _, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status=?,result_json=?,completion_error='Native process stopped; reconcile the original operation before continuing',completion_rejected=?,runner_acked=CASE WHEN ? THEN 1 ELSE runner_acked END WHERE request_id=?`, next, string(raw), unclaimed, unclaimed, id); err != nil {
+		if _, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='unknown',result_json=?,completion_error=?,completion_rejected=0 WHERE run_id=? AND request_id=?`, string(raw), reason, run, id); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func rejectUnclaimedManagerRequest(ctx context.Context, tx *store.Tx, run, id, reason string) error {
+	raw, err := json.Marshal(protocol.ManagerNativeReply{ID: id, Error: reason, Rejected: true})
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE manager_native_requests SET status='completed',result_json=?,completion_error=?,completion_rejected=1,runner_acked=1
+ WHERE run_id=? AND request_id=? AND status='pending'`, string(raw), reason, run, id); err != nil {
+		return err
+	}
+	_, err = reconcileRejectedManagerToolDelivery(ctx, tx, run, id)
+	return err
+}
+
+// Preserve the produced result when the original delivery is known to be rejected.
+// Store this fact before the command receipt can be retired.
+func reconcileRejectedManagerToolDelivery(ctx context.Context, tx *store.Tx, run, id string) (bool, error) {
+	result, err := tx.Exec(ctx, `UPDATE conversation_tool_uses AS u SET native_delivery_status='rejected',native_delivery_error=r.completion_error
+ FROM manager_native_requests r WHERE u.native_run_id=? AND u.native_delivery_id=? AND u.native_delivery_status='produced'
+ AND r.run_id=u.native_run_id AND r.request_id=u.native_delivery_id AND r.method='tool_result' AND r.status='completed' AND r.completion_rejected=1`, run, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }
 
 // managerNativeObservationMethod never submits input or changes execution state.
