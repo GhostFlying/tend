@@ -538,6 +538,11 @@ func finishServerDelivery(ctx context.Context, x *Exec, tx *store.Tx, id string,
 	if _, err = tx.Exec(ctx, `UPDATE server_delivery_queries SET status=?,finished_at=? WHERE query_id=?`, status, now, id); err != nil {
 		return Outcome{}, err
 	}
+	if cached == nil {
+		if err := tx.RecordChecksWaitBoardEvidence(ctx, ref); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if err := capturePRWaits(ctx, x, tx, ref); err != nil {
 		return Outcome{}, err
 	}
