@@ -395,3 +395,16 @@ func TestBothWorkerRolesExposeScopedObservation(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkerTerminalFailureRetainsTypedEvidence(t *testing.T) {
+	raw := json.RawMessage(`{"threadId":"thread","turn":{"id":"turn","status":"failed","error":{"message":"private detail","codexErrorInfo":"cyberPolicy"}}}`)
+	event := nativeRolloutEvent("thread", harness.Event{Kind: harness.EventTurnCompleted, TurnID: "turn", TurnStatus: "failed",
+		Failure: nativeFailure(json.RawMessage(`{"codexErrorInfo":"cyberPolicy"}`), false), Raw: raw})
+	var terminal struct {
+		Failure *protocol.AgentFailure `json:"failure"`
+	}
+	if err := json.Unmarshal(event.Body, &terminal); err != nil || terminal.Failure == nil || terminal.Failure.Code != "cyberPolicy" ||
+		bytes.Contains(event.Body, []byte("private detail")) {
+		t.Fatal("typed failure was lost or provider prose escaped the redaction boundary", event, err)
+	}
+}

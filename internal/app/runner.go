@@ -1245,7 +1245,11 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 			return Outcome{}, err
 		}
 	}
-	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: map[string]any{"reason": p.Reason, "failure": protocol.ParseWorkerFailureReason(p.Reason)}})
+	body := map[string]any{"reason": p.Reason}
+	if failure := protocol.ParseWorkerFailureReason(p.Reason); failure != nil {
+		body["failure"] = failure
+	}
+	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: body})
 	return Outcome{Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFailed, "task": newTaskResult(d.Task, nil)}, Events: events}, nil
 }
 
