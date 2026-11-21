@@ -229,6 +229,7 @@ type RetiredJournalWork struct {
 	Usage     []UsageCollectionCommand `json:"usage,omitempty"`
 }
 type HeartbeatResult struct {
+	MaintenanceCoverage bool                          `json:"maintenance_coverage,omitempty"`
 	RetiredWork         map[string]RetiredJournalWork `json:"retired_work,omitempty"`
 	HistoryReads        []ManagerHistoryRead          `json:"history_reads,omitempty"`
 	HistoryAcknowledged []string                      `json:"history_acknowledged,omitempty"`

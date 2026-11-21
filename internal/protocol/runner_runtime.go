@@ -38,6 +38,8 @@ type RunnerBuild struct {
 // A missing observation identifies an older, aggregate-only runner.
 type RunnerMaintenanceCoverage struct {
 	RunDeadlines map[string]int64 `json:"run_deadlines"`
+	// Recorded by the server. Runners omit it on the wire.
+	ObservedAtMillis int64 `json:"observed_at_ms,omitempty"`
 }
 
 // RunnerRuntime is an observation, not authority to renew another incarnation.

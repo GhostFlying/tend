@@ -1198,6 +1198,13 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	r.retiredWork = res.RetiredWork
 	r.mu.Unlock()
+	r.controlMu.Lock()
+	coverageChanged := r.maintenanceCoverageSupported != res.MaintenanceCoverage
+	r.maintenanceCoverageSupported = res.MaintenanceCoverage
+	r.controlMu.Unlock()
+	if coverageChanged && res.MaintenanceCoverage {
+		r.requestHeartbeat() // Report existing Run deadlines to the successor.
+	}
 	r.acceptHistoryReads(ctx, res.HistoryReads, res.HistoryAcknowledged)
 	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)

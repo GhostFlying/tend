@@ -2381,6 +2381,7 @@ export interface ExtensionSkillExclusionStatus {
  * via the `definition` "RunnerMaintenanceCoverage".
  */
 export interface RunnerMaintenanceCoverage {
+  observed_at_ms?: number;
   run_deadlines: {
     [k: string]: number | undefined;
   } | null;

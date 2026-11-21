@@ -294,8 +294,10 @@ func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff 
 		!rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart fence is not confirmed", rt.Runtime.InstanceID)
 	}
-	if j.delegated && rt.Runtime.MaintenanceCoverage == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) {
-		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has not acknowledged its local Run coverage", rt.Runtime.InstanceID)
+	scope := rt.Runtime.MaintenanceCoverage
+	if j.delegated && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) &&
+		(scope == nil || scope.ObservedAtMillis == 0 || now-scope.ObservedAtMillis >= RunnerOfflineAfter.Milliseconds()) {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has no fresh acknowledgement of its local Run coverage", rt.Runtime.InstanceID)
 	}
 	localCutoff := j.localCutoff
 	if j.delegated && rt.Runtime.MaintenanceCoverage == nil && rt.Runtime.AuthorizationID != "" {

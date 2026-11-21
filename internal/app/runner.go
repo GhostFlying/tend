@@ -1309,6 +1309,7 @@ func (a *App) RuntimeHeartbeat(ctx context.Context, p protocol.Principal, payloa
 			return err
 		}
 		if payload.Runtime != nil {
+			res.MaintenanceCoverage = slices.Contains(payload.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage)
 			c, err := instanceControl(ctx, q, host.HostID, payload.Runtime, now.UnixMilli())
 			if err != nil {
 				return err

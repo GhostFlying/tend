@@ -2676,7 +2676,7 @@ runner 协议和调度不变。见 [实施计划](plans/issue-owner-execution-pr
 
 ### D258 补充：按原执行权核对 server 重启覆盖
 
-签发 server 替换授权前，按冻结的 Run 协议、Task/action/lease 和原 journal 归属核对开放执行。协议 6 的当前租约继续获得固定覆盖，覆盖及 runner 确认后的保守截止必须容纳整个重启预算。协议 7 的固定执行权随原写入者保留；已有维护 grant 约束某个仍活跃的 Run 时，用原 grant 和期限计算覆盖。接单 runner 保持维护准入确认，仍有活执行的收尾 runner 确认各自的维护控制。 runner 的维护 ACK 可附带本地逐 Run 保守截止，包括退出上一轮维护后仍保留的 grant。只报告聚合截止的旧 runner 以该截止作为有潜在固定授权的执行上限，新的续租 grant 不能遮蔽这份证据。
+签发 server 替换授权前，按冻结的 Run 协议、Task/action/lease 和原 journal 归属核对开放执行。协议 6 的当前租约继续获得固定覆盖，覆盖及 runner 确认后的保守截止必须容纳整个重启预算。协议 7 的固定执行权随原写入者保留；已有维护 grant 约束某个仍活跃的 Run 时，用原 grant 和期限计算覆盖。接单 runner 保持维护准入确认，仍有活执行的收尾 runner 确认各自的维护控制。 runner 的维护 ACK 可附带本地逐 Run 保守截止，包括退出上一轮维护后仍保留的 grant。 心跳完成新旧 Server 的兼容协商。同一实例、代次、journal、控制修订和授权身份的 Hello 可以沿用最近的逐 Run 证据，保留其原观测时间。只报告聚合截止的旧 runner 以该截止作为有潜在固定授权的执行上限，新的续租 grant 不能遮蔽这份证据。
 
 已 lapsed 的 unknown Run 需要可验证的 journal 归属或原隔离凭据。继任 server 保留原 Run、原 lease、工作区、物理容量和待对账的外部请求。重启资格不会补记退出或释放。无归属、活授权冲突和越过协议窗口仍拒绝。见 [实施计划](plans/server-restart-journal-coverage.md)。
 

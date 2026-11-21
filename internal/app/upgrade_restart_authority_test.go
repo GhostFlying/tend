@@ -343,3 +343,64 @@ func TestUpgradeKeepsUncoveredRenewableRunLapsedAfterAuthorization(t *testing.T)
 		t.Fatal("original Run reacquired renewal beyond the prepared coverage")
 	}
 }
+
+func TestUpgradePreservesFreshScopedCoverageAcrossHello(t *testing.T) {
+	ctx := t.Context()
+	h, c, rt := restartAuthorityFixture(t, "original-journal", protocol.CurrentRunnerProtocol)
+	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage)
+	original := claimRestartWork(t, h, rt, "delegated work retained on the same runner")
+	if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256})
+	ack := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+	ack.Capabilities = rt.Capabilities
+	ack.Sequence++
+	firstSeen := h.clock.Now().UnixMilli()
+	deadline := h.clock.Now().Add(4 * time.Minute).UnixMilli()
+	ack.AuthorizationID = "original-grant"
+	ack.AuthorizationDeadlineMillis = deadline
+	ack.MaintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: map[string]int64{original.RunID: deadline}}
+	response, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack})
+	if err != nil || !response.MaintenanceCoverage {
+		t.Fatal("heartbeat did not negotiate scoped observation", response, err)
+	}
+	hello := ack
+	hello.MaintenanceCoverage = nil
+	reportHello := func() {
+		t.Helper()
+		hello.Sequence++
+		op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"},
+			protocol.HelloPayload{Runtime: &hello, WorkspaceProtocol: 1, Held: []protocol.HeldRun{{
+				RunID: original.RunID, LeaseID: original.LeaseID, Observed: protocol.RunRunning,
+			}}}, nil), Hello{})
+		if op.Error != nil {
+			t.Fatal(op.Error)
+		}
+	}
+	h.clock.Advance(15 * time.Second)
+	reportHello()
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		rt, err := store.GetHostRuntime(ctx, tx.Q(), "linux-1")
+		if err != nil {
+			return err
+		}
+		scope := rt.Runtime.MaintenanceCoverage
+		if scope == nil || scope.RunDeadlines[original.RunID] != deadline || scope.ObservedAtMillis != firstSeen || rt.LastHeartbeatAt <= firstSeen {
+			t.Errorf("Hello erased or refreshed the scoped ACK: %+v", scope)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b := restartTestBinding(c, "next")
+	if grant, err := h.app.ServerUpgradeAuthorize(ctx, b); err != nil || !grant.Allowed ||
+		grant.ExpiresAt.UnixMilli() != deadline-upgradeRead(h).RestartMillis {
+		t.Fatal("Hello blocked or exceeded the original verified cutoff", grant, err)
+	}
+	h.clock.Advance(RunnerOfflineAfter)
+	reportHello()
+	if grant, err := h.app.ServerUpgradeAuthorize(ctx, b); protocol.CodeOf(err) != protocol.CodeInvalidTransition || grant.Allowed {
+		t.Fatal("Hello refreshed scope without fresh evidence", grant, err)
+	}
+}

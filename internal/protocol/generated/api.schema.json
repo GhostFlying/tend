@@ -17874,6 +17874,9 @@
     "RunnerMaintenanceCoverage": {
       "additionalProperties": false,
       "properties": {
+        "observed_at_ms": {
+          "type": "integer"
+        },
         "run_deadlines": {
           "anyOf": [
             {

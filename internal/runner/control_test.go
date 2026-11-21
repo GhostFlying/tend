@@ -439,3 +439,67 @@ func TestMaintenanceObservationKeepsOriginalDelegatedDeadline(t *testing.T) {
 		t.Fatal("watchdog did not observe the deadline that the runtime reported")
 	}
 }
+
+func TestHeartbeatLearnsMaintenanceCoverageOnExistingConnection(t *testing.T) {
+	r := controlRunner(t)
+	r.runnerProtocol = protocol.CurrentRunnerProtocol
+	r.cfg.IDs = testkit.NewIDGen(testkit.NewClock(), 1)
+	r.cfg.Log = slog.Default()
+	r.c.log = r.cfg.Log
+	support := make(chan bool, 1)
+	sent := make(chan bool, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var env protocol.Envelope
+		if err := json.NewDecoder(request.Body).Decode(&env); err != nil {
+			t.Error(err)
+			return
+		}
+		var result any
+		switch env.Operation {
+		case protocol.OpRunnerHello:
+			var hello protocol.HelloPayload
+			if err := json.Unmarshal(env.Payload, &hello); err != nil || hello.Runtime.MaintenanceCoverage != nil {
+				t.Error("Hello must retain its older wire shape", err)
+			}
+			result = protocol.HelloResult{LeaseTTLMillis: 60000, ProtocolMax: protocol.CurrentRunnerProtocol}
+		case protocol.OpRunnerHeartbeat:
+			var heartbeat protocol.HeartbeatPayload
+			if err := json.Unmarshal(env.Payload, &heartbeat); err != nil ||
+				!slices.Contains(heartbeat.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) {
+				t.Error("runner did not advertise maintenance coverage", err)
+				return
+			}
+			sent <- heartbeat.Runtime.MaintenanceCoverage != nil
+			negotiated := <-support
+			result = protocol.HeartbeatResult{LeaseTTLMillis: 60000, MaintenanceCoverage: negotiated}
+		default:
+			t.Errorf("unexpected operation %s", env.Operation)
+		}
+		data, _ := json.Marshal(result)
+		if err := json.NewEncoder(w).Encode(rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: data}}); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	r.c.base, r.c.http = server.URL, server.Client()
+	ctx := t.Context()
+	if err := r.helloLocked(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := r.instanceID
+	for _, state := range []struct{ support, sent bool }{{false, false}, {true, false}, {true, true}} {
+		support <- state.support
+		r.heartbeat(ctx)
+		select {
+		case got := <-sent:
+			if got != state.sent {
+				t.Fatal("wrong evidence for server negotiation", state, got)
+			}
+		default:
+			t.Fatal("no heartbeat reached the server")
+		}
+	}
+	if r.instanceID != before || !r.maintenanceCoverageSupported {
+		t.Fatal("successor heartbeat changed runner identity or failed to negotiate")
+	}
+}
