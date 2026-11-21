@@ -11,6 +11,12 @@ strict `check`。开启 intake 前用试点 PR 确认规则与实际检查一致
 先确认实际 head、必需检查及合入授权，再以 GitHub rebase & merge 合入。
 如果 GitHub 拒绝合并有冲突的候选，解决冲突并重新检查。
 
+`main` 的必需状态 `main-route` 允许仓库自己的提升 PR 或有 `skip_integration`
+标签的例外 PR。添加和移除该标签会单独刷新门禁。合入例外 PR 之前核对当前标签、
+对应的明确授权和门禁结果。提升收据和两种路径的全量验证仍由 strict `check` 检查。
+如果已有 PR 缺少该状态，维护者可从 `main` 运行 `main-route.yml` 并传入当前
+PR head 的完整 SHA。
+
 ## 维护者操作
 
 从可信的仓库 checkout 执行，`origin` 指向 GitHub，Git 使用维护者现有身份。

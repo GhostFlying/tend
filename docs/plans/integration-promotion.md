@@ -30,3 +30,23 @@ Refs: D265。
 
 提升过程只使用 Git、GitHub CLI 和 Python 标准库。main 继续保护线性历史、
 禁止直推和强推、要求最新基线和完整 CI；发布和生产安装仍是独立动作。
+
+## main 的直达 PR 门禁
+
+在已有 strict `check` 之外增加轻量必需状态 `main-route`。受信任的
+`pull_request_target` 工作流只执行目标仓库 `main` 上的代码。它重新读取 PR，
+为当前 head 更新状态。仓库自己的提升分支沿用原 `check` 的收据验证，
+其他直达 main 的 PR 要有 `skip_integration`。同一 head 对应多个开放的
+main PR 时暂停放行，以免把一个 PR 的标签借给另一个 PR。
+
+开启、重新开启、关闭、提交更新、进出 main、添加和移除指定标签会更新门禁。
+提交更新时同时核对旧 head 与新 head。没有开放 main PR 的旧 head 会清除放行状态。
+同一 head 的发布按 SHA 串行。
+维护者可从 main 使用当前 head SHA 手动补查。
+门禁与全量 CI 分开，标签变化无需重跑全量。
+标签只代表仓库操作约定中的用户授权。共享 GitHub 凭据的 Agent 按 AGENTS.md
+核对实际授权后使用标签，合入前也重新核对标签和最新门禁。
+
+先测试提升、授权标签、撤标、同 SHA 多 PR 和无关目标。通过 integration
+提升相关代码后，先用开放的 main PR 确认真实状态，再把 `main-route`
+加入所需检查并读回原 strict `check`。暂缓规则启用时保留原门禁。
