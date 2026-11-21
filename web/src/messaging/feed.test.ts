@@ -298,3 +298,67 @@ test("hiding during a queued SSE read lets resumed stream replay the read event"
     await feed.stop();
   }
 });
+
+test.each([1, 8])(
+  "forward catch-up ignores %i off-page invalidations and refreshes the visible input",
+  async (oldCount) => {
+    const retained = { message_id: "visible", sequence: 11, direction: "input", agent_read_at: 0 };
+    const unseen = { message_id: "unseen", sequence: 2, direction: "input", agent_read_at: 25 };
+    const visibleRead = { ...retained, agent_read_at: 25 };
+    const fresh = { message_id: "new", sequence: 12, direction: "publication" };
+    const reads: string[] = [];
+    let emit!: (frame: string) => void;
+    const feed = new MessagingFeed({
+      noteAlive() {},
+      get: (async (path: string) => {
+        reads.push(path);
+        if (path.includes("/unseen-")) {
+          const message_id = path.split("/").at(-1)!;
+          return {
+            ...unseen,
+            message_id,
+            sequence: Number(message_id.slice("unseen-".length)) + 1,
+          };
+        }
+        if (path.endsWith("/visible")) return visibleRead;
+        if (path.includes("latest")) return { items: [retained], next: 11, more: true };
+        return { items: [fresh], next: 12, more: false };
+      }) as ApiClient["get"],
+      async openStream(_path, signal) {
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              emit = (frame) => controller.enqueue(new TextEncoder().encode(frame));
+              emit('event: start\ndata: {"event_seq":1}\n\n');
+              signal?.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+        );
+      },
+    });
+    const itemPath = "/api/v1/messaging/messages/";
+    const ledger = (seq: number, kind: string, id: string) =>
+      "event: ledger\ndata: " +
+      JSON.stringify({ event_seq: seq, kind, object_type: "message", object_id: id }) +
+      "\n\n";
+    feed.start();
+    try {
+      await vi.waitFor(() => expect(feed.state.get().items).toEqual([retained]));
+      emit(
+        ledger(2, "messaging.published", "new") +
+          Array.from({ length: oldCount }, (_, n) =>
+            ledger(3 + n, "messaging.read", "unseen-" + n),
+          ).join("") +
+          ledger(3 + oldCount, "messaging.read", "visible"),
+      );
+      await vi.waitFor(() => expect(feed.state.get().items.at(-1)?.message_id).toBe("new"));
+      expect.soft(reads.slice(2)).toEqual([itemPath + "visible"]);
+      expect
+        .soft(feed.state.get().items.find((m) => m.message_id === "visible")?.agent_read_at)
+        .toBe(25);
+      expect(feed.state.get().items).toEqual([visibleRead, fresh]);
+    } finally {
+      await feed.stop();
+    }
+  },
+);
