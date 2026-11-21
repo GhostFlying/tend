@@ -147,8 +147,8 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 
 ## 4. 测试
 
-- `make check` 默认按实际 diff、Go 生产/测试反向依赖与跨组件契约选择受影响验证；`CHECK_BASE=<ref>` 指定基线，`make test-plan` 查看选择理由。纯文档不运行无关业务测试，纯 Web 保留完整 Web 和 CI 浏览器验证，Go 改动保留受影响包全部动态发现的 race 根。协议、迁移、依赖、构建/验证基础设施、未知输入及 main/release 使用完整兜底；`CHECK_MODE=full` 可显式选择全量。PR CI 使用绑定最终来源的同一影响计划选择作业；只有计划明确排除的 job 可以跳过，必要 job 的缺失、失败、取消或跳过仍不通过。Refs: `docs/plans/affected-validation.md`。
-- 允许本地检查尚未结束时先 commit、push 并创建 PR，让 PR CI 与本地受影响验证并行；描述如实标注计划、实际执行、缓存、排除理由与待完成项。合入前本地与 CI 的必要验证必须覆盖最终候选和基线；来源改变重新判断适用性，不机械重复不变候选。本地及 PR CI 默认保留 Go 原生结果缓存（`TEST_COUNT=0`）；需要新鲜回归、性能测量或实际逐例执行证明时显式 `TEST_COUNT=1`。JSON 原件区分 cached 与本次执行，缓存命中不算本次重新执行或性能测量。
+- `make check` 默认按实际 diff、Go 生产/测试反向依赖与跨组件契约选择受影响验证；`CHECK_BASE=<ref>` 指定基线，`make test-plan` 查看选择理由。纯文档不运行无关业务测试，纯 Web 保留完整 Web 验证，Go 改动保留受影响包全部动态发现的 race 根。协议、迁移、依赖、构建/验证基础设施、未知输入及 main/release 使用完整兜底；`CHECK_MODE=full` 可显式选择全量。指向 `integration` 的 PR CI 运行构建和 P0，指向 `main` 的 PR 和 main/release CI 运行完整计划。必要 job 的缺失、失败、取消或跳过仍不通过。Refs: `docs/plans/affected-validation.md`、`docs/operations/integration-promotion.md`。
+- 允许本地检查尚未结束时先 commit、push 并创建 PR，让 PR CI 与本地受影响验证并行；描述如实标注计划、实际执行、缓存、排除理由与待完成项。合入前本地与 CI 的必要验证必须覆盖当前 PR 候选及其采用的基线；来源改变重新判断适用性，不机械重复不变候选。合入 `integration` 时目标前移允许复用当前 PR head 的有效验证，实际集成组合在提升时跑全量。本地及全量 CI 默认保留 Go 原生结果缓存（`TEST_COUNT=0`），集成 P0 每次执行；需要新鲜回归、性能测量或实际逐例执行证明时显式 `TEST_COUNT=1`。JSON 原件区分 cached 与本次执行，缓存命中不算本次重新执行或性能测量。
 - 完整本地检查复用 `make check` 的有效 CPU 自动预算（`CHECK_JOBS=0`），不要在外部启动器无理由固定为串行。多 CPU 下显式 `CHECK_JOBS=1` 必须设置 `CHECK_SERIAL_REASON` 记录原因，例行资源例外由执行者据实际预算决定，无需另索审批。八 CPU 的默认预算是两组并行、App/suite 各两片、子进程 GOMAXPROCS=2、包并行=1，E2E 独占；其他容量自动调整。启动时核对预算行，用阶段起止时间核实重叠。长检查向现有协调者报告当前 phase、原逐例日志中的 case 与 elapsed，不新增巡检计时器、不自动重跑；不删除功能/安全断言、不关闭 race。业务时间用注入时钟，fixture 初始化与功能阶段分开，wall-clock 只作可诊断的有限防卡死边界；性能 SLA 需明确环境。见 `docs/plans/test-time-semantics.md`。
 - 单元测试默认不联网、不调用模型，使用 `testkit` 替身。
 - 需要真实 traex 或 tailnet 的集成测试使用 build tag `integration`，通过 `make it` 显式运行；测试模型使用 `TEND_TRAEX_MODEL`（默认 GPT-5.6-Sol）。
@@ -168,10 +168,9 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 - body 用英文详细描述这次做了什么、为什么这样做、引入了哪些约束；涉及设计决策时引用编号（如 `Refs: D17`），涉及计划项时引用编号（如 `Plan: B3`）。
 - body 不写跑了哪些测试、多少测试、测试结果；检查进展与结果记录在 PR 描述中，合入前须满足第 4 节的测试门槛。
 - 每个 commit 是一个可以独立构建和测试的原子变更；允许按第 4 节的并行流程在提交后完成检查，重构和行为变化分开提交。
-- 所有改动都通过 PR 合入：从最新的 `main` 拉短期分支（`<type>/<topic>`），推送后开 PR。CI（`.github/workflows/ci.yml`）按实际影响选择，main/release 保持完整覆盖及交叉编译；required check 校验来源绑定的计划及全部必要结果。
-- 每个 PR 合并前都要经过独立 review：在 PR 分支上运行 `codex review --base main -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`。review 意见由提交者逐条判断：确实的缺陷和值得做的改进在合并前修掉；过度防御的意见（为假设性场景加防护、超出本次范围的扩展）可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。合入前确认本地影响计划、独立 review 和必要 CI 均覆盖最终候选/基线；候选或基线变更后重新计算影响并评估已有证据，修改较大时重新 review。不增加永久检查账本或额外审批步骤。
-- GitHub 只允许受保护的 rebase merge，`main` 禁止直接 push 和 force push。开发、审阅或等待合入授权期间，PR 仅落后于 `main` 时保留现有候选和验证；实际冲突已阻碍审阅或验证时可以先解决。
-- 准备合入时，先确认授权和其他合入条件允许推进，再读取当前 `main` 和 PR head。`main` 已是 head 的祖先且必要验证仍适用时，直接使用受保护的 rebase merge。只有落后才 rebase 并推送，验证最终组合及必需 CI，按现有规则判断审阅证据和候选批准是否仍适用。合入前再次核对 head 和 `main`；如 `main` 再次前移，重新判断并继续遵守 GitHub strict 检查。
+- 所有改动都通过 PR 合入。集成流程启用后，普通改动从最新的 `integration` 拉短期分支并明确把 PR 指向 `integration`。本地指定 `CHECK_BASE=origin/integration`，全量提升和紧急修复 PR 指向 `main`。启用前普通改动以 `main` 为目标。
+- 每个 PR 合并前都要经过独立 review，在 PR 分支上运行 `codex review --base <target-ref> -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`，其中 target-ref 是这个 PR 的实际目标分支。review 意见由提交者逐条判断。确实的缺陷和值得做的改进在合并前修掉，超出本次范围的扩展可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。需要更新候选时，重新计算影响并评估已有证据，修改较大时重新 review。
+- GitHub 只允许受保护的 rebase merge，`integration` 和 `main` 禁止直接 push 和 force push。合入前核对授权、实际 PR head、目标分支及必需检查。`integration` 允许基线落后且 GitHub 能 rebase 的候选直接合入。GitHub 无法 rebase 时，解决冲突并验证新候选。`main` 保留 strict，候选落后时更新并验证最终组合。提升批次按 [集成分支操作说明](docs/operations/integration-promotion.md) 推进。
 - PR 来源标记：仅当 PR 由真实的 Tend 受管 Issue/Task 推进产出时，给该 PR 添加 GitHub label `tend`。是否受管以实际的 Issue/Task 上下文为准，不凭目录名、分支名或 GitHub 作者账号判断；外部维护（如 Codex 直接维护）、人类直接提交的 PR 以及其他仓库的 PR 都不标记。
 - `tend` label 不存在时用 `gh label create tend` 创建一次，已存在则直接复用，不重复创建、不改动其他 label。新建 PR 可在 `gh pr create` 时带 `--label tend`；已开放的真实受管 PR 经原负责人确认后用 `gh pr edit --add-label tend` 补标，并用 `gh pr view` 读回。label 只用于来源辨识，不构成审阅或合入授权。
 - 远程：GitHub，公开仓库。
