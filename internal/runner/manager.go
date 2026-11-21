@@ -370,7 +370,10 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 			}
 			return nil
 		}
-		return r.flushManagerEvents(ctx, as)
+		if event.Disconnected {
+			return r.flushManagerEvents(ctx, as)
+		}
+		return r.deliverActiveManagerEvents(ctx, as)
 	}
 	defer func() {
 		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(lifetime), r.cfg.RequestTimeout)
@@ -408,7 +411,7 @@ func (r *Runner) managerNative(ctx, lifetime context.Context, as protocol.Assign
 	}
 	// The asynchronous sender includes older facts in the same ordered stream.
 	if !as.EventSync {
-		if err = r.flushManagerEvents(ctx, as); err != nil {
+		if err = r.deliverActiveManagerEvents(liveSession, as); err != nil {
 			return err
 		}
 	}
@@ -720,7 +723,7 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 // A completed native call retains its exact reply while the connection is
 // unavailable. Keep the original session alive for its already admitted turn.
 func (r *Runner) deliverActiveManagerReceipt(ctx, liveSession context.Context, as protocol.Assignment, env *protocol.Envelope) error {
-	if !as.EventSync || env.Operation != protocol.OpManagerNativeReply {
+	if env.Operation != protocol.OpManagerNativeReply {
 		return r.sendManagerReceipt(ctx, as, env)
 	}
 	var reply protocol.ManagerNativeReply
@@ -737,18 +740,32 @@ func (r *Runner) deliverActiveManagerReceipt(ctx, liveSession context.Context, a
 		}
 	}
 
-	for {
-		err := r.sendManagerReceipt(liveSession, as, env)
-		if liveSession.Err() != nil || err == nil ||
-			(!errors.Is(err, context.DeadlineExceeded) && !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome) {
+	return r.retryActiveManagerDelivery(liveSession, func() error {
+		return r.sendManagerReceipt(liveSession, as, env)
+	})
+}
+
+func (r *Runner) deliverActiveManagerEvents(ctx context.Context, as protocol.Assignment) error {
+	return r.retryActiveManagerDelivery(ctx, func() error {
+		return r.flushManagerEvents(ctx, as)
+	})
+}
+
+// Only the event journal and completed native reply delivery use this loop.
+// The current execution context still owns the lease and stop boundary.
+func (r *Runner) retryActiveManagerDelivery(ctx context.Context, deliver func() error) error {
+	for ctx.Err() == nil {
+		err := deliver()
+		if err == nil || !errors.Is(err, context.DeadlineExceeded) && !isRetryable(err) && protocol.CodeOf(err) != protocol.CodeUnknownOutcome {
 			return err
 		}
 		select {
-		case <-liveSession.Done():
-			return context.Cause(liveSession)
+		case <-ctx.Done():
+			return context.Cause(ctx)
 		case <-time.After(r.cfg.RetryDelay):
 		}
 	}
+	return context.Cause(ctx)
 }
 
 // A close proof may reach the server before the final uploaded event has
@@ -823,7 +840,11 @@ func (r *Runner) flushManagerEvents(ctx context.Context, as protocol.Assignment)
 		if as.EventSync {
 			err = r.sendEvent(ctx, as, env)
 		} else {
-			_, err = r.send(ctx, runCredential(as), env)
+			var receipt protocol.Operation
+			receipt, err = r.send(ctx, runCredential(as), env)
+			if err == nil && receipt.Status != protocol.OpSucceeded {
+				err = protocol.Errorf(protocol.CodeUnknownOutcome, "original manager event receipt is not confirmed")
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("deliver original manager event %s: %w", env.RequestID, err)
