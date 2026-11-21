@@ -338,6 +338,11 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if err := tx.CompleteManagerNative(ctx, run, p.ID, method, payload, p, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
+		if method == "close" && p.Error == "" && !p.Rejected {
+			if err := settleManagerProjectedTools(ctx, x, tx, run); err != nil {
+				return Outcome{}, err
+			}
+		}
 		if method == "close" && p.Error == "" && !p.Rejected && len(processText) != 0 {
 			if err := retainManagerCloseProcessText(ctx, tx, run, p.LastSequence, processText); err != nil {
 				return Outcome{}, err
@@ -428,6 +433,9 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, err
 		}
 		if err := tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, p.LastSequence, x.Now.UnixMilli()); err != nil {
+			return Outcome{}, err
+		}
+		if err := settleManagerProjectedTools(ctx, x, tx, run); err != nil {
 			return Outcome{}, err
 		}
 		return finishStoppedManager(ctx, x, tx, run, p.Reason, p.LastSequence)
@@ -1061,5 +1069,8 @@ func recordManagerPhysicalStop(ctx context.Context, x *Exec, tx *store.Tx, run s
 	if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&last); err != nil {
 		return err
 	}
-	return tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, last, x.Now.UnixMilli())
+	if err := tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, last, x.Now.UnixMilli()); err != nil {
+		return err
+	}
+	return settleManagerProjectedTools(ctx, x, tx, run)
 }

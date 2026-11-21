@@ -10,6 +10,16 @@ CREATE TABLE manager_event_apply_failures (
 ) STRICT;
 CREATE INDEX manager_event_apply_retry ON manager_event_apply_failures(retry_at) WHERE retry_at>0;
 
+-- Starts recovered while the original close is unresolved may still need a
+-- status update when that same Run supplies its physical stop proof.
+CREATE TABLE manager_projected_running_tools (
+ run_id TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ message_id TEXT NOT NULL REFERENCES conversation_messages(message_id) ON DELETE CASCADE,
+ PRIMARY KEY(run_id,seq),
+ FOREIGN KEY(run_id,seq) REFERENCES manager_native_events(run_id,seq) ON DELETE CASCADE
+) STRICT;
+
 -- A later stop or tool-result receipt can satisfy a parked original event.
 -- The original event will still be rechecked before applying anything.
 CREATE TRIGGER wake_manager_event_recovery_on_stop

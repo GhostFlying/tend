@@ -318,14 +318,26 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 	if n.Tool != nil {
 		p := recordToolUsePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Tool: n.Tool.Name, Input: n.Tool.Input, Output: n.Tool.Output, Status: n.Tool.Status}
 		command := RecordToolUse{DeliveryTurn: root}
-		if n.Kind == "item_started" && p.Status == protocol.ToolRunning {
+		runningStart := n.Kind == "item_started" && p.Status == protocol.ToolRunning
+		if runningStart {
 			_, stoppedThrough, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), in.run)
 			if err != nil {
 				return Outcome{}, err
 			}
 			command.interruptRunning = stopped && stoppedThrough >= in.sequence
 		}
-		return applyManagerProjectionMessage(ctx, &projection, tx, p, command)
+		out, err := applyManagerProjectionMessage(ctx, &projection, tx, p, command)
+		if err != nil || !runningStart || command.interruptRunning {
+			return out, err
+		}
+		// Background tool records settle as interrupted when published.
+		// Remember any already visible, running tool in the same transaction
+		// that applies its original start.
+		_, err = tx.Exec(ctx, `INSERT INTO manager_projected_running_tools(run_id,seq,message_id)
+ SELECT ?,?,message_id FROM conversation_tool_uses
+ WHERE thread_id=? AND turn_id=? AND item_id=? AND status='running'`,
+			in.run, in.sequence, e.ThreadID, n.TurnID, n.ItemID)
+		return out, err
 	}
 	p := recordAgentMessagePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Body: n.Text, Status: protocol.AssistantCompleted}
 	return applyManagerProjectionMessage(ctx, &projection, tx, p, RecordAgentMessage{DeliveryTurn: root, Reconciled: true})
@@ -420,6 +432,28 @@ func requireManagerProjectionStop(ctx context.Context, q store.Querier, in manag
 	if err == nil && (!stopped || id == "" || sequence < in.sequence) {
 		return errManagerProjectionUnsupported
 	}
+	return err
+}
+
+func settleManagerProjectedTools(ctx context.Context, x *Exec, tx *store.Tx, run string) error {
+	_, through, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), run)
+	if err != nil || !stopped {
+		return err
+	}
+	now := x.Now.UnixMilli()
+	ids, err := store.FollowupIDs(ctx, tx.Q(), `UPDATE conversation_tool_uses SET status='interrupted',updated_at=?
+ WHERE status='running' AND message_id IN (
+  SELECT message_id FROM manager_projected_running_tools WHERE run_id=? AND seq<=?
+ ) RETURNING message_id`, now, run, through)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := insertToolUseEvent(ctx, tx, x.IDs, id, protocol.ToolInterrupted, now); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM manager_projected_running_tools WHERE run_id=? AND seq<=?`, run, through)
 	return err
 }
 
