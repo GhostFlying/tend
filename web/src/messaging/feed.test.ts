@@ -174,3 +174,44 @@ test("unrelated work adds no reads and a real publication only reads forward", a
     await feed.stop();
   }
 });
+
+test("a read receipt received during the initial page survives its stale snapshot", async () => {
+  const message = { message_id: "first", sequence: 1, direction: "input", agent_read_at: 0 };
+  let emit!: (value: string) => void;
+  let completePage!: () => void;
+  const snapshot = new Promise((resolve) => {
+    completePage = () => resolve({ items: [message], next: 1, more: false });
+  });
+  const get = vi.fn(async (path: string) =>
+    path.endsWith("/first") ? { ...message, agent_read_at: 1000 } : snapshot,
+  );
+  const noteAlive = vi.fn();
+  const feed = new MessagingFeed({
+    get: get as ApiClient["get"],
+    noteAlive,
+    async openStream(_path, signal) {
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            emit = (text) => controller.enqueue(new TextEncoder().encode(text));
+            emit('event: start\ndata: {"event_seq":1}\n\n');
+            signal?.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+      );
+    },
+  });
+  feed.start();
+  try {
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    emit(
+      'event: ledger\ndata: {"event_seq":2,"kind":"messaging.read","object_type":"message","object_id":"first"}\n\n',
+    );
+    await vi.waitFor(() => expect(noteAlive).toHaveBeenCalledTimes(2));
+    completePage();
+    await vi.waitFor(() => expect(feed.state.get().items[0]?.agent_read_at).toBe(1000));
+  } finally {
+    completePage();
+    await feed.stop();
+  }
+});
