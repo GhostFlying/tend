@@ -752,3 +752,39 @@ func TestProviderJSONRootFailureClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestIndependentReviewTerminalFailureWaitsForAnOwnerDecision(t *testing.T) {
+	f, w, a := failedWorker(t)
+	w.spec.Spec = json.RawMessage(`{"review_delivery_id":"original-pr"}`)
+	a.RootTurn = &RootTurn{Version: 1, Source: "native-api", PaneKey: a.PaneKey, LaunchID: "original-launch",
+		SessionID: a.ProviderSession.ID, TurnID: "original-turn", StartedAt: w.st.Turn, ObservedAt: 200,
+		State: "failed", Operations: "settled", ErrorCode: "rate_limit_exceeded", Retryable: true}
+	got, ok := errors.AsType[*harness.TerminalWorkerFailure](w.recoverFailure(t.Context(), *a))
+	if !ok || got.Evidence.Code != a.RootTurn.ErrorCode || w.st.Recovery != nil ||
+		f.orca.count("terminal send", nil) != 0 || f.orca.count("agent launch", nil) != 0 {
+		t.Fatal("independent review restarted inside the failed Run", got, w.st.Recovery)
+	}
+}
+
+func TestPreboundReviewTerminalFailureWaitsForAnOwnerDecision(t *testing.T) {
+	f, w, a := failedWorker(t)
+	w.spec.Spec = json.RawMessage(`{"deliverables":["report"]}`)
+	w.spec.ReadContext = func(_ context.Context, q protocol.IssueMaterialsQuery) (protocol.RunContext, error) {
+		if q.Kind != "reviews" {
+			t.Fatal(q)
+		}
+		return protocol.RunContext{TaskID: "original-task", Materials: protocol.IssueMaterials{
+			SharedReviews: &protocol.SharedDeliveryReviewPage{Items: []protocol.SharedDeliveryReview{{
+				Rounds: []protocol.SharedDeliveryReviewRound{{TaskID: "original-task"}},
+			}}},
+		}}, nil
+	}
+	a.RootTurn = &RootTurn{Version: 1, Source: "native-api", PaneKey: a.PaneKey, LaunchID: "original-launch",
+		SessionID: a.ProviderSession.ID, TurnID: "original-turn", StartedAt: w.st.Turn, ObservedAt: 200,
+		State: "failed", Operations: "settled", ErrorCode: "rate_limit_exceeded", Retryable: true}
+	got, ok := errors.AsType[*harness.TerminalWorkerFailure](w.recoverFailure(t.Context(), *a))
+	if !ok || got.Evidence.Code != a.RootTurn.ErrorCode || w.st.Recovery != nil ||
+		f.orca.count("terminal send", nil) != 0 || f.orca.count("agent launch", nil) != 0 {
+		t.Fatal("prebound reviewer restarted within the failed Run", got, w.st.Recovery)
+	}
+}

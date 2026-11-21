@@ -64,7 +64,8 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if w.spec.IndependentReview() {
+	independent, err := w.spec.IndependentReview(ctx)
+	if independent || err != nil {
 		if validRootTurn(a, w.st.Turn) && a.RootTurn.State == "failed" && a.RootTurn.Operations == "settled" {
 			return &harness.TerminalWorkerFailure{Evidence: protocol.AgentFailure{Code: a.RootTurn.ErrorCode}}
 		}
@@ -104,7 +105,6 @@ func (w *worker) recoverFailure(ctx context.Context, a Agent) error {
 		return errors.New("orca: the worker's root turn failed; automatic recovery unavailable or exhausted")
 	}
 	var fact failedTurn
-	var err error
 	if a.RootTurn != nil {
 		fact, err = nativeFailedTurn(a, w.st.Turn)
 		// Context reconstruction still requires the same turn's full transcript.
