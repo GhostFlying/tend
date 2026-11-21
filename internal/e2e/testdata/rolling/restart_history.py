@@ -132,7 +132,8 @@ def exercise(root, old, renewal_runner, first, second, seed):
         cli("login", "--server", "http://" + address)
         cli("host", "set-maintenance", "compat", "--data", '{"mode":"maintenance"}')
         eventually("renewal-bound runner acknowledged closed admission", lambda: maintenance_confirmed("maintenance"), [active])
-        cli("cancel", live_task, "--data", "{}")
+        revision, = rows("select control_revision from tasks where task_id=?", (live_task,))[0]
+        cli("cancel", live_task, "--revision", str(revision), "--data", "{}")
         eventually("the original protocol 6 worker stopped and released its lease",
                    lambda: snapshot(live_task)[0][2] == "released", [active])
         assert not snapshot(queued_task)
