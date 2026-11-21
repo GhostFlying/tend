@@ -362,3 +362,49 @@ test.each([1, 8])(
     }
   },
 );
+
+test("shared turn changes refresh both loaded inputs by ID", async () => {
+  const original = { message_id: "original", sequence: 2, processing: "processing" };
+  const answer = { message_id: "answer", sequence: 3, processing: "processing" };
+  const get = vi.fn(async (path: string) => {
+    if (path.endsWith("/original")) return { ...original, processing: "needs_review" };
+    if (path.endsWith("/answer")) return { ...answer, processing: "needs_review" };
+    return { items: [original, answer], next: 3, more: true };
+  });
+  let emit!: (data: string) => void;
+  const feed = new MessagingFeed({
+    get: get as ApiClient["get"],
+    noteAlive() {},
+    async openStream(_path, signal) {
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            emit = (data) => controller.enqueue(new TextEncoder().encode(data));
+            emit('event: start\ndata: {"event_seq":1}\n\n');
+            signal?.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+      );
+    },
+  });
+  feed.start();
+  try {
+    await vi.waitFor(() => expect(feed.state.get().items).toHaveLength(2));
+    emit(
+      'event: ledger\ndata: {"event_seq":2,"object_type":"logical_turn","object_id":"turn","kind":"messaging.turn_processing","message_ids":["off-page","original","answer"]}\n\n',
+    );
+    await vi.waitFor(() =>
+      expect(feed.state.get().items.map((m) => m.processing)).toEqual([
+        "needs_review",
+        "needs_review",
+      ]),
+    );
+    expect(get.mock.calls.map(([path]) => path)).toEqual([
+      "/api/v1/messaging/messages?latest=1",
+      "/api/v1/messaging/messages/original",
+      "/api/v1/messaging/messages/answer",
+    ]);
+  } finally {
+    await feed.stop();
+  }
+});

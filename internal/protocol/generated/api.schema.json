@@ -13322,6 +13322,12 @@
         "kind": {
           "type": "string"
         },
+        "message_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "object_id": {
           "type": "string"
         },

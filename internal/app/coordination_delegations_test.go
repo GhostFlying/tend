@@ -367,6 +367,11 @@ func TestClarificationInheritsDelegationFailureAndItsCorrection(t *testing.T) {
 				if err != nil || state.Status != "needs_review" {
 					t.Fatal(state, err)
 				}
+				original, err := h.app.MessagingMessage(t.Context(), id)
+				if err != nil || original.Processing != "needs_review" {
+					t.Fatalf("original input after blocked settlement = %q, err = %v", original.Processing, err)
+				}
+				assertMessagingTurnRefresh(t, h, state.ID, 2)
 			}
 		})
 	}
