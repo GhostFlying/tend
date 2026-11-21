@@ -50,6 +50,7 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	now := x.Now.UnixMilli()
+	prWaitEvidence := slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryPRWaitEvidence)
 	var selected *store.DeliveryObservationRow
 	var selectedDelivery protocol.IssueDelivery
 	var selectedItem protocol.WorkItem
@@ -89,6 +90,15 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 					return Outcome{}, err
 				}
 				if !waiting {
+					continue
+				}
+			}
+			if !prWaitEvidence {
+				preferred, err := preferredPRDeliveryReader(ctx, tx.Q(), delivery, now)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if preferred {
 					continue
 				}
 			}
@@ -142,10 +152,10 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if _, err := tx.Exec(ctx, `UPDATE observation_jobs SET status='claimed',event_id=?,updated_at=? WHERE issue_id=? AND delivery_id=?`, eventID, now, selectedItem.WorkItemID, selectedDelivery.DeliveryID); err != nil {
 		return Outcome{}, err
 	}
-	assignment := protocol.DeliveryAssignment{TargetLineage: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryTargetLineage),
+	assignment := protocol.DeliveryAssignment{PRWaitEvidence: prWaitEvidence, TargetLineage: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryTargetLineage),
 		CandidateIdentity: slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryCandidateIdentity),
 		WorkItemID:        selected.Observation.WorkItemID, Delivery: selectedDelivery, Generation: selected.Observation.Generation, Nonce: selected.Nonce}
-	if assignment.PRWaitEvidence = slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryPRWaitEvidence); assignment.PRWaitEvidence {
+	if prWaitEvidence {
 		assignment.PRChecks, assignment.CheckAttempts, err = deliveryPRObservationNeeds(ctx, tx.Q(), selectedDelivery)
 		if err != nil {
 			return Outcome{}, err
