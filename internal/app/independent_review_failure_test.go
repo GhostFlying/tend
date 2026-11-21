@@ -279,17 +279,19 @@ func TestFault_IndependentReviewHandoffRetainsOriginalRetryBudget(t *testing.T) 
 	for _, tt := range []struct {
 		name                 string
 		approveBeforeHandoff bool
+		waitBeforeApproval   bool
 	}{
 		{name: "failed original"},
 		{name: "unclaimed approval", approveBeforeHandoff: true},
+		{name: "waiting then approved", waitBeforeApproval: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			testIndependentReviewHandoff(t, tt.approveBeforeHandoff)
+			testIndependentReviewHandoff(t, tt.approveBeforeHandoff, tt.waitBeforeApproval)
 		})
 	}
 }
 
-func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
+func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff, waitBeforeApproval bool) {
 	t.Helper()
 	h, runtime, issue := issueOwnerHarness(t, func(p *protocol.AgentInventoryProjection) {
 		p.Agents[1].Categories = []string{"reviewer", "implementer"}
@@ -370,12 +372,32 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 	if op, _ := create(current, "implementer", task); op.Error == nil || op.Error.Code != protocol.CodeForbidden {
 		t.Fatal("the original reviewer identity used an unqualified execution category", op)
 	}
-	if !approveBeforeHandoff {
+	if !approveBeforeHandoff && !waitBeforeApproval {
 		changeSharedReviewerDefaults(t, h, runtime, protocol.ExecutionProfile{Model: "different-model", Effort: "medium"})
 		if op, _ := create(current, "reviewer", task); op.Error == nil || op.Error.Code != protocol.CodeForbidden {
 			t.Fatal("the same reviewer could replace the frozen profile", op)
 		}
 		changeSharedReviewerDefaults(t, h, runtime, *review.Rounds[0].ReviewerProfile)
+	}
+	releaseOriginal := func() {
+		t.Helper()
+		if op := h.exec(owner, h.env("tasks.cancel", taskTarget(task), map[string]any{}, rev(h.task(task).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if resource := h.resourceForTask(task); !h.releaseResource(task, resource.WorkspaceID) {
+			t.Fatal("the original Task workspace was not released")
+		}
+	}
+	if waitBeforeApproval {
+		releaseOriginal()
+		review = sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: &review.Revision}))
+		if review.Status != "waiting" {
+			t.Fatal("the original stopped review did not enter waiting", review)
+		}
+		if op := sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+			t.Fatal("waiting recorded a result without an authorized completed retry", op)
+		}
+		current = canonicalTaskIssue(t, h, current.IssueID)
 	}
 	retry, replacement := create(current, "reviewer", task)
 	if retry.Status != protocol.OpSucceeded || replacement == "" || replacement == task {
@@ -387,13 +409,8 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 		  AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.action_id=old.action_id)`, originalApproval) != 1 {
 		t.Fatal("handoff lost the superseded approval or started its original action", originalApproval)
 	}
-	if !approveBeforeHandoff {
-		if op := h.exec(owner, h.env("tasks.cancel", taskTarget(task), map[string]any{}, rev(h.task(task).ControlRevision)), CancelTask{}); op.Status != protocol.OpSucceeded {
-			t.Fatal(op)
-		}
-		if resource := h.resourceForTask(task); !h.releaseResource(task, resource.WorkspaceID) {
-			t.Fatal("the original Task workspace was not released")
-		}
+	if !approveBeforeHandoff && !waitBeforeApproval {
+		releaseOriginal()
 	}
 	// A responsibility handoff returns the Issue to backlog. Re-admit it
 	// through its ordinary board control before the runner can claim work.
@@ -404,8 +421,10 @@ func testIndependentReviewHandoff(t *testing.T, approveBeforeHandoff bool) {
 	}
 	if !approveBeforeHandoff {
 		wait := protocol.UpdateSharedDeliveryReviewPayload{Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: &review.Revision}
-		if op := sharedReviewAction(t, h, issue.IssueID, wait); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
-			t.Fatal("the original Task release allowed waiting during its approved replacement Run", op)
+		if !waitBeforeApproval {
+			if op := sharedReviewAction(t, h, issue.IssueID, wait); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
+				t.Fatal("the original Task release allowed waiting during its approved replacement Run", op)
+			}
 		}
 		submitSharedReviewForTest(t, h, as, review, "changes_requested")
 		if op := sharedReviewAction(t, h, issue.IssueID, wait); op.Error == nil || op.Error.Code != protocol.CodeInvalidTransition {
