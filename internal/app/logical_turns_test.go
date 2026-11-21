@@ -209,17 +209,72 @@ func TestClarificationAnswerAdoptsOriginalResponsibility(t *testing.T) {
 	if err != nil || len(state.Awaiting) != 1 {
 		t.Fatal(state, err)
 	}
+	before, err := h.app.MessagingMessage(t.Context(), id)
+	if err != nil || before.Processing != "waiting_user" {
+		t.Fatalf("original input before adoption = %q, err = %v", before.Processing, err)
+	}
+	var since int64
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		var err error
+		since, err = store.LatestEventSeq(t.Context(), tx.Q())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	adopt := AdoptClarification{RequestID: next.RequestID}
 	p := state.Awaiting[0]
 	op = h.exec(mainAgent, h.env(adopt.Operation(), protocol.Target{Type: "logical_turn", ID: p.LogicalTurnID}, protocol.AdoptClarificationPayload{LogicalTurnID: p.LogicalTurnID, Revision: p.Revision}, rev(p.Revision)), adopt)
 	if op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	after, err := h.app.MessagingMessage(t.Context(), id)
+	if err != nil || after.Processing != "processing" {
+		t.Fatalf("original input after adoption = %q, err = %v", after.Processing, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		batch, err := store.ListEvents(t.Context(), tx.Q(), since, 100)
+		if err != nil {
+			return err
+		}
+		var oldInput, newInput bool
+		for _, event := range batch {
+			oldInput = oldInput || event.ObjectType == "message" && event.ObjectID == id && event.Kind == "messaging.processing"
+			newInput = newInput || event.ObjectType == "message" && event.ObjectID == answer && event.Kind == "conversation.clarification_resumed"
+		}
+		if !oldInput || !newInput {
+			t.Fatalf("pending inputs missing invalidations after adoption: original=%v answer=%v", oldInput, newInput)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.associate(mainAgent, id)
 	h.associate(mainAgent, answer)
 	commitFixtureTurn(t, h, next.RequestID)
 	next.Status = store.TurnCompleted
 	if err := h.app.PutMainTurn(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
+	completed, err := h.app.MessagingMessage(t.Context(), id)
+	if err != nil || completed.Processing != "processed" {
+		t.Fatalf("original input after settlement = %q, err = %v", completed.Processing, err)
+	}
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		batch, err := store.ListEvents(t.Context(), tx.Q(), since, 100)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for _, event := range batch {
+			if event.ObjectType == "message" && event.ObjectID == id && event.Kind == "messaging.processing" {
+				count++
+			}
+		}
+		if count != 2 {
+			t.Fatalf("original input received %d processing invalidations, want adoption and settlement", count)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	for _, req := range []string{turn.RequestID, next.RequestID} {
