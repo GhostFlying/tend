@@ -13316,6 +13316,9 @@
         "event_seq": {
           "type": "integer"
         },
+        "issue_id": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },

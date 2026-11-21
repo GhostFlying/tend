@@ -1,7 +1,11 @@
 import type { ApiClient } from "../api/client.ts";
-import type { MessagingMessage, MessagingPage } from "../api/generated/api.ts";
+import type { MessagingEvent, MessagingMessage, MessagingPage } from "../api/generated/api.ts";
 import { EventStream } from "../live/eventStream.ts";
 import { Store } from "../state/store.ts";
+
+const messagesURL = "/api/v1/messaging/messages";
+const workRefreshMs = 200;
+const detailBatch = 8;
 
 export class MessagingFeed {
   readonly state = new Store<{
@@ -10,134 +14,239 @@ export class MessagingFeed {
     more: boolean;
     error: string;
   }>({ items: [], loading: true, more: false, error: "" });
-  private controller = new AbortController();
-  private running = false;
-  private pending = false;
+
+  private controller: AbortController | undefined;
+  private stopping: Promise<void> | undefined;
+  private connected = false;
+  private initialized = false;
+  private reset = false;
+  private forward = false;
   private dirty = new Set<string>();
-  private stream: EventStream;
+  private workIssues = new Set<string>();
+  private workTimer: ReturnType<typeof setTimeout> | undefined;
+  private reading: Promise<void> | undefined;
+  private readonly stream: EventStream<MessagingEvent>;
+
   constructor(private client: Pick<ApiClient, "get" | "openStream" | "noteAlive">) {
-    this.stream = new EventStream({
+    this.stream = new EventStream<MessagingEvent>({
       open: (after, signal) =>
         client.openStream(
           `/api/v1/messaging/events${after === undefined ? "" : `?after=${after}`}`,
           signal,
         ),
-      onStart: () => {
-        for (const m of this.state.get().items)
-          if (m.interaction?.state === "open" || m.direction === "input")
-            this.dirty.add(m.message_id);
-        void this.refresh();
+      onStart: (_eventSeq, fresh) => {
+        if (!this.controller || this.stopping) return;
+        this.connected = true;
+        this.reset ||= fresh || !this.initialized;
+        this.forward = true;
+        void this.read();
       },
-      onEvent: (event) => {
-        if (event.object_type === "message") this.dirty.add(event.object_id);
-        if (event.kind === "messaging.work_changed" || event.kind === "messaging.processing") {
-          for (const m of this.state.get().items)
-            if (m.direction === "input") this.dirty.add(m.message_id);
-        }
-        void this.refresh();
-      },
+      onEvent: (event) => this.handleEvent(event),
       onAlive: () => {
+        if (!this.controller || this.stopping) return;
         client.noteAlive();
-        if (this.state.get().error && this.dirty.size) void this.refresh();
+        if (this.state.get().error) void this.read();
       },
-      onLost: () => this.state.set({ ...this.state.get(), error: "连接已断开，正在恢复消息…" }),
+      onLost: () => {
+        this.connected = false;
+        if (this.controller && !this.stopping)
+          this.state.set({ ...this.state.get(), error: "连接已断开，正在恢复消息…" });
+      },
+      onReset: () => {
+        this.connected = false;
+        this.reset = true;
+      },
     });
   }
+
   start() {
-    if (this.running) return;
-    this.running = true;
-    this.stream.start();
-  }
-  async stop() {
-    this.running = false;
-    this.controller.abort();
-    await this.stream.stop();
-  }
-  async refresh() {
-    this.pending = true;
-    if (this.runningRefresh) return;
-    this.runningRefresh = true;
-    let inflight: string[] = [];
-    try {
-      while (this.pending && this.running) {
-        this.pending = false;
-        const ids = [...this.dirty];
-        inflight = ids;
-        this.dirty.clear();
-        const page = await this.client.get<MessagingPage>(
-          "/api/v1/messaging/messages?latest=1",
-          this.controller.signal,
-        );
-        const current = new Set((page.items ?? []).map((m) => m.message_id));
-        const updates = await Promise.all(
-          ids
-            .filter(
-              (id) => !current.has(id) && this.state.get().items.some((m) => m.message_id === id),
-            )
-            .map((id) =>
-              this.client.get<MessagingMessage>(
-                `/api/v1/messaging/messages/${encodeURIComponent(id)}`,
-                this.controller.signal,
-              ),
-            ),
-        );
-        if (!this.running) return;
-        const old = this.state.get();
-        const last = old.items.at(-1)?.sequence;
-        const arrived = [...(page.items ?? [])];
-        // Resume every missing page after a long disconnect, even if the newest
-        // window no longer overlaps the messages already on screen.
-        if (last !== undefined && arrived[0] && arrived[0].sequence > last) {
-          let after = last;
-          while (this.running) {
-            const missing = await this.client.get<MessagingPage>(
-              `/api/v1/messaging/messages?after=${after}`,
-              this.controller.signal,
-            );
-            arrived.push(...(missing.items ?? []));
-            if (!missing.more || missing.next <= after) break;
-            after = missing.next;
-          }
-        }
-        if (!this.running) return;
-        const retained = this.state.get();
-        const messages = new Map(retained.items.map((m) => [m.message_id, m]));
-        for (const item of [...arrived, ...updates]) messages.set(item.message_id, item);
-        this.state.set({
-          items: [...messages.values()].sort((a, b) => a.sequence - b.sequence),
-          loading: false,
-          more: retained.items.length ? retained.more : page.more,
-          error: "",
-        });
-        inflight = [];
-      }
-    } catch (e) {
-      for (const id of inflight) this.dirty.add(id);
-      if (!this.controller.signal.aborted)
-        this.state.set({
-          ...this.state.get(),
-          loading: false,
-          error: e instanceof Error ? e.message : String(e),
-        });
-    } finally {
-      this.runningRefresh = false;
+    if (this.controller) return;
+    const controller = new AbortController();
+    this.controller = controller;
+    if (this.stopping) {
+      void this.stopping.then(() => {
+        if (!controller.signal.aborted) this.stream.start();
+      });
+    } else {
+      this.stream.start();
     }
   }
-  private runningRefresh = false;
-  async older() {
-    const before = this.state.get().items[0]?.sequence;
-    if (!before) return;
-    const page = await this.client.get<MessagingPage>(
-      `/api/v1/messaging/messages?before=${before}`,
-      this.controller.signal,
-    );
-    if (!this.running) return;
-    const old = this.state.get();
-    const messages = new Map([...(page.items ?? []), ...old.items].map((m) => [m.message_id, m]));
-    this.state.set({
-      ...old,
-      items: [...messages.values()].sort((a, b) => a.sequence - b.sequence),
-      more: page.more,
+
+  stop(): Promise<void> {
+    if (!this.controller) return this.stopping ?? Promise.resolve();
+    this.controller.abort();
+    this.controller = undefined;
+    this.connected = false;
+    clearTimeout(this.workTimer);
+    this.workTimer = undefined;
+    // Drain aborted reads and the EventStream loop before restarting the same
+    // stream. Its cursor remains valid and pending invalidations stay queued.
+    const stopping = Promise.all([this.stopping, this.stream.stop(), this.reading]).then(() => {
+      if (this.stopping === stopping) this.stopping = undefined;
     });
+    this.stopping = stopping;
+    return stopping;
   }
+
+  refresh() {
+    this.forward = true;
+    return this.read();
+  }
+
+  private handleEvent(event: MessagingEvent) {
+    if (!this.controller || this.stopping) return;
+    if (event.kind === "messaging.work_changed") {
+      if (
+        !event.issue_id ||
+        !this.state
+          .get()
+          .items.some((m) => m.direction === "input" && m.issue_ids?.includes(event.issue_id!))
+      )
+        return;
+      this.workIssues.add(event.issue_id);
+      this.workTimer ??= setTimeout(() => {
+        this.workTimer = undefined;
+        this.queueChangedWork();
+        void this.read();
+      }, workRefreshMs);
+      return;
+    }
+    if (event.object_type !== "message") return;
+    if (event.kind === "messaging.input" || event.kind === "messaging.published")
+      this.forward = true;
+    if (this.state.get().items.some((m) => m.message_id === event.object_id))
+      this.dirty.add(event.object_id);
+    void this.read();
+  }
+
+  private queueChangedWork() {
+    if (!this.workIssues.size) return;
+    for (const message of this.state.get().items) {
+      if (message.direction === "input" && message.issue_ids?.some((id) => this.workIssues.has(id)))
+        this.dirty.add(message.message_id);
+    }
+    this.workIssues.clear();
+  }
+
+  private read(): Promise<void> {
+    if (!this.controller || !this.connected) return Promise.resolve();
+    if (
+      !this.reset &&
+      !this.forward &&
+      !this.dirty.size &&
+      (this.workTimer || !this.workIssues.size)
+    )
+      return this.reading ?? Promise.resolve();
+    if (!this.reading) {
+      const { signal } = this.controller;
+      // Start after the current SSE chunk so its work is read together.
+      this.reading = Promise.resolve()
+        .then(() => this.readPending(signal))
+        .finally(() => {
+          this.reading = undefined;
+        });
+    }
+    return this.reading;
+  }
+
+  private async readPending(signal: AbortSignal) {
+    while (!signal.aborted && this.connected) {
+      if (!this.workTimer) this.queueChangedWork();
+      const reset = this.reset;
+      const forward = this.forward;
+      const ids = [...this.dirty];
+      if (!reset && !forward && !ids.length) return;
+      this.reset = false;
+      this.forward = false;
+      this.dirty.clear();
+      const previous = this.state.get();
+      try {
+        const latest = reset
+          ? await this.client.get<MessagingPage>(`${messagesURL}?latest=1`, signal)
+          : undefined;
+        const arrived = latest
+          ? (latest.items ?? [])
+          : forward
+            ? await this.readAfter(previous.items.at(-1)?.sequence ?? 0, signal)
+            : [];
+        const updates: MessagingMessage[] = [];
+        if (!reset) {
+          const arrivedIDs = new Set(arrived.map((message) => message.message_id));
+          const remainingIDs = ids.filter((id) => !arrivedIDs.has(id));
+          for (let i = 0; i < remainingIDs.length && !signal.aborted; i += detailBatch) {
+            updates.push(
+              ...(await Promise.all(
+                ids
+                  .slice(i, i + detailBatch)
+                  .map((id) =>
+                    this.client.get<MessagingMessage>(
+                      `${messagesURL}/${encodeURIComponent(id)}`,
+                      signal,
+                    ),
+                  ),
+              )),
+            );
+          }
+        }
+        if (signal.aborted) throw signal.reason;
+        if (this.reset) continue;
+        const retained = this.state.get();
+        const items = reset ? arrived : mergeMessages(retained.items, arrived, updates);
+        this.initialized = true;
+        this.state.set({
+          items,
+          loading: false,
+          more: latest?.more ?? retained.more,
+          error: "",
+        });
+      } catch (e) {
+        this.reset ||= reset;
+        this.forward ||= forward;
+        for (const id of ids) this.dirty.add(id);
+        if (!signal.aborted)
+          this.state.set({
+            ...this.state.get(),
+            loading: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        return;
+      }
+    }
+  }
+
+  private async readAfter(after: number, signal: AbortSignal) {
+    const items: MessagingMessage[] = [];
+    while (!signal.aborted) {
+      const page = await this.client.get<MessagingPage>(`${messagesURL}?after=${after}`, signal);
+      items.push(...(page.items ?? []));
+      if (!page.more || page.next <= after) break;
+      after = page.next;
+    }
+    return items;
+  }
+
+  async older() {
+    const signal = this.controller?.signal;
+    const before = this.state.get().items[0]?.sequence;
+    if (!signal || !before) return;
+    try {
+      const page = await this.client.get<MessagingPage>(`${messagesURL}?before=${before}`, signal);
+      const old = this.state.get();
+      if (signal.aborted || old.items[0]?.sequence !== before) return;
+      this.state.set({
+        ...old,
+        items: mergeMessages(page.items ?? [], old.items),
+        more: page.more,
+      });
+    } catch (e) {
+      if (!signal.aborted) throw e;
+    }
+  }
+}
+
+function mergeMessages(...groups: MessagingMessage[][]): MessagingMessage[] {
+  const messages = new Map<string, MessagingMessage>();
+  for (const group of groups)
+    for (const message of group) messages.set(message.message_id, message);
+  return [...messages.values()].sort((a, b) => a.sequence - b.sequence);
 }

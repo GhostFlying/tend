@@ -55,7 +55,6 @@ test("reconnection fills more than one missing page without losing visible histo
 });
 
 test("failed old-message invalidations survive until a successful refresh", async () => {
-  let latest = 1;
   let failRead = true;
   let detailReads = 0;
   let processing = "processing";
@@ -67,6 +66,7 @@ test("failed old-message invalidations survive until a successful refresh", asyn
     sequence: 1,
     direction: "input",
     processing: "waiting_execution",
+    issue_ids: ["issue"],
   } as MessagingMessage;
   const feed = new MessagingFeed({
     get: (async (path: string) => {
@@ -76,8 +76,8 @@ test("failed old-message invalidations survive until a successful refresh", asyn
         return { ...initial, processing };
       }
       return {
-        items: latest === 1 ? [initial] : [{ message_id: "new", sequence: latest }],
-        next: latest,
+        items: path.includes("latest") ? [initial] : [],
+        next: 1,
         more: false,
       };
     }) as ApiClient["get"],
@@ -97,7 +97,6 @@ test("failed old-message invalidations survive until a successful refresh", asyn
   feed.start();
   try {
     await vi.waitFor(() => expect(feed.state.get().items).toHaveLength(1));
-    latest = 200;
     emit(
       'event: ledger\ndata: {"event_seq":2,"object_type":"message","object_id":"question","kind":"messaging.interaction_changed"}\n\n',
     );
@@ -110,7 +109,7 @@ test("failed old-message invalidations survive until a successful refresh", asyn
     );
     processing = "processed";
     emit(
-      'event: ledger\ndata: {"event_seq":3,"object_type":"task","object_id":"task","kind":"messaging.work_changed"}\n\n',
+      'event: ledger\ndata: {"event_seq":3,"object_type":"task","object_id":"task","kind":"messaging.work_changed","issue_id":"issue"}\n\n',
     );
     await vi.waitFor(() =>
       expect(feed.state.get().items.find((m) => m.message_id === "question")?.processing).toBe(
@@ -122,57 +121,56 @@ test("failed old-message invalidations survive until a successful refresh", asyn
   }
 });
 
-test.each(["work change", "reconnect"])(
-  "processed retained inputs refresh after %s",
-  async (event) => {
-    let latest = 1;
-    let emit: (text: string) => void = () => {
-      throw new Error("stream not started");
-    };
-    const original = {
-      message_id: "old",
-      sequence: 1,
-      direction: "input",
-      processing: "processed",
-    } as MessagingMessage;
-    const feed = new MessagingFeed({
-      get: (async (path: string) =>
-        path.endsWith("/old")
-          ? { ...original, processing: "waiting_assignment" }
-          : {
-              items: latest === 1 ? [original] : [{ message_id: "new", sequence: latest }],
-              next: latest,
-              more: false,
-            }) as ApiClient["get"],
-      noteAlive() {},
-      async openStream(_path, signal) {
-        return new Response(
-          new ReadableStream({
-            start(controller) {
-              emit = (text) => controller.enqueue(new TextEncoder().encode(text));
-              emit('event: start\ndata: {"event_seq":1}\n\n');
-              signal?.addEventListener("abort", () => controller.close(), { once: true });
-            },
-          }),
-        );
-      },
-    });
+test("unrelated work adds no reads and a real publication only reads forward", async () => {
+  const original = { message_id: "m1", sequence: 1, direction: "input", issue_ids: ["related"] };
+  const fresh = { message_id: "m2", sequence: 2, direction: "publication" };
+  const get = vi.fn(async (path: string) => ({
+    items: path.includes("latest") ? [original] : [fresh],
+    next: path.includes("latest") ? 1 : 2,
+    more: false,
+  }));
+  let emit!: (value: string) => void;
+  const streams: string[] = [];
+  const feed = new MessagingFeed({
+    get: get as ApiClient["get"],
+    noteAlive() {},
+    async openStream(path, signal) {
+      streams.push(path);
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            emit = (text) => controller.enqueue(new TextEncoder().encode(text));
+            emit(`event: start\ndata: {"event_seq":${path.includes("after=") ? 41 : 1}}\n\n`);
+            signal?.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+      );
+    },
+  });
+  const ledger = (event_seq: number, event: Record<string, unknown>) =>
+    `event: ledger\ndata: ${JSON.stringify({ event_seq, ...event })}\n\n`;
+  feed.start();
+  try {
+    await vi.waitFor(() => expect(feed.state.get().items).toHaveLength(1));
+    const unrelated = Array.from({ length: 40 }, (_, n) =>
+      ledger(n + 2, {
+        kind: "messaging.work_changed",
+        object_type: "issue",
+        object_id: "other",
+        issue_id: "other",
+      }),
+    );
+    emit(unrelated.join(""));
+    emit(ledger(42, { kind: "messaging.published", object_type: "message", object_id: "m2" }));
+    await vi.waitFor(() => expect(feed.state.get().items).toHaveLength(2));
+    expect(get.mock.calls.map(([path]) => path)).toEqual([
+      "/api/v1/messaging/messages?latest=1",
+      "/api/v1/messaging/messages?after=1",
+    ]);
+    await feed.stop();
     feed.start();
-    try {
-      await vi.waitFor(() => expect(feed.state.get().items).toHaveLength(1));
-      latest = 200;
-      emit(
-        event === "reconnect"
-          ? 'event: start\ndata: {"event_seq":3}\n\n'
-          : 'event: ledger\ndata: {"event_seq":2,"object_type":"issue","object_id":"issue","kind":"messaging.work_changed"}\n\n',
-      );
-      await vi.waitFor(() =>
-        expect(feed.state.get().items.find((m) => m.message_id === "old")?.processing).toBe(
-          "waiting_assignment",
-        ),
-      );
-    } finally {
-      await feed.stop();
-    }
-  },
-);
+    await vi.waitFor(() => expect(streams.at(-1)).toBe("/api/v1/messaging/events?after=42"));
+  } finally {
+    await feed.stop();
+  }
+});

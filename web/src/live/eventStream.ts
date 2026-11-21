@@ -22,7 +22,7 @@ import { SseParser } from "./sse.ts";
  */
 export type StreamState = "connecting" | "live" | "waiting" | "stopped";
 
-export interface StreamOptions {
+export interface StreamOptions<Event = LedgerEvent> {
   /** Opens the stream after the cursor, or at the newest event without one. */
   open(after: number | undefined, signal: AbortSignal): Promise<Response>;
   /**
@@ -32,7 +32,7 @@ export interface StreamOptions {
    */
   onStart(eventSeq: number, fresh: boolean): void;
   /** A ledger event after the cursor, in order, each once. */
-  onEvent(event: LedgerEvent): void;
+  onEvent(event: Event): void;
   /** Anything arrived, a heartbeat included. */
   onAlive?(): void;
   /** The connection was lost; it reconnects by itself. */
@@ -53,8 +53,8 @@ type Ending =
 
 const defaultBackoff = (attempt: number): number => Math.min(1_000 * 2 ** attempt, 30_000);
 
-export class EventStream {
-  private readonly options: StreamOptions;
+export class EventStream<Event extends Pick<LedgerEvent, "event_seq"> = LedgerEvent> {
+  private readonly options: StreamOptions<Event>;
   private readonly silenceMs: number;
   private readonly backoffMs: (attempt: number) => number;
   private readonly status = new Store<StreamState>("connecting");
@@ -64,7 +64,7 @@ export class EventStream {
   private pause: AbortController | null = null;
   private loop: Promise<void> | null = null;
 
-  constructor(options: StreamOptions) {
+  constructor(options: StreamOptions<Event>) {
     this.options = options;
     this.silenceMs = options.silenceMs ?? 45_000;
     this.backoffMs = options.backoffMs ?? defaultBackoff;
@@ -185,7 +185,7 @@ export class EventStream {
             if (this.cursorSeq !== undefined && checkpoint.event_seq > this.cursorSeq)
               this.cursorSeq = checkpoint.event_seq;
           } else if (m.event === "ledger") {
-            const event = JSON.parse(m.data) as LedgerEvent;
+            const event = JSON.parse(m.data) as Event;
             if (this.cursorSeq !== undefined && event.event_seq <= this.cursorSeq) {
               continue;
             }
