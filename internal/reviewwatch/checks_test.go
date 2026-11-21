@@ -153,3 +153,20 @@ func TestCodebaseNamedChecksPreserveRunnerCandidateBase(t *testing.T) {
 		t.Fatal("requesting check evidence changed existing candidate metadata", before, during, err)
 	}
 }
+
+func TestCodebaseExplicitChecksKeepSeparateMergeLineage(t *testing.T) {
+	c := New(Config{Exec: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if args[2] == "commit" {
+			return []byte(`{"status":"success","data":{"ref_name":"target..merge","page_number":1,"commits":[]}}`), nil
+		}
+		if args[3] == "get" {
+			return []byte(`{"status":"success","data":{"merge_request":{"Number":7,"Status":"merged","MergeCommitId":"merge","TargetBranch":{"Name":"integration","Commit":{"Id":"target"}},"Versions":[{"Number":1,"SourceCommitId":"head","TargetCommitId":"base"}]}}}`), nil
+		}
+		return []byte(`{"status":"success","data":{"merge_request":{"number":7,"status":"merged","source_commit_id":"head"},"check_runs":{"total_count":1,"items":[{"Name":"required","Status":"completed","Conclusion":"success"}]}}}`), nil
+	}})
+	o, err := c.Observe(t.Context(), Ref{Provider: Codebase, Repository: "example/project", Number: 7, IncludeChecks: true})
+	if err != nil || !o.TargetContainsMerge || o.LineageErrorKind != "" || o.BaseSHA != "target" ||
+		o.CI == nil || len(o.CI.Checks) != 1 {
+		t.Fatal("check enrichment lost the independent lineage proof or changed legacy base", o, err)
+	}
+}
