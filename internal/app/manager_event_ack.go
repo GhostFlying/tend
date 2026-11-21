@@ -173,7 +173,7 @@ func (a *App) requireManagerEventACKLease(ctx context.Context, q store.Querier, 
 	if err != nil {
 		return err
 	}
-	allowed, err := managerNativeBusinessAllowed(ctx, q, r)
+	allowed, err := managerNativeRunAllowed(ctx, q, r, true)
 	if err != nil {
 		return err
 	}

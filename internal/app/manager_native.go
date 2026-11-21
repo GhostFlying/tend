@@ -971,6 +971,12 @@ func managerNativeReceiptMethod(method string) bool {
 	return false
 }
 func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.RunRow) (bool, error) {
+	return managerNativeRunAllowed(ctx, q, r, false)
+}
+
+// Only ACK recovery may settle an already handled event after the same
+// responsibility closes, before its original Run queues a native close.
+func managerNativeRunAllowed(ctx context.Context, q store.Querier, r store.RunRow, settleTerminal bool) (bool, error) {
 	if r.PauseHandoff != nil {
 		return false, nil
 	}
@@ -978,7 +984,16 @@ func managerNativeBusinessAllowed(ctx context.Context, q store.Querier, r store.
 		return false, err
 	}
 	var current bool
-	err := q.QueryRowContext(ctx, `SELECT m.state='assigned' AND i.assignment_epoch=m.assignment_epoch AND i.state IN ('active','cancelling') AND i.assignment_state='active' AND t.control_mode='managed' AND t.lifecycle NOT IN ('completed','cancelled') AND a.status='dispatched' AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0 AND r.desired_state='run' AND r.observed_state IN ('starting','running','waiting') FROM runs r JOIN issue_manager_tasks m USING(task_id) JOIN tasks t USING(task_id) JOIN plan_actions a ON a.action_id=r.action_id JOIN issue_controls i ON i.issue_id=m.issue_id WHERE r.run_id=?`, r.RunID).Scan(&current)
+	err := q.QueryRowContext(ctx, `SELECT m.state='assigned'
+		AND i.assignment_epoch=m.assignment_epoch
+		AND ((i.state IN ('active','cancelling') AND i.assignment_state='active')
+		     OR (? AND i.state IN ('closed','cancelled')))
+		AND t.control_mode='managed' AND t.lifecycle NOT IN ('completed','cancelled')
+		AND a.status='dispatched' AND COALESCE(json_extract(a.trigger_json,'$.receipt_only'),0)=0
+		AND r.desired_state='run' AND r.observed_state IN ('starting','running','waiting')
+		FROM runs r JOIN issue_manager_tasks m USING(task_id) JOIN tasks t USING(task_id)
+		JOIN plan_actions a ON a.action_id=r.action_id JOIN issue_controls i ON i.issue_id=m.issue_id
+		WHERE r.run_id=?`, settleTerminal, r.RunID).Scan(&current)
 	if err != nil || !current {
 		return current, err
 	}

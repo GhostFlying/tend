@@ -152,9 +152,9 @@ func TestFault_LiveManagerACKRecoversOnlyUnderOriginalLease(t *testing.T) {
 }
 
 func TestFault_LiveManagerACKSettlesAfterCloseTransition(t *testing.T) {
-	for _, transition := range []string{"physical stop", "close in flight"} {
+	for _, transition := range []string{"physical stop", "close in flight", "Issue completed"} {
 		t.Run(transition, func(t *testing.T) {
-			h, _, _, as, _ := reviewManagerAssignment(t)
+			h, _, issue, as, _ := reviewManagerAssignment(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 			defer cancel()
 			event := protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{"thread_id":"native","native":{"Kind":"item_started","TurnID":"turn","ItemID":"reply"}}`)}
@@ -208,13 +208,32 @@ func TestFault_LiveManagerACKSettlesAfterCloseTransition(t *testing.T) {
 			if err := <-held; err != nil {
 				t.Fatal(err)
 			}
-			if transition == "physical stop" {
+			switch transition {
+			case "physical stop":
 				op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original native process stopped", LastSequence: 1}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped})
 				if op.Status != protocol.OpSucceeded {
 					t.Fatal(op)
 				}
-			} else {
+			case "close in flight":
 				if _, err := h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`)); err != nil {
+					t.Fatal(err)
+				}
+			case "Issue completed":
+				issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "set_status", protocol.SetIssueStatusPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Status: protocol.IssueDone}))
+				if issue.State != protocol.IssueClosed {
+					t.Fatal(issue)
+				}
+				if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+					run, err := store.GetRun(ctx, tx.Q(), as.RunID)
+					if err != nil {
+						return err
+					}
+					allowed, err := managerNativeBusinessAllowed(ctx, tx.Q(), run)
+					if allowed {
+						t.Error("the original Run can still initiate business after Issue completion")
+					}
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
 			}
