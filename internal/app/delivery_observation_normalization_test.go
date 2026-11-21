@@ -427,7 +427,7 @@ func TestRunnerSharedHistoryKeepsOriginalPayloadAndInstanceChecks(t *testing.T) 
 	}
 }
 
-func TestRunnerSharedTerminalFactNotifiesEveryReferenceInBoundedBatches(t *testing.T) {
+func TestRunnerSharedTerminalFactProjectsEveryReferenceInBoundedBatches(t *testing.T) {
 	h := newHarness(t)
 	items := make([]protocol.WorkItem, 101)
 	for i := range items {
@@ -454,7 +454,27 @@ func TestRunnerSharedTerminalFactNotifiesEveryReferenceInBoundedBatches(t *testi
 	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 1 {
 		t.Fatal("notification fanout fabricated another provider result", fact)
 	}
-	assertSharedDeliveryNotices(t, h, items, 1)
+	assertSharedDeliveryNotices(t, h, items, 0)
+	assertSharedDeliveryPublished(t, h, items, "merged", "")
+}
+
+func assertSharedDeliveryPublished(t *testing.T, h *harness, items []protocol.WorkItem, state, errorKind string) {
+	t.Helper()
+	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
+		for _, item := range items {
+			row, err := store.GetDeliveryObservation(t.Context(), tx.Q(), item.WorkItemID, item.Deliveries[0].DeliveryID)
+			if err != nil {
+				return err
+			}
+			if row.ObservedRevision != row.FactRevision || row.NotificationPending || row.Observation.RefreshPending ||
+				row.Observation.State != state || row.Observation.ErrorKind != errorKind {
+				t.Errorf("reference failed to consume its current provider fact: %+v", row)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertSharedDeliveryNotices(t *testing.T, h *harness, items []protocol.WorkItem, expected int) {
@@ -475,7 +495,7 @@ func assertSharedDeliveryNotices(t *testing.T, h *harness, items []protocol.Work
 	}
 }
 
-func TestServerCachedFanoutPreservesMergeAndRecoveryTransitionNotices(t *testing.T) {
+func TestServerCachedFanoutProjectsMergeAndRecoveryWithoutOwnerNotice(t *testing.T) {
 	for _, recovery := range []bool{false, true} {
 		t.Run(map[bool]string{false: "merge", true: "error-recovery"}[recovery], func(t *testing.T) {
 			h := newHarness(t)
@@ -495,7 +515,8 @@ func TestServerCachedFanoutPreservesMergeAndRecoveryTransitionNotices(t *testing
 				if q, err = h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
 					t.Fatal(q, err)
 				}
-				assertSharedDeliveryNotices(t, h, items, 1)
+				assertSharedDeliveryNotices(t, h, items, 0)
+				assertSharedDeliveryPublished(t, h, items, "unknown", "authentication_required")
 				serverRefreshDelivery(t, h, items[0])
 			}
 			q, err := h.app.ClaimServerDelivery(t.Context())
@@ -508,11 +529,8 @@ func TestServerCachedFanoutPreservesMergeAndRecoveryTransitionNotices(t *testing
 			if q, err = h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
 				t.Fatal(q, err)
 			}
-			expected := 1
-			if recovery {
-				expected++
-			}
-			assertSharedDeliveryNotices(t, h, items, expected)
+			assertSharedDeliveryNotices(t, h, items, 0)
+			assertSharedDeliveryPublished(t, h, items, "merged", "")
 			before := h.count("message_notices WHERE notice_type='work_item_updated'")
 			serverRefreshDelivery(t, h, items[0])
 			q, err = h.app.ClaimServerDelivery(t.Context())
@@ -555,7 +573,7 @@ func TestRunnerSharedLaterRefreshRetainsTransitionUntilFreshRead(t *testing.T) {
 		t.Fatal("fresh result rejected")
 	}
 	items := []protocol.WorkItem{h.work(first.WorkItemID), second}
-	assertSharedDeliveryNotices(t, h, items, 1)
+	assertSharedDeliveryNotices(t, h, items, 0)
 	for range 2 {
 		if next := pollDelivery(t, h, "linux-1", "first"); len(next) != 0 {
 			t.Fatal("settled terminal fact caused another provider read", next)
@@ -564,7 +582,7 @@ func TestRunnerSharedLaterRefreshRetainsTransitionUntilFreshRead(t *testing.T) {
 	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 2 || fact.Observation.RefreshPending {
 		t.Fatal("fresh read did not settle the original pending transition", fact)
 	}
-	assertSharedDeliveryNotices(t, h, items, 1)
+	assertSharedDeliveryNotices(t, h, items, 0)
 }
 
 func TestRunnerSharedCoveredRefreshSettlesWithoutAnotherProviderRead(t *testing.T) {
@@ -596,7 +614,7 @@ func TestRunnerSharedCoveredRefreshSettlesWithoutAnotherProviderRead(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertSharedDeliveryNotices(t, h, items, 1)
+	assertSharedDeliveryNotices(t, h, items, 0)
 	if next := pollDelivery(t, h, "linux-1", "first"); len(next) != 0 {
 		t.Fatal("covered refresh re-read the provider", next)
 	}
@@ -607,7 +625,7 @@ func TestRunnerSharedCoveredRefreshSettlesWithoutAnotherProviderRead(t *testing.
 	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 1 || fact.Observation.RefreshPending {
 		t.Fatal("notification settlement changed provider facts", fact)
 	}
-	assertSharedDeliveryNotices(t, h, items, 1)
+	assertSharedDeliveryNotices(t, h, items, 0)
 }
 
 func TestIncrementalPendingFanoutDoesNotStarveOtherPR(t *testing.T) {
@@ -649,10 +667,10 @@ func TestIncrementalPendingFanoutDoesNotStarveOtherPR(t *testing.T) {
 			t.Fatal("unexpected read", next)
 		}
 	}
-	assertSharedDeliveryNotices(t, h, unrelated, 1)
+	assertSharedDeliveryNotices(t, h, unrelated, 0)
 }
 
-func TestIncrementalClosedRefreshRetainsDeferredMergeNotice(t *testing.T) {
+func TestIncrementalClosedRefreshRetainsDeferredMergeFact(t *testing.T) {
 	h := newHarness(t)
 	closed := observerItem(t, h)
 	closure := protocol.CloseWorkItemPayload{Closure: protocol.IssueClosure{Kind: "declined", Reason: "Owner ended responsibility", Evidence: []protocol.IssueEvidence{h.ownerEvidence()}}}
@@ -683,7 +701,8 @@ func TestIncrementalClosedRefreshRetainsDeferredMergeNotice(t *testing.T) {
 			t.Fatal(next)
 		}
 	}
-	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 1)
+	assertSharedDeliveryPublished(t, h, []protocol.WorkItem{closed}, "merged", "")
 }
 
 func closeObserverItem(t *testing.T, h *harness, item protocol.WorkItem) protocol.WorkItem {
@@ -695,7 +714,7 @@ func closeObserverItem(t *testing.T, h *harness, item protocol.WorkItem) protoco
 	return h.work(item.WorkItemID)
 }
 
-func TestRunnerClosedCoveredRefreshRetainsDeferredNotification(t *testing.T) {
+func TestRunnerClosedCoveredRefreshRetainsDeferredProviderFact(t *testing.T) {
 	h := newHarness(t)
 	first := closeObserverItem(t, h, observerItem(t, h))
 	second := closeObserverItem(t, h, observerItem(t, h))
@@ -723,8 +742,9 @@ func TestRunnerClosedCoveredRefreshRetainsDeferredNotification(t *testing.T) {
 			t.Fatal("deferred closed notice restarted a provider read", next)
 		}
 	}
-	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{first, second}, 2)
-	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{later}, 1)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{first, second}, 1)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{later}, 0)
+	assertSharedDeliveryPublished(t, h, []protocol.WorkItem{first, second, later}, "merged", "")
 }
 
 func TestServerConsumesRunnerDeferredClosedNotificationWithoutProviderRead(t *testing.T) {
@@ -780,7 +800,8 @@ func TestServerConsumesRunnerDeferredClosedNotificationWithoutProviderRead(t *te
 	if q, err = h.app.ClaimServerDelivery(t.Context()); err != nil || q != nil {
 		t.Fatal("deferred notification required another provider read", q, err)
 	}
-	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 1)
+	assertSharedDeliveryPublished(t, h, []protocol.WorkItem{closed}, "merged", "")
 	if fact := normalizedDeliveryFact(t, h); fact.FactRevision != 2 || fact.Observation.RefreshPending {
 		t.Fatal("notification changed provider facts or started another query", fact)
 	}
@@ -797,7 +818,7 @@ func TestServerConsumesRunnerDeferredClosedNotificationWithoutProviderRead(t *te
 	if err := h.app.RecordServerDelivery(t.Context(), q.ID, nil, "authentication_required"); err != nil {
 		t.Fatal(err)
 	}
-	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 2)
+	assertSharedDeliveryNotices(t, h, []protocol.WorkItem{closed}, 1)
 }
 
 func TestNotificationMetadataOnlyProgressCommitsWithoutQuery(t *testing.T) {
@@ -854,7 +875,7 @@ func TestNotificationMetadataOnlyProgressCommitsWithoutQuery(t *testing.T) {
 			if n := h.count("events WHERE kind IN ('work_item.delivery_changed','work_item.delivery_checked')"); n != before {
 				t.Fatal("metadata cleanup manufactured a provider event", before, n)
 			}
-			assertSharedDeliveryNotices(t, h, []protocol.WorkItem{item}, 2)
+			assertSharedDeliveryNotices(t, h, []protocol.WorkItem{item}, 1)
 		})
 	}
 }

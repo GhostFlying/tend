@@ -88,7 +88,7 @@ func observeServerDelivery(ctx context.Context, a *app.App, c DeliveryObserverCo
 			timeout = 30 * time.Second
 		}
 		readCtx, cancel := context.WithTimeout(ctx, timeout)
-		observed, readErr := observer.Observe(readCtx, reviewwatch.Ref{Provider: q.Provider, Repository: q.Repository, Number: q.Number})
+		observed, readErr := observer.Observe(readCtx, reviewwatch.Ref{Provider: q.Provider, Repository: q.Repository, Number: q.Number, CheckAttempts: q.CheckAttempts})
 		cancel()
 		if readErr != nil {
 			kind = "query_failed"
@@ -102,7 +102,7 @@ func observeServerDelivery(ctx context.Context, a *app.App, c DeliveryObserverCo
 				return ctx.Err()
 			}
 		} else {
-			snapshot = &protocol.DeliverySnapshot{Draft: observed.Draft, LineageErrorKind: observed.LineageErrorKind, Mergeability: observed.Mergeability, CI: observed.CI, TargetSHA: observed.TargetSHA, TargetContainsMerge: observed.TargetContainsMerge, BaseSHA: observed.BaseSHA, State: observed.State, HeadSHA: observed.HeadSHA, MergeSHA: observed.MergeSHA, URL: observed.URL, ProviderUpdatedAt: observed.UpdatedAt, MergedAt: observed.MergedAt, ClosedAt: observed.ClosedAt}
+			snapshot = &protocol.DeliverySnapshot{Draft: observed.Draft, LineageErrorKind: observed.LineageErrorKind, Mergeability: observed.Mergeability, CI: observed.CI, TargetRef: observed.TargetRef, TargetSHA: observed.TargetSHA, TargetContainsMerge: observed.TargetContainsMerge, BaseSHA: observed.BaseSHA, State: observed.State, HeadSHA: observed.HeadSHA, MergeSHA: observed.MergeSHA, URL: observed.URL, ProviderUpdatedAt: observed.UpdatedAt, MergedAt: observed.MergedAt, ClosedAt: observed.ClosedAt}
 			if observed.MergedBy != nil {
 				snapshot.MergedBy = &protocol.DeliveryActor{ID: observed.MergedBy.ID, Login: observed.MergedBy.Login}
 			}

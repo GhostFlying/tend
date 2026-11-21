@@ -1184,6 +1184,7 @@ export interface DeliveryObservation {
   retry_count?: number;
   state: string;
   target_contains_merge?: boolean;
+  target_ref?: string;
   target_sha?: string;
   url?: string;
   work_item_id: string;
@@ -1193,6 +1194,7 @@ export interface DeliveryObservation {
  * via the `definition` "DeliveryCI".
  */
 export interface DeliveryCI {
+  attempt_checks?: DeliveryCheck[];
   checks: DeliveryCheck[] | null;
   error_kind?: string;
   head_sha: string;
@@ -1204,10 +1206,15 @@ export interface DeliveryCI {
  * via the `definition` "DeliveryCheck".
  */
 export interface DeliveryCheck {
+  app?: string;
+  attempt?: number;
   conclusion?: string;
+  id?: string;
   name: string;
+  source?: string;
   state: string;
   url?: string;
+  workflow_run_id?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4087,6 +4094,7 @@ export interface ExtensionHostView {
  * via the `definition` "ExternalWait".
  */
 export interface ExternalWait {
+  condition?: PRWaitCondition;
   created_at_ms: number;
   deadline_at_ms?: number;
   input_event_watermark?: number;
@@ -4099,6 +4107,9 @@ export interface ExternalWait {
   observed_revision?: number;
   observed_state?: string;
   observed_target?: string;
+  observed_target_ref?: string;
+  pr_binding?: IssueDelivery;
+  pr_evidence?: PRWaitEvidence;
   reason: string;
   recovery: string;
   resume_reason?: string;
@@ -4114,6 +4125,39 @@ export interface ExternalWait {
   wait_id: string;
   wait_key: string;
   wake_reason?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PRWaitCondition".
+ */
+export interface PRWaitCondition {
+  app?: string;
+  attempt?: number;
+  head_sha?: string;
+  kind: string;
+  name?: string;
+  source?: string;
+  target_ref?: string;
+  target_sha?: string;
+  workflow_run_id?: number;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "PRWaitEvidence".
+ */
+export interface PRWaitEvidence {
+  check?: DeliveryCheck;
+  fact_revision: number;
+  head_sha?: string;
+  number: number;
+  observed_at_ms: number;
+  provider: IssueDeliveryProvider;
+  reason: string;
+  repository: string;
+  state: string;
+  target_ref?: string;
+  target_sha?: string;
+  url?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -4620,6 +4664,7 @@ export interface IssueDeliveryObservation {
   retry_count?: number;
   state: string;
   target_contains_merge?: boolean;
+  target_ref?: string;
   target_sha?: string;
   url?: string;
 }
@@ -8099,6 +8144,7 @@ export interface UsageUpload {
  * via the `definition` "WaitExternalPayload".
  */
 export interface WaitExternalPayload {
+  condition?: PRWaitCondition;
   deadline_at_ms?: number;
   issue_id?: string;
   kind: string;

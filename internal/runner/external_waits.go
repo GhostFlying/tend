@@ -132,6 +132,9 @@ func (r *Runner) externalWaitRequest(ctx context.Context, as protocol.Assignment
 	if err := json.Unmarshal(op.Result, &v); err != nil {
 		return v, err
 	}
+	if v.Status == protocol.ExternalWaitSatisfied {
+		return v, nil
+	}
 	if err := r.cfg.Journal.RecordExternalWait(context.WithoutCancel(ctx), as.RunID, &v); err != nil {
 		return v, err
 	}
@@ -219,6 +222,9 @@ func (r *Runner) recoverExternalWait(ctx context.Context, as protocol.Assignment
 		var v protocol.ExternalWait
 		if err := json.Unmarshal(op.Result, &v); err != nil {
 			return nil, err
+		}
+		if v.Status == protocol.ExternalWaitSatisfied {
+			continue
 		}
 		if err := r.cfg.Journal.RecordExternalWait(ctx, as.RunID, &v); err != nil {
 			return nil, err
