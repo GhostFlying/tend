@@ -132,6 +132,15 @@ func (CanonicalOwnerTaskCreate) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if err != nil {
 		return Outcome{}, err
 	}
+	target, err := declaredIndependentReviewTarget(ctx, tx.Q(), current, spec)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if allowed, err := canStartIndependentReviewTarget(ctx, tx.Q(), target, input.TaskID); err != nil {
+		return Outcome{}, err
+	} else if !allowed {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "resolve the original independent review Task for this candidate")
+	}
 	child := *x
 	env := *x.Env
 	env.Target = protocol.Target{Type: "task", ID: input.TaskID}

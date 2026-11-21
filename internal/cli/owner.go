@@ -45,6 +45,10 @@ func runOwner(ctx context.Context, e *Env, cmd string, args []string) error {
 		}
 	case "retry":
 		kind = fs.String("kind", "implement", "implement or accept")
+		fs.Usage = func() {
+			fmt.Fprintln(e.Stderr, "usage: tend retry <task_id> --kind implement|accept\nIndependent review technical failures require the current Issue owner to retry the original Task. The review allows up to three additional attempts.")
+			fs.PrintDefaults()
+		}
 	case "status":
 		project = fs.String("project", "", "show only this project")
 	}

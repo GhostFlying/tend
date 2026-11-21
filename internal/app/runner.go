@@ -3,6 +3,7 @@ package app
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -421,6 +422,10 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	if err != nil {
 		return Outcome{}, err
 	}
+	rows, reviewTargets, err := filterIndependentReviewCandidates(ctx, q, rows)
+	if err != nil {
+		return Outcome{}, err
+	}
 	endDecode := tx.ObservePhase(store.WriteClaimCandidateDecode)
 	candidates, err := candidatesOf(rows)
 	endDecode()
@@ -524,6 +529,9 @@ func (Claim) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		run.Protocol = p.Runtime.Protocol
 	}
 	if err := tx.InsertRun(ctx, run); err != nil {
+		return Outcome{}, err
+	}
+	if err := saveIndependentReviewTarget(ctx, tx, run.RunID, reviewTargets[run.ActionID]); err != nil {
 		return Outcome{}, err
 	}
 	if p.Runtime != nil && p.Runtime.JournalID != "" {
@@ -1152,6 +1160,19 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 	if err := validatePreparationFailure(ctx, tx.Q(), rc, p); err != nil {
 		return Outcome{}, err
 	}
+	if rc.run.ObservedState == protocol.RunFailed {
+		var previous string
+		err := tx.Q().QueryRowContext(ctx, `SELECT reason FROM independent_review_failures WHERE run_id=?`, rc.run.RunID).Scan(&previous)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Outcome{}, err
+		}
+		if err == nil {
+			if p.Reason != previous {
+				return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "Run already records a different independent review failure")
+			}
+			return Outcome{NoEffect: true, Result: map[string]any{"run_id": rc.run.RunID, "observed": rc.run.ObservedState, "task": newTaskResult(toDomain(rc.task, rc.spec.Budget()), nil)}}, nil
+		}
+	}
 	if preserved, err := preserveMaintenanceGiveUp(ctx, x, tx, rc.run.RunID); err != nil {
 		return Outcome{}, err
 	} else if preserved {
@@ -1208,11 +1229,23 @@ func (Release) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error
 			d = domain.RunFailed(toDomain(rc.task, rc.spec.Budget()), rc.fact(), p.Reason)
 		}
 	}
+	var reviewFailure *independentReviewFailure
+	if p.Preparation == nil && p.Reason != "stopped by tend" {
+		reviewFailure, err = recordIndependentReviewFailure(ctx, x, tx, rc, &d, p.Reason)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
 	_, events, err := applyDecision(ctx, x, tx, rc.task, d, map[string]any{"on": "run.failed", "run_id": rc.run.RunID})
 	if err != nil {
 		return Outcome{}, err
 	}
-	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: map[string]any{"reason": p.Reason}})
+	if reviewFailure != nil {
+		if err := recordIndependentReviewFailureNotice(ctx, x, tx, *reviewFailure); err != nil {
+			return Outcome{}, err
+		}
+	}
+	events = append(events, Event{ObjectType: "run", ObjectID: rc.run.RunID, Kind: "run.released", Body: map[string]any{"reason": p.Reason, "failure": protocol.ParseWorkerFailureReason(p.Reason)}})
 	return Outcome{Result: map[string]any{"run_id": rc.run.RunID, "observed": protocol.RunFailed, "task": newTaskResult(d.Task, nil)}, Events: events}, nil
 }
 

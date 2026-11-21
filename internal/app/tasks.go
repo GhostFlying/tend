@@ -769,9 +769,30 @@ func (CreateAction) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 	if err := claimTaskPlanningSource(ctx, x, tx, p.SourceMessageID, p.CommitSeq); err != nil {
 		return Outcome{}, err
 	}
-	actions, events, err := applyDecision(ctx, x, tx, row, d, map[string]any{"on": "requested"})
+	trigger := map[string]any{"on": "requested"}
+	var retry *independentReviewFailure
+	for _, action := range d.Actions {
+		retry, err = pendingIndependentReviewFailure(ctx, tx.Q(), row.TaskID, protocol.RunRole(action.Kind), action.ArtifactID)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if retry != nil {
+			if err := authorizeIndependentReviewRetry(ctx, x, tx.Q(), row, *retry); err != nil {
+				return Outcome{}, err
+			}
+			trigger["independent_review_failed_run"] = retry.run
+			trigger["reason"] = x.Env.Reason
+		}
+	}
+	actions, events, err := applyDecision(ctx, x, tx, row, d, trigger)
 	if err != nil {
 		return Outcome{}, err
+	}
+	if retry != nil {
+		if _, err := tx.Exec(ctx, `UPDATE independent_review_failures SET retry_action_id=? WHERE run_id=? AND retry_action_id IS NULL`,
+			actions[0].ActionID, retry.run); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if err := bindSource(ctx, tx, p.SourceMessageID, "task", row.TaskID); err != nil {
 		return Outcome{}, err
