@@ -169,7 +169,7 @@ serverkit → webui（webui 只用标准库，不 import 其他包）
 - body 不写跑了哪些测试、多少测试、测试结果；检查进展与结果记录在 PR 描述中，合入前须满足第 4 节的测试门槛。
 - 每个 commit 是一个可以独立构建和测试的原子变更；允许按第 4 节的并行流程在提交后完成检查，重构和行为变化分开提交。
 - 所有改动都通过 PR 合入。普通改动从最新的 `integration` 拉短期分支，创建 PR 时显式指定 `--base integration`，本地验证用 `CHECK_BASE=origin/integration`，独立审阅也以 `integration` 为基线。
-- 只有批次提升和获得用户明确授权的例外 PR 才以 `main` 为目标。例外改动从当前 `main` 开分支，使用 `skip_integration` 标签。Agent 只有在用户明确授权这个 PR 跳过 `integration` 时，才可添加或使用该标签。标签只豁免经过集成分支的要求，合入仍需满足 `main` 的全量 CI、独立审阅和合入授权。
+- 只有批次提升和获得用户明确授权的例外 PR 才以 `main` 为目标。例外改动从当前 `main` 开分支，使用 `skip_integration` 标签。Agent 只有在用户明确授权这个 PR 跳过 `integration` 时，才可添加或使用该标签。合入前核对当前标签和 `main-route` 状态。标签只豁免经过集成分支的要求，合入仍需满足 `main` 的全量 CI、独立审阅和合入授权。
 - 每个 PR 合并前都要经过独立 review，在 PR 分支上运行 `codex review --base <target-ref> -c model='"gpt-6.1-sol"' -c model_reasoning_effort='"xhigh"'`，其中 target-ref 是这个 PR 的实际目标分支。review 意见由提交者逐条判断。确实的缺陷和值得做的改进在合并前修掉，超出本次范围的扩展可以不采纳。在 PR 描述里简要记录采纳和不采纳的意见及理由。需要更新候选时，重新计算影响并评估已有证据，修改较大时重新 review。
 - GitHub 只允许受保护的 rebase merge，`integration` 和 `main` 禁止直接 push 和 force push。合入前核对授权、实际 PR head、目标分支及必需检查。`integration` 允许基线落后且 GitHub 能 rebase 的候选直接合入。GitHub 无法 rebase 时，解决冲突并验证新候选。`main` 保留 strict，候选落后时更新并验证最终组合。提升批次按 [集成分支操作说明](docs/operations/integration-promotion.md) 推进。
 - PR 来源标记：仅当 PR 由真实的 Tend 受管 Issue/Task 推进产出时，给该 PR 添加 GitHub label `tend`。是否受管以实际的 Issue/Task 上下文为准，不凭目录名、分支名或 GitHub 作者账号判断；外部维护（如 Codex 直接维护）、人类直接提交的 PR 以及其他仓库的 PR 都不标记。
