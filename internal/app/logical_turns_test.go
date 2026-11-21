@@ -213,14 +213,6 @@ func TestClarificationAnswerAdoptsOriginalResponsibility(t *testing.T) {
 	if err != nil || before.Processing != "waiting_user" {
 		t.Fatalf("original input before adoption = %q, err = %v", before.Processing, err)
 	}
-	var since int64
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		var err error
-		since, err = store.LatestEventSeq(t.Context(), tx.Q())
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
 	adopt := AdoptClarification{RequestID: next.RequestID}
 	p := state.Awaiting[0]
 	op = h.exec(mainAgent, h.env(adopt.Operation(), protocol.Target{Type: "logical_turn", ID: p.LogicalTurnID}, protocol.AdoptClarificationPayload{LogicalTurnID: p.LogicalTurnID, Revision: p.Revision}, rev(p.Revision)), adopt)
@@ -231,27 +223,20 @@ func TestClarificationAnswerAdoptsOriginalResponsibility(t *testing.T) {
 	if err != nil || after.Processing != "processing" {
 		t.Fatalf("original input after adoption = %q, err = %v", after.Processing, err)
 	}
-	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		batch, err := store.ListEvents(t.Context(), tx.Q(), since, 100)
-		if err != nil {
-			return err
-		}
-		var oldInput, newInput bool
-		for _, event := range batch {
-			oldInput = oldInput || event.ObjectType == "message" && event.ObjectID == id && event.Kind == "messaging.processing"
-			newInput = newInput || event.ObjectType == "message" && event.ObjectID == answer && event.Kind == "conversation.clarification_resumed"
-		}
-		if !oldInput || !newInput {
-			t.Fatalf("pending inputs missing invalidations after adoption: original=%v answer=%v", oldInput, newInput)
-		}
-		return nil
-	}); err != nil {
+	adoptedAt := assertMessagingTurnRefresh(t, h, state.ID, 1)
+	if err := h.app.AwaitNativeReceipts(t.Context(), next.ThreadID); err != nil {
 		t.Fatal(err)
 	}
+	unknown, err := h.app.MessagingMessage(t.Context(), id)
+	if err != nil || unknown.Processing != "unknown" {
+		t.Fatalf("original input while reconciling = %q, err = %v", unknown.Processing, err)
+	}
+	assertMessagingTurnRefresh(t, h, state.ID, 2)
 	h.associate(mainAgent, id)
 	h.associate(mainAgent, answer)
 	commitFixtureTurn(t, h, next.RequestID)
 	next.Status = store.TurnCompleted
+	next.NativeReconciled = true
 	if err := h.app.PutMainTurn(t.Context(), next); err != nil {
 		t.Fatal(err)
 	}
@@ -259,19 +244,18 @@ func TestClarificationAnswerAdoptsOriginalResponsibility(t *testing.T) {
 	if err != nil || completed.Processing != "processed" {
 		t.Fatalf("original input after settlement = %q, err = %v", completed.Processing, err)
 	}
+	settledAt := assertMessagingTurnRefresh(t, h, state.ID, 3)
+	if settledAt <= adoptedAt {
+		t.Fatalf("settlement cursor %d did not advance from adoption %d", settledAt, adoptedAt)
+	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
-		batch, err := store.ListEvents(t.Context(), tx.Q(), since, 100)
-		if err != nil {
-			return err
+		expired, err := store.RefreshCursorExpired(t.Context(), tx.Q(), adoptedAt-1)
+		if err != nil || !expired {
+			t.Fatalf("coalesced IM cursor did not expire: %v, %v", expired, err)
 		}
-		count := 0
-		for _, event := range batch {
-			if event.ObjectType == "message" && event.ObjectID == id && event.Kind == "messaging.processing" {
-				count++
-			}
-		}
-		if count != 2 {
-			t.Fatalf("original input received %d processing invalidations, want adoption and settlement", count)
+		chatExpired, err := store.ChatRefreshCursorExpired(t.Context(), tx.Q(), adoptedAt-1)
+		if err != nil || chatExpired {
+			t.Fatalf("IM-only change expired Chat cursor: %v, %v", chatExpired, err)
 		}
 		return nil
 	}); err != nil {
@@ -283,6 +267,29 @@ func TestClarificationAnswerAdoptsOriginalResponsibility(t *testing.T) {
 			t.Fatal(state, err)
 		}
 	}
+}
+
+func assertMessagingTurnRefresh(t *testing.T, h *harness, logical string, wantRevision int) int64 {
+	t.Helper()
+	ctx := t.Context()
+	var seq int64
+	if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+		var notices, revision, permanent int
+		err := tx.Q().QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(revision),0),COALESCE(MAX(event_seq),0),
+			(SELECT COUNT(*) FROM events WHERE kind='messaging.turn_processing' AND object_id=?)
+			FROM refresh_notifications WHERE kind='messaging.turn_processing' AND object_type='logical_turn' AND object_id=?`, logical, logical).
+			Scan(&notices, &revision, &seq, &permanent)
+		if err != nil {
+			return err
+		}
+		if notices != 1 || revision != wantRevision || permanent != 0 {
+			t.Fatalf("turn %s has %d refresh rows at revision %d and %d permanent events; want one refresh at revision %d", logical, notices, revision, permanent, wantRevision)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return seq
 }
 
 func TestCorrectionRequiresExplicitFactReconciliation(t *testing.T) {

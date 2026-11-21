@@ -162,9 +162,10 @@ type MessagingTask struct {
 
 // MessagingEvent is the communication projection of a durable ledger event.
 type MessagingEvent struct {
-	EventSeq   int64  `json:"event_seq"`
-	Kind       string `json:"kind"`
-	ObjectType string `json:"object_type"`
-	ObjectID   string `json:"object_id"`
-	IssueID    string `json:"issue_id,omitempty"`
+	EventSeq   int64    `json:"event_seq"`
+	Kind       string   `json:"kind"`
+	ObjectType string   `json:"object_type"`
+	ObjectID   string   `json:"object_id"`
+	IssueID    string   `json:"issue_id,omitempty"`
+	MessageIDs []string `json:"message_ids,omitempty"`
 }

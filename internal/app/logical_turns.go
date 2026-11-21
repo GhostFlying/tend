@@ -289,9 +289,6 @@ func (a *App) settleLogicalTurn(ctx context.Context, tx *store.Tx, m store.MainT
 		return false, err
 	}
 	_, err = tx.Exec(ctx, `WITH RECURSIVE children(id) AS (SELECT logical_turn_id FROM logical_turns WHERE resumed_by=? UNION ALL SELECT l.logical_turn_id FROM logical_turns l JOIN children c ON l.resumed_by=c.id) UPDATE logical_turns SET status='completed',reason='',updated_at=? WHERE logical_turn_id IN (SELECT id FROM children)`, v.ID, now)
-	if err == nil && v.Status != "completed" && len(v.Messages) > 1 {
-		err = a.invalidateLogicalTurnInputs(ctx, tx, v.ID, m.MessageID, m.RequestID, now)
-	}
 	return false, err
 }
 
@@ -373,14 +370,7 @@ func (c AwaitTurnClarification) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='awaiting_clarification',reason=?,updated_at=? WHERE logical_turn_id=?`, p.Question, x.Now.UnixMilli(), v.ID); err != nil {
 		return Outcome{}, err
 	}
-	primary := v.Messages[0].MessageID
-	if len(v.Messages) > 1 {
-		a := App{ids: x.IDs}
-		if err := a.invalidateLogicalTurnInputs(ctx, tx, v.ID, primary, x.Env.RequestID, x.Now.UnixMilli()); err != nil {
-			return Outcome{}, err
-		}
-	}
-	return Outcome{Result: map[string]any{"logical_turn_id": v.ID}, Notify: true, Events: []Event{{ObjectType: "message", ObjectID: primary, Kind: "conversation.clarification_pending"}}}, nil
+	return Outcome{Result: map[string]any{"logical_turn_id": v.ID}, Notify: true, Events: []Event{{ObjectType: "message", ObjectID: v.Messages[0].MessageID, Kind: "conversation.clarification_pending"}}}, nil
 }
 
 // recoverLateTurnMessages runs inside dispatcher admission. Triggers retain the
@@ -464,31 +454,7 @@ func (c AdoptClarification) Apply(ctx context.Context, x *Exec, tx *store.Tx) (O
 	if _, err := tx.Exec(ctx, `UPDATE logical_turns SET status='awaiting_completion',resumed_by=?,updated_at=? WHERE logical_turn_id=?`, current.ID, x.Now.UnixMilli(), x.Env.Target.ID); err != nil {
 		return Outcome{}, err
 	}
-	message := current.Messages[0].MessageID
-	a := App{ids: x.IDs}
-	if err := a.invalidateLogicalTurnInputs(ctx, tx, current.ID, message, x.Env.RequestID, x.Now.UnixMilli()); err != nil {
-		return Outcome{}, err
-	}
-	return Outcome{Notify: true, Result: map[string]string{"logical_turn_id": current.ID}, Events: []Event{{ObjectType: "message", ObjectID: message, Kind: "conversation.clarification_resumed"}}}, nil
-}
-
-// The primary message already has a conversation event. IM-only invalidations
-// let other inputs in the same logical turn refresh their derived state.
-func (a *App) invalidateLogicalTurnInputs(ctx context.Context, tx *store.Tx, logical, primary, request string, now int64) error {
-	inputs, err := store.FollowupIDs(ctx, tx.Q(), `SELECT m.message_id
-		FROM logical_turn_messages l JOIN messaging_messages m USING(message_id)
-		WHERE l.logical_turn_id=? AND m.direction='input' AND m.message_id<>?
-		ORDER BY m.message_id`, logical, primary)
-	if err != nil {
-		return err
-	}
-	for _, id := range inputs {
-		if _, err := tx.InsertEvent(ctx, store.EventRow{EventID: a.ids.New(protocol.PrefixEvent), Source: "messaging", ObjectType: "message",
-			ObjectID: id, Kind: "messaging.processing", BodyJSON: `{}`, RequestID: request, CreatedAt: now}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return Outcome{Notify: true, Result: map[string]string{"logical_turn_id": current.ID}, Events: []Event{{ObjectType: "message", ObjectID: current.Messages[0].MessageID, Kind: "conversation.clarification_resumed"}}}, nil
 }
 
 // UncertainNativeTurns contains only registered executions with a missing native receipt.
