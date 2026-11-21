@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -25,32 +26,168 @@ func checkDrainingWindow(ctx context.Context, q store.Querier, window release.Ra
 	return protocol.Errorf(protocol.CodeInvalidTransition, "host %s draining runner %s uses protocol %d outside the target range [%d,%d]", host, instance, version, window.Min, window.Max)
 }
 
-func issueJournalCoverage(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow, host, journal string) (*protocol.MaintenanceAuthorization, error) {
-	now := x.Now.UnixMilli()
-	runs, err := store.ListOpenRunsInJournal(ctx, tx.Q(), host, journal)
-	if err != nil {
-		return nil, err
-	}
-	coverage := min(batch.GrantMillis+batch.RestartMillis, (15 * time.Minute).Milliseconds())
-	grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(batch, now+coverage), RunIDs: []string{}}
-	for _, run := range runs {
-		if run.ObservedState == protocol.RunUnknown {
-			released, err := store.WindowRunStopped(ctx, tx.Q(), host, run.RunID)
-			if err != nil {
-				return nil, err
-			}
-			if released {
-				continue
-			}
-		}
-		lease, err := store.GetLeaseByRun(ctx, tx.Q(), run.RunID)
+type restartJournal struct {
+	runtime  store.HostRuntimeRow
+	control  protocol.RunnerControl
+	primary  bool
+	live     bool
+	renewals []store.LeaseRow
+	fixed    bool
+}
+
+// restartJournals resolves all open Runs, including ones outside the primary
+// and draining journals. Journal absence must not hide an orphan from restart.
+func restartJournals(ctx context.Context, q store.Querier, batch store.UpgradeRow, host store.UpgradeHost, now int64) ([]restartJournal, error) {
+	var journals []restartJournal
+	if !host.PrimaryOffline {
+		rt, err := store.GetHostRuntime(ctx, q, host.HostID)
 		if err != nil {
 			return nil, err
 		}
-		if lease.Status != store.LeaseActive || run.ObservedState == protocol.RunUnknown {
-			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "run %s must reconcile before server restart", run.RunID)
+		ctl, err := runnerControl(ctx, q, host.HostID, now)
+		if err != nil {
+			return nil, err
 		}
-		grant.RunIDs = append(grant.RunIDs, run.RunID)
+		journals = append(journals, restartJournal{runtime: rt, control: ctl, primary: true})
+	}
+	ids, err := store.DrainingInstances(ctx, q, host.HostID)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		drain, err := store.GetDrainingRunner(ctx, q, host.HostID, id)
+		if err != nil {
+			return nil, err
+		}
+		drain.Online = true // Only a fresh heartbeat can confirm this registered predecessor.
+		journals = append(journals, restartJournal{runtime: drain.HostRuntimeRow, control: drain.Control})
+	}
+	byID := make(map[string]*restartJournal, len(journals))
+	for i := range journals {
+		j := &journals[i]
+		rt := j.runtime.Runtime
+		if !batch.Manifest.Protocol.Contains(rt.Protocol) {
+			return nil, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s uses protocol %d outside the restart window", rt.InstanceID, rt.Protocol)
+		}
+		if byID[rt.JournalID] != nil {
+			return nil, protocol.Errorf(protocol.CodeConflictPayload, "host %s has multiple owners for runner journal %q", host.HostID, rt.JournalID)
+		}
+		byID[rt.JournalID] = j
+	}
+
+	runs, err := store.ListOpenRunsOnHost(ctx, q, host.HostID)
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if err := classifyRestartRun(ctx, q, batch, byID, run, now); err != nil {
+			return nil, err
+		}
+	}
+	return journals, nil
+}
+
+func classifyRestartRun(ctx context.Context, q store.Querier, batch store.UpgradeRow, journals map[string]*restartJournal, run store.RunRow, now int64) error {
+	if run.ObservedState == protocol.RunUnknown {
+		stopped, err := store.WindowRunStopped(ctx, q, run.HostID, run.RunID)
+		if err != nil || stopped {
+			return err
+		}
+	}
+	if !batch.Manifest.Protocol.Contains(run.Protocol) {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "unfinished run %s requires a retired protocol", run.RunID)
+	}
+	journal, err := store.RunJournal(ctx, q, run.RunID)
+	if err != nil {
+		return err
+	}
+	j := journals[journal]
+	lease, err := store.GetLeaseByRun(ctx, q, run.RunID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err != nil || lease.HostID != run.HostID {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s has no matching original lease for server restart", run.RunID)
+	}
+	action, err := store.GetAction(ctx, q, run.ActionID)
+	if err != nil {
+		return err
+	}
+	if action.TaskID != run.TaskID || action.Generation != run.Generation {
+		return protocol.Errorf(protocol.CodeConflictPayload, "run %s has conflicting task or action identity", run.RunID)
+	}
+
+	var fixed *protocol.MaintenanceAuthorization
+	for _, owner := range journals {
+		grant := owner.control.Authorization
+		if grant == nil || !slices.Contains(grant.RunIDs, run.RunID) {
+			continue
+		}
+		if owner == j {
+			fixed = grant
+		} else if grant.DeadlineMillis > now {
+			return protocol.Errorf(protocol.CodeConflictPayload, "run %s is named in another journal's maintenance grant", run.RunID)
+		}
+	}
+	if run.ObservedState == protocol.RunUnknown && lease.Status == store.LeaseLapsed {
+		if fixed != nil && fixed.DeadlineMillis > now {
+			return protocol.Errorf(protocol.CodeConflictPayload, "run %s has a lapsed lease and an unexpired maintenance grant", run.RunID)
+		}
+		if journal != "" {
+			if j != nil && j.runtime.Runtime.Protocol >= run.Protocol {
+				return nil // Identity stays attached to its original journal. No resource is released.
+			}
+			if j == nil {
+				retired, err := store.JournalRetirementConfirmed(ctx, q, run.HostID, journal)
+				if err != nil || retired {
+					return err
+				}
+			}
+		}
+		protected, err := activeMaintenanceRunProtection(ctx, q, run)
+		if err != nil || protected != nil {
+			return err
+		}
+		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s lacks proof of journal isolation for server restart", run.RunID)
+	}
+	if j == nil || j.runtime.Runtime.Protocol < run.Protocol {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s has no compatible journal owner for server restart", run.RunID)
+	}
+	if run.ObservedState == protocol.RunUnknown || !lease.Current(now) {
+		return protocol.Errorf(protocol.CodeInvalidTransition, "run %s must reconcile before server restart", run.RunID)
+	}
+	j.live = true
+	if protocol.RunnerOwnsExecution(run.Protocol) {
+		if lease.MaintenanceDeadline != 0 {
+			if j.control.Mode != protocol.RunnerMaintenance || fixed == nil || fixed.DeadlineMillis != lease.MaintenanceDeadline {
+				return protocol.Errorf(protocol.CodeConflictPayload, "run %s has conflicting fixed execution authority", run.RunID)
+			}
+			j.fixed = true
+		}
+	} else {
+		j.renewals = append(j.renewals, lease)
+	}
+	return nil
+}
+
+// issueJournalCoverage adds a maintenance grant only for renewal-bound Runs.
+// A prior fixed grant stays intact, including its original deadline and scope.
+func issueJournalCoverage(ctx context.Context, x *Exec, tx *store.Tx, batch store.UpgradeRow, j restartJournal) (*protocol.MaintenanceAuthorization, error) {
+	prior := j.control.Authorization
+	if prior != nil && prior.DeadlineMillis > x.Now.UnixMilli() {
+		if err := checkRestartGrant(j); err != nil {
+			return nil, err
+		}
+		return prior, nil
+	}
+	if len(j.renewals) == 0 {
+		return nil, nil
+	}
+	coverage := min(batch.GrantMillis+batch.RestartMillis, (15 * time.Minute).Milliseconds())
+	now := x.Now.UnixMilli()
+	grant := &protocol.MaintenanceAuthorization{ID: x.IDs.New(protocol.PrefixLease), DeadlineMillis: capUpgradeDeadline(&batch, now+coverage)}
+	for _, lease := range j.renewals {
+		grant.RunIDs = append(grant.RunIDs, lease.RunID)
 		if err := tx.SetLease(ctx, lease.LeaseID, store.LeaseActive, store.LeaseActive, max(lease.ExpiresAt, grant.DeadlineMillis), now); err != nil {
 			return nil, err
 		}
@@ -58,60 +195,79 @@ func issueJournalCoverage(ctx context.Context, x *Exec, tx *store.Tx, batch *sto
 	return grant, nil
 }
 
-func coverDrainingJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow, host string) error {
-	ids, err := store.DrainingInstances(ctx, tx.Q(), host)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		drain, err := store.GetDrainingRunner(ctx, tx.Q(), host, id)
-		if err != nil {
-			return err
-		}
-		grant, err := issueJournalCoverage(ctx, x, tx, batch, host, drain.Runtime.JournalID)
-		if err != nil {
-			return err
-		}
-		if len(grant.RunIDs) == 0 {
-			continue
-		}
-		drain.Control.Revision++
-		drain.Control.UpgradeID = batch.View.UpgradeID
-		drain.Control.Authorization = grant
-		if err := tx.PutDrainingControl(ctx, host, id, drain.Control); err != nil {
-			return err
+func checkRestartGrant(j restartJournal) error {
+	grant := j.control.Authorization
+	for _, l := range j.renewals {
+		if grant == nil || !slices.Contains(grant.RunIDs, l.RunID) || l.ExpiresAt < grant.DeadlineMillis {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "run %s lacks persisted restart coverage", l.RunID)
 		}
 	}
 	return nil
 }
 
-func confirmedRestartCutoff(control protocol.RunnerControl, rt store.HostRuntimeRow, now time.Time, restartMillis int64) (int64, error) {
-	grant := control.Authorization
-	if grant == nil || rt.Runtime.AuthorizationID != grant.ID || rt.Runtime.AppliedControlRevision != control.Revision || !rt.Online || now.UnixMilli()-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() || grant.DeadlineMillis-now.UnixMilli() < 2*restartMillis {
-		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart coverage is not confirmed or too short", rt.Runtime.InstanceID)
+func prepareRestartJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *store.UpgradeRow, host *store.UpgradeHost) error {
+	journals, err := restartJournals(ctx, tx.Q(), *batch, *host, x.Now.UnixMilli())
+	if err != nil {
+		return err
 	}
-	return min(grant.DeadlineMillis, rt.Runtime.AuthorizationDeadlineMillis) - restartMillis, nil
+	for _, j := range journals {
+		ctl := j.control
+		if j.primary && (ctl.UpgradeID != "" && ctl.UpgradeID != batch.View.UpgradeID || ctl.Authorization != nil && ctl.Authorization.DeadlineMillis > x.Now.UnixMilli()) {
+			return protocol.Errorf(protocol.CodeConflictPayload, "host %s has another restart authority", host.HostID)
+		}
+		grant, err := issueJournalCoverage(ctx, x, tx, *batch, j)
+		if err != nil {
+			return err
+		}
+		if j.primary {
+			if batch.View.ServerOnly && ctl.UpgradeID != batch.View.UpgradeID {
+				host.MaintenanceHandoff = ctl.Mode == protocol.RunnerMaintenance
+			}
+			ctl.Revision++
+			ctl.Mode = protocol.RunnerMaintenance
+			ctl.UpgradeID = batch.View.UpgradeID
+			if ctl.CancelledUpgradeID != batch.View.UpgradeID {
+				ctl.CancelledUpgradeID = ""
+			}
+			ctl.ReleaseID = batch.View.ReleaseID
+			ctl.Authorization = grant
+			if err := tx.PutHostControl(ctx, host.HostID, ctl, x.Now.UnixMilli()); err != nil {
+				return err
+			}
+		} else if grant != nil && grant != ctl.Authorization {
+			ctl.Revision++
+			ctl.UpgradeID = batch.View.UpgradeID
+			ctl.Authorization = grant
+			if err := tx.PutDrainingControl(ctx, host.HostID, j.runtime.Runtime.InstanceID, ctl); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-func drainingRestartCutoff(ctx context.Context, q store.Querier, batch store.UpgradeRow, host string, now time.Time, cutoff int64) (int64, error) {
-	ids, err := store.DrainingInstances(ctx, q, host)
-	if err != nil {
+func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff int64) (int64, error) {
+	if !j.primary && !j.live {
+		return cutoff, nil
+	}
+	rt, ctl := j.runtime, j.control
+	// A fresh ACK of the maintenance revision still fences all new claims,
+	// even when the journal does not need a per-Run restart grant.
+	if ctl.Mode != protocol.RunnerMaintenance || j.primary && ctl.UpgradeID != batch.View.UpgradeID ||
+		rt.Runtime.AppliedControlRevision != ctl.Revision || rt.Runtime.UpgradeID != ctl.UpgradeID ||
+		rt.Runtime.Mode != protocol.RunnerMaintenance && rt.Runtime.Mode != protocol.RunnerReady ||
+		!rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart fence is not confirmed", rt.Runtime.InstanceID)
+	}
+	if len(j.renewals) == 0 && !j.fixed {
+		return cutoff, nil
+	}
+	if err := checkRestartGrant(j); err != nil {
 		return 0, err
 	}
-	for _, id := range ids {
-		drain, err := store.GetDrainingRunner(ctx, q, host, id)
-		if err != nil {
-			return 0, err
-		}
-		if drain.Control.UpgradeID != batch.View.UpgradeID {
-			continue
-		}
-		drain.Online = true // Presence of a draining runner is checked against its own heartbeat timestamp.
-		covered, err := confirmedRestartCutoff(drain.Control, drain.HostRuntimeRow, now, batch.RestartMillis)
-		if err != nil {
-			return 0, err
-		}
-		cutoff = min(cutoff, covered)
+	grant := ctl.Authorization
+	if grant == nil || rt.Runtime.AuthorizationID != grant.ID || grant.DeadlineMillis-now < 2*batch.RestartMillis {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart coverage is not confirmed or too short", rt.Runtime.InstanceID)
 	}
-	return cutoff, nil
+	return min(cutoff, min(grant.DeadlineMillis, rt.Runtime.AuthorizationDeadlineMillis)-batch.RestartMillis), nil
 }

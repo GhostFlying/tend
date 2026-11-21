@@ -63,29 +63,40 @@ head=$(git rev-parse HEAD)
 go run ./internal/release/packagecmd -arch amd64 -commit "$head" -output "$scratch/packages"
 mkdir "$scratch/bundle"
 tar -xzf "$scratch/packages/tend-main-$head-linux-amd64.tar.gz" -C "$scratch/bundle"
-# Relink the same source with a distinct Go build ID to create a third real
-# runner artifact. Server, CLI, supervisor and recorded source commit are identical.
-mkdir "$scratch/third"
-cp -al "$scratch/bundle/." "$scratch/third/"
-rm "$scratch/third/tend-runner" "$scratch/third/manifest.json" "$scratch/third/release-set.json"
-CGO_ENABLED=0 go build -trimpath -buildvcs=true -ldflags=-buildid=tend-wire-third -o "$scratch/third/tend-runner" ./cmd/tend-runner
-python3 - "$scratch/bundle" "$scratch/third" <<'PYTHON'
+# Relink a single component with a distinct Go build ID. Each isolated test
+# verifies a real replacement while retaining the same checked-out source.
+alternate_bundle() {
+  local role=$1 dest=$2 tag=$3
+  mkdir "$dest"
+  cp -al "$scratch/bundle/." "$dest/"
+  rm "$dest/tend-$role" "$dest/manifest.json" "$dest/release-set.json"
+  CGO_ENABLED=0 go build -trimpath -buildvcs=true -ldflags="-buildid=$tag" -o "$dest/tend-$role" "./cmd/tend-$role"
+  python3 - "$scratch/bundle" "$dest" "$role" "$tag" <<'PYTHON'
 import hashlib, json, sys
 from pathlib import Path
-first, third = map(Path, sys.argv[1:])
+first, alternate = map(Path, sys.argv[1:3])
+role, tag = sys.argv[3:]
 for name in ("manifest.json", "release-set.json"):
     doc = json.loads((first / name).read_bytes())
-    doc["release_id"] += "-wire-third"
+    doc["release_id"] += "-" + tag
     for artifact in doc["artifacts"]:
-        if artifact["role"] == "runner":
-            binary = third / artifact["path"]
-            artifact.update(sha256=hashlib.file_digest(binary.open("rb"), "sha256").hexdigest(), size=binary.stat().st_size)
+        if artifact["role"] == role:
+            binary = alternate / artifact["path"]
+            with binary.open("rb") as stream:
+                artifact.update(sha256=hashlib.file_digest(stream, "sha256").hexdigest(), size=binary.stat().st_size)
     if name == "release-set.json":
-        doc["manifest_sha256"] = hashlib.sha256((third / "manifest.json").read_bytes()).hexdigest()
-    (third / name).write_text(json.dumps(doc))
+        doc["manifest_sha256"] = hashlib.sha256((alternate / "manifest.json").read_bytes()).hexdigest()
+    (alternate / name).write_text(json.dumps(doc))
 PYTHON
+}
+alternate_bundle runner "$scratch/third" tend-wire-third
+alternate_bundle server "$scratch/restart" tend-wire-restart
+mkdir "$scratch/bridge-source"
+git archive "$bridge_source" | tar -x -C "$scratch/bridge-source"
+cp "$fixture/seed.go" "$scratch/bridge-source/seed.go"
+(cd "$scratch/bridge-source" && go build -o "$scratch/bridge-seed" seed.go)
 python3 -B "$fixture/next_window.py" "$scratch/third" "$scratch/next-window"
-cp "$fixture/"{cross_version,model,controlled,generations}.py "$scratch/"
+cp "$fixture/"{cross_version,model,controlled,generations,restart_history}.py "$scratch/"
 account=tend-wire-fixture
 sudo useradd --create-home "$account"
 cleanup() {
@@ -117,3 +128,8 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/generations.py" "$scratch/dev" "$scratch/bridge" "$scratch/bundle" "$scratch/dev-seed" --legacy-bridge
+
+
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/restart_history.py" "$scratch/bridge" "$scratch/bundle" "$scratch/restart" "$scratch/bridge-seed"

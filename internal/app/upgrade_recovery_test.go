@@ -11,26 +11,20 @@ import (
 )
 
 func TestUpgradeServerStopGrantReservesConservativeRestartCoverage(t *testing.T) {
-	h, c := upgradeHarness(t)
+	h, c, rt := restartAuthorityFixture(t, "renewal-journal", protocol.MinimumRunnerProtocol)
+	claimRestartWork(t, h, rt, "renewable execution")
 	if op := startPreparedTestUpgrade(h, "coverage", c); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: strings.Repeat("a", 64)})
-	var earliest int64
-	for _, host := range []string{"linux-1", "linux-2"} {
-		rt := upgradeAck(h, host, protocol.RunnerMaintenance)
-		// Include an actual response delay on one host in its acknowledged bound.
-		if host == "linux-2" {
-			rt.Sequence++
-			rt.AuthorizationDeadlineMillis -= 20000
-			if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &rt}); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if earliest == 0 || rt.AuthorizationDeadlineMillis < earliest {
-			earliest = rt.AuthorizationDeadlineMillis
-		}
+	ack := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+	// Include the runner's conservative allowance for the response delay.
+	ack.Sequence++
+	ack.AuthorizationDeadlineMillis -= 20000
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+		t.Fatal(err)
 	}
+	earliest := ack.AuthorizationDeadlineMillis
 	b := protocol.UpgradeBinding{UpgradeID: "coverage", ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: c.ServerHash, InstanceID: "server", ProcessInstanceID: "candidate"}
 	g, err := h.app.ServerUpgradeAuthorize(t.Context(), b)
 	if err != nil || !g.Allowed {

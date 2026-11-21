@@ -181,26 +181,16 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	}
 	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
 	for _, h := range r.Hosts {
-		cutoff, err = drainingRestartCutoff(ctx, tx.Q(), r, h.HostID, x.Now, cutoff)
+		journals, err := restartJournals(ctx, tx.Q(), r, h, x.Now.UnixMilli())
 		if err != nil {
 			return Outcome{}, err
 		}
-		if h.PrimaryOffline {
-			continue
+		for _, j := range journals {
+			cutoff, err = journalRestartCutoff(j, r, x.Now.UnixMilli(), cutoff)
+			if err != nil {
+				return Outcome{}, err
+			}
 		}
-		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
-		if err != nil {
-			return Outcome{}, err
-		}
-		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
-		if err != nil {
-			return Outcome{}, err
-		}
-		covered, err := confirmedRestartCutoff(ctl, rt, x.Now, r.RestartMillis)
-		if err != nil {
-			return Outcome{}, err
-		}
-		cutoff = min(cutoff, covered)
 	}
 	if cutoff <= x.Now.UnixMilli() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")

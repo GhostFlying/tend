@@ -555,42 +555,7 @@ func (c tickUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome,
 					}
 					r.ServerPreviousHash = c.Observation.BinarySHA256
 					for i := range r.Hosts {
-						h := &r.Hosts[i]
-						if h.PrimaryOffline {
-							if err := coverDrainingJournals(ctx, x, tx, &r, h.HostID); err != nil {
-								return Outcome{}, err
-							}
-							continue
-						}
-						ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
-						if err != nil {
-							return Outcome{}, err
-						}
-						// A retained host stays owner-controlled throughout preparation.
-						// Capture its actual mode when acquiring the restart fence.
-						if r.View.ServerOnly && ctl.UpgradeID != r.View.UpgradeID {
-							h.MaintenanceHandoff = ctl.Mode == protocol.RunnerMaintenance
-						}
-						runtime, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
-						if err != nil {
-							return Outcome{}, err
-						}
-						grant, err := issueJournalCoverage(ctx, x, tx, &r, h.HostID, runtime.Runtime.JournalID)
-						if err != nil {
-							return Outcome{}, err
-						}
-						if err := coverDrainingJournals(ctx, x, tx, &r, h.HostID); err != nil {
-							return Outcome{}, err
-						}
-						ctl.Revision++
-						ctl.Mode = protocol.RunnerMaintenance
-						ctl.UpgradeID = r.View.UpgradeID
-						if ctl.CancelledUpgradeID != r.View.UpgradeID {
-							ctl.CancelledUpgradeID = ""
-						}
-						ctl.ReleaseID = r.View.ReleaseID
-						ctl.Authorization = grant
-						if err := tx.PutHostControl(ctx, h.HostID, ctl, now); err != nil {
+						if err := prepareRestartJournals(ctx, x, tx, &r, &r.Hosts[i]); err != nil {
 							return Outcome{}, err
 						}
 					}
