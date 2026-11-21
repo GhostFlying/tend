@@ -16,6 +16,61 @@ promotion = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(promotion)
 
 
+class MainRouteTest(unittest.TestCase):
+    def setUp(self):
+        self.repo = "example/tend"
+        self.head = "a" * 40
+        self.url = "https://github.com/example/tend/actions/runs/1"
+        self.pull = {
+            "number": 12, "state": "open", "base": {"ref": "main"}, "labels": [],
+            "head": {"sha": self.head, "ref": "fix/example", "repo": {"full_name": self.repo}},
+        }
+        self.pulls = self.enterContext(patch.object(promotion, "list_pulls", return_value=[self.pull]))
+        self.api = self.enterContext(patch.object(promotion, "api", return_value=self.pull))
+
+    def assert_route(self, state):
+        promotion.publish_main_route(self.repo, self.head, self.url)
+        args = self.api.call_args.args
+        self.assertEqual(args[:4], (self.repo, f"statuses/{self.head}", "--method", "POST"))
+        self.assertIn("context=main-route", args)
+        self.assertIn(f"state={state}", args)
+
+    def test_default_deny_and_live_label_addition_and_removal(self):
+        self.assert_route("failure")
+        self.pull["labels"] = [{"name": promotion.EXCEPTION_LABEL}]
+        self.assert_route("success")
+        self.pull["labels"] = []
+        self.assert_route("failure")
+
+    def test_only_repository_promotion_route_is_exempt(self):
+        self.pull["head"]["ref"] = promotion.BRANCH
+        self.assert_route("success")
+        self.pull["head"]["repo"]["full_name"] = "fork/tend"
+        self.assert_route("failure")
+
+    def test_shared_head_cannot_borrow_another_prs_label(self):
+        self.pull["labels"] = [{"name": promotion.EXCEPTION_LABEL}]
+        other_pull = {**self.pull, "number": 13, "labels": []}
+        self.pulls.return_value = [self.pull, other_pull]
+        self.assert_route("failure")
+        other_pull["head"] = {**self.pull["head"], "sha": "b" * 40}
+        self.assert_route("success")
+
+    def test_publication_targets_the_latest_pr_head(self):
+        self.pull["labels"] = [{"name": promotion.EXCEPTION_LABEL}]
+        self.assert_route("success")
+        self.pull["head"] = {**self.pull["head"], "sha": "b" * 40}
+        self.assert_route("failure")
+        self.head = self.pull["head"]["sha"]
+        self.assert_route("success")
+
+    def test_closing_the_last_main_pr_revokes_the_status(self):
+        self.pull["labels"] = [{"name": promotion.EXCEPTION_LABEL}]
+        self.assert_route("success")
+        self.pulls.return_value = []
+        self.assert_route("failure")
+
+
 class PromotionTest(unittest.TestCase):
     def setUp(self):
         folder = self.enterContext(tempfile.TemporaryDirectory())
