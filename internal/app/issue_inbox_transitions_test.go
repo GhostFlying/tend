@@ -14,11 +14,15 @@ import (
 func readIssueInbox(t *testing.T, h *harness, issue string, actionable bool) []protocol.AttentionView {
 	t.Helper()
 	var page protocol.AttentionPage
+	status := ""
+	if actionable {
+		status = "open"
+	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		var err error
 		page, err = views.Attentions(t.Context(), tx.Q(), views.AttentionFilter{
 			IssueID: issue, Recipient: "owner", OwnerSubject: owner.Subject,
-			ActionableOnly: actionable, IncludeArchived: true,
+			ActionableOnly: actionable, Status: status, IncludeArchived: true,
 		})
 		return err
 	}); err != nil {
@@ -143,5 +147,124 @@ func TestIssueInboxChecksWaitUsesStoppedCurrentCandidate(t *testing.T) {
 	}
 	if count := h.count("conversation_bindings WHERE object_type='attention'"); count != 0 {
 		t.Fatalf("Inbox transitions created Chat messages: %d", count)
+	}
+}
+
+func refreshInboxDelivery(t *testing.T, h *harness, issue protocol.Issue, ref protocol.IssueDelivery) {
+	t.Helper()
+	issue = canonicalTaskIssue(t, h, issue.IssueID)
+	op := h.exec(owner, h.env("issues.refresh_delivery", protocol.Target{Type: "issue", ID: issue.IssueID},
+		protocol.IssueRefreshDeliveryPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, DeliveryID: ref.DeliveryID}, rev(issue.Revision)), IssueRefreshDelivery{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+}
+
+func claimInboxDelivery(t *testing.T, h *harness, issue protocol.Issue, ref protocol.IssueDelivery) string {
+	t.Helper()
+	refreshInboxDelivery(t, h, issue, ref)
+	query, err := h.app.ClaimServerDelivery(t.Context())
+	if err != nil || query == nil {
+		t.Fatal("expected a provider query", query, err)
+	}
+	return query.ID
+}
+
+func recordInboxDelivery(t *testing.T, h *harness, query, head, ci string) {
+	t.Helper()
+	if err := h.app.RecordServerDelivery(t.Context(), query, &protocol.DeliverySnapshot{
+		State: "open", HeadSHA: head, CI: &protocol.DeliveryCI{HeadSHA: head, State: ci},
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func registerInboxChecksWait(t *testing.T, h *harness, as protocol.Assignment, issue protocol.Issue, ref protocol.IssueDelivery) protocol.ExternalWait {
+	t.Helper()
+	op := h.runAs(as, protocol.OpRunsWaitExternal, protocol.WaitExternalPayload{
+		WaitKey: "inbox-ci", Kind: "checks", IssueID: issue.IssueID, TargetID: ref.DeliveryID,
+		Reason: "Wait for required CI", Recovery: "Read the required CI result",
+	}, WaitExternal{})
+	var wait protocol.ExternalWait
+	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &wait) != nil {
+		t.Fatal(op)
+	}
+	return wait
+}
+
+func TestIssueInboxDoesNotReviveEndedChecksWait(t *testing.T) {
+	for _, scenario := range []struct {
+		name, initial, middleHead, middleCI string
+		refreshAgain, wantNotice            bool
+	}{
+		{name: "terminal at registration", initial: "success"},
+		{name: "same head rerun", initial: "pending", middleHead: "head-a", middleCI: "success"},
+		{name: "head round trip", initial: "pending", middleHead: "head-b", middleCI: "pending"},
+		{name: "terminal behind refresh fence", initial: "pending", middleHead: "head-a", middleCI: "success", refreshAgain: true, wantNotice: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, runtime := managerClaimHarness(t)
+			h.app.serverDeliveryObservations = true
+			ref := protocol.IssueDelivery{DeliveryID: "delivery-inbox", Provider: "github", Repository: "example/project", Number: 7}
+			issue := canonicalLifecycleIssue(t, h.exec(owner, h.env("issues.create", protocol.Target{Type: "issue"}, protocol.CreateIssuePayload{
+				Plan: protocol.IssuePlan{Title: "Wait for CI", Project: "default", Intent: "Wait for checks", Deliveries: []protocol.IssueDelivery{ref}},
+			}, nil), historicalAdmittedIssueFixture{}))
+			issue = canonicalLifecycleIssue(t, h.exec(owner, h.env(protocol.OpIssueRequestManager, protocol.Target{Type: "issue", ID: issue.IssueID},
+				protocol.RequestIssueManagerPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Reason: "Track the candidate"}, rev(issue.Revision)), RequestIssueManager{}))
+
+			as := ownerClaim(t, h, runtime)
+			recordInboxDelivery(t, h, claimInboxDelivery(t, h, issue, ref), "head-a", scenario.initial)
+			wait := registerInboxChecksWait(t, h, as, issue, ref)
+			if scenario.middleHead != "" {
+				query := claimInboxDelivery(t, h, issue, ref)
+				if scenario.refreshAgain {
+					refreshInboxDelivery(t, h, issue, ref)
+				}
+				recordInboxDelivery(t, h, query, scenario.middleHead, scenario.middleCI)
+			}
+			recordInboxDelivery(t, h, claimInboxDelivery(t, h, issue, ref), "head-a", "pending")
+			stopOwnerClaim(t, h, as)
+			items := readIssueInbox(t, h, issue.IssueID, false)
+			if scenario.wantNotice {
+				if len(items) != 1 || items[0].IssueTransition == nil || items[0].IssueTransition.WaitID != wait.WaitID {
+					t.Fatal("the superseded observation invalidated a current wait", items)
+				}
+			} else if len(items) != 0 {
+				t.Fatal("an invalidated wait emitted a notification", items)
+			}
+		})
+	}
+}
+
+func TestIssueInboxReviewWaitDoesNotNotifyImplementingIssue(t *testing.T) {
+	h, runtime, issue := issueOwnerHarness(t)
+	h.app.serverDeliveryObservations = true
+	ref := protocol.IssueDelivery{DeliveryID: "delivery-inbox", Provider: "github", Repository: "example/project", Number: 7}
+	issue.Plan.Deliveries = []protocol.IssueDelivery{ref}
+	issue = canonicalLifecycleIssue(t, canonicalLifecycleControl(t, h, issue, "update", protocol.UpdateIssuePayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Plan: issue.Plan}))
+	task := ownerArtifact(t, h, runtime, issue)
+	as := ownerWorkerClaim(t, h, runtime, protocol.RoleAccept)
+	if as.Responsibility == nil || as.Responsibility.IssueID == issue.IssueID {
+		t.Fatal("expected a distinct review responsibility", as.Responsibility)
+	}
+	if op := h.runAs(as, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	recordInboxDelivery(t, h, claimInboxDelivery(t, h, issue, ref), "head-a", "pending")
+	wait := registerInboxChecksWait(t, h, as, issue, ref)
+	if op := h.runAs(as, protocol.OpRunsYieldExternalWait, protocol.YieldExternalWaitPayload{WaitID: wait.WaitID}, YieldExternalWait{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if items := readIssueInbox(t, h, issue.IssueID, false); len(items) != 0 {
+		t.Fatal("review Run was attributed to the implementing Issue", items)
+	}
+	recordInboxDelivery(t, h, claimInboxDelivery(t, h, issue, ref), "head-a", "success")
+	h.clock.Advance(6 * time.Second)
+	if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waits, err := h.app.ExternalWaits(t.Context(), task.TaskID)
+	if err != nil || len(waits) != 1 || waits[0].Status != "continued" || waits[0].WakeReason != "checks_success" {
+		t.Fatal("review Run could no longer observe and resume", waits, err)
 	}
 }

@@ -64,8 +64,17 @@ func recordChecksWaitInInbox(ctx context.Context, x *Exec, tx *store.Tx, wait *p
 		return false, nil
 	}
 	q := tx.Q()
-	var own sql.NullString
-	if err := q.QueryRowContext(ctx, `SELECT inbox_attention_id FROM run_external_waits WHERE run_id=?`, wait.RunID).Scan(&own); err != nil || own.Valid {
+	var eligible bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM run_external_waits w JOIN runs r USING(run_id)
+ LEFT JOIN run_issue_responsibilities pin USING(run_id)
+ LEFT JOIN issue_manager_tasks m ON m.task_id=r.task_id
+ LEFT JOIN task_work_item_owners o ON o.task_id=r.task_id
+ LEFT JOIN task_execution_contracts c ON c.task_id=r.task_id
+ WHERE w.run_id=? AND w.inbox_attention_id IS NULL
+ AND json_extract(w.body_json,'$.board_checks.head')=?
+ AND json_extract(w.body_json,'$.board_checks.invalidated_at') IS NULL
+ AND `+issueInboxRunOwnerSQL+`=?)`, wait.RunID, wait.ObservedHead, wait.IssueID).Scan(&eligible); err != nil || !eligible {
 		return false, err
 	}
 	issue, err := store.GetCanonicalIssue(ctx, q, wait.IssueID)
@@ -102,9 +111,15 @@ func recordChecksWaitInInbox(ctx context.Context, x *Exec, tx *store.Tx, wait *p
 	err = q.QueryRowContext(ctx, `SELECT w.inbox_attention_id FROM run_external_waits w
  JOIN runs r USING(run_id) JOIN leases l USING(run_id) JOIN tasks t ON t.task_id=w.task_id
  JOIN plan_actions a ON a.action_id=r.action_id LEFT JOIN run_issue_responsibilities pin USING(run_id)
+ LEFT JOIN issue_manager_tasks m ON m.task_id=r.task_id
+ LEFT JOIN task_work_item_owners o ON o.task_id=r.task_id
+ LEFT JOIN task_execution_contracts c ON c.task_id=r.task_id
  WHERE w.status='waiting' AND w.inbox_attention_id IS NOT NULL AND w.successor_run_id IS NULL
    AND json_extract(w.body_json,'$.issue_id')=? AND json_extract(w.body_json,'$.target_id')=?
-   AND json_extract(w.body_json,'$.observed_head')=? AND COALESCE(json_extract(w.body_json,'$.resume_reason'),'')=''
+   AND json_extract(w.body_json,'$.board_checks.head')=?
+   AND json_extract(w.body_json,'$.board_checks.invalidated_at') IS NULL
+   AND COALESCE(json_extract(w.body_json,'$.resume_reason'),'')=''
+   AND `+issueInboxRunOwnerSQL+`=json_extract(w.body_json,'$.issue_id')
    AND r.observed_state='finished' AND l.status='released'
    AND (pin.run_id IS NULL OR (pin.assignment_epoch=? AND pin.agent_ref=?))
    AND t.control_mode='managed' AND t.lifecycle NOT IN ('completed','cancelled')
@@ -135,8 +150,10 @@ func recordChecksWaitInInbox(ctx context.Context, x *Exec, tx *store.Tx, wait *p
 	return created, err
 }
 
-// Explicit Run responsibility takes precedence over the task associations,
-// as in the Issue execution board. A live or unsettled run fences an Issue-level wait.
+// Explicit Run responsibility takes precedence over task associations, as in the Issue execution board.
+const issueInboxRunOwnerSQL = `COALESCE(pin.issue_id, CASE WHEN r.role='issue_manager' THEN m.issue_id WHEN r.role='accept' THEN c.review_issue_id END, o.work_item_id)`
+
+// A live or unsettled Run fences an Issue-level wait.
 const issueInboxUnsettledRunSQL = `
 WITH related(run_id) AS (
  SELECT run_id FROM run_issue_responsibilities WHERE issue_id=?
@@ -149,6 +166,6 @@ SELECT EXISTS(SELECT 1 FROM related JOIN runs r USING(run_id) LEFT JOIN leases l
  LEFT JOIN issue_manager_tasks m ON m.task_id=r.task_id
  LEFT JOIN task_work_item_owners o ON o.task_id=r.task_id
  LEFT JOIN task_execution_contracts c ON c.task_id=r.task_id
- WHERE COALESCE(pin.issue_id, CASE WHEN r.role='issue_manager' THEN m.issue_id WHEN r.role='accept' THEN c.review_issue_id END, o.work_item_id)=?
+ WHERE ` + issueInboxRunOwnerSQL + `=?
  AND r.observed_state<>'starting'
  AND (r.observed_state NOT IN ('finished','failed') OR COALESCE(l.status,'') IN ('active','lapsed')))`

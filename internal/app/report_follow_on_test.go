@@ -197,8 +197,20 @@ func TestReportFollowOnDecision(t *testing.T) {
 					t.Fatalf("report-only did not complete with original report and answer evidence: %+v", issue)
 				}
 			}
-			if h.count("artifacts") != 1 || h.count("attentions") != 1 {
-				t.Fatal("the choice replaced the original report or decision")
+			items := readIssueInbox(t, h, issue.IssueID, false)
+			if h.count("artifacts") != 1 || !slices.ContainsFunc(items, func(a protocol.AttentionView) bool {
+				return a.AttentionID == item.AttentionID && a.DecisionID == item.DecisionID && a.Status == "resolved"
+			}) {
+				t.Fatal("the choice lost the original report or resolved decision", items)
+			}
+			if tc.option == protocol.ReportCloseOnly {
+				if len(items) != 2 || !slices.ContainsFunc(items, func(a protocol.AttentionView) bool {
+					return a.IssueTransition != nil && a.IssueTransition.State == "closed" && a.IssueTransition.ClosureKind == string(protocol.WorkItemClosureCompleted)
+				}) || len(readIssueInbox(t, h, issue.IssueID, true)) != 0 {
+					t.Fatal("report closure did not add exactly one informational notice", items)
+				}
+			} else if len(items) != 1 {
+				t.Fatal("a nonterminal choice unexpectedly emitted a notice", items)
 			}
 			if tc.option == protocol.ReportMoveToBacklog {
 				checkReportFollowOnReadmission(t, h, runtime, issue, run, item, p, "resolved")

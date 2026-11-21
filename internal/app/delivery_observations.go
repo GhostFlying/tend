@@ -379,6 +379,9 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	events = append(events, sharedEvents...)
+	if err := tx.RecordChecksWaitBoardEvidence(ctx, delivery); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Result: protocol.DeliveryReportResult{Accepted: true}, Events: events}, nil
 }
 
