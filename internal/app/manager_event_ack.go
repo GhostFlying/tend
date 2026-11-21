@@ -30,13 +30,10 @@ func (a *App) AcknowledgeManagerEvent(ctx context.Context, run string, seq int64
 // finished. Only the live attachment may retry a write that never reached its
 // transaction callback. History draining retains its existing single attempt.
 func (a *App) RecoverManagerEventACK(ctx context.Context, run string, seq int64, thread, turn, item string, flush bool) error {
-	return a.recoverManagerEventACK(ctx, managerEventACK{run: run, sequence: seq, thread: thread, turn: turn, item: item, flush: flush}, managerEventACKAttempt)
-}
-
-func (a *App) recoverManagerEventACK(ctx context.Context, ack managerEventACK, timeout time.Duration) error {
+	ack := managerEventACK{run: run, sequence: seq, thread: thread, turn: turn, item: item, flush: flush}
 	const attempts = 3
 	for attempt := 0; ; attempt++ {
-		step, cancel := context.WithTimeout(ctx, timeout)
+		step, cancel := context.WithTimeout(ctx, managerEventACKAttempt)
 		started, err := a.writeManagerEventACK(step, ack, attempt > 0)
 		cancel()
 		if err == nil {
@@ -46,7 +43,7 @@ func (a *App) recoverManagerEventACK(ctx context.Context, ack managerEventACK, t
 			return ctx.Err()
 		}
 		if started && protocol.CodeOf(err) != protocol.CodeForbidden {
-			readCtx, done := context.WithTimeout(ctx, timeout)
+			readCtx, done := context.WithTimeout(ctx, managerEventACKAttempt)
 			applied, readErr := a.managerEventACKApplied(readCtx, ack)
 			done()
 			if applied && readErr == nil {
