@@ -8,17 +8,18 @@ const CurrentRunnerProtocol int64 = 7
 const MinimumRunnerProtocol int64 = 6
 
 const (
-	RunnerNormal                      = "normal"
-	RunnerMaintenance                 = "maintenance"
-	RunnerReady                       = "ready"
-	CapabilityRepositoryBindings      = "runner-repositories-v1"
-	CapabilityProtocolNegotiation     = "runner-protocol-negotiation-v1"
-	CapabilityRunnerHeartbeat         = "runner-heartbeat-v1"
-	CapabilityRunnerMaintenance       = "runner-maintenance-v1"
-	CapabilityStrictRetainedResume    = "runner-strict-retained-resume-v1"
-	CapabilityRetainedReconciliation  = "runner-retained-reconciliation-v1"
-	CapabilityBoundedRunnerRecovery   = "runner-bounded-recovery-v1"
-	CapabilityAcceptanceEvidenceFiles = "acceptance-evidence-files-v1"
+	RunnerNormal                        = "normal"
+	RunnerMaintenance                   = "maintenance"
+	RunnerReady                         = "ready"
+	CapabilityRepositoryBindings        = "runner-repositories-v1"
+	CapabilityProtocolNegotiation       = "runner-protocol-negotiation-v1"
+	CapabilityRunnerHeartbeat           = "runner-heartbeat-v1"
+	CapabilityRunnerMaintenance         = "runner-maintenance-v1"
+	CapabilityRunnerMaintenanceCoverage = "runner-maintenance-coverage-v1"
+	CapabilityStrictRetainedResume      = "runner-strict-retained-resume-v1"
+	CapabilityRetainedReconciliation    = "runner-retained-reconciliation-v1"
+	CapabilityBoundedRunnerRecovery     = "runner-bounded-recovery-v1"
+	CapabilityAcceptanceEvidenceFiles   = "acceptance-evidence-files-v1"
 )
 
 // RunnerBuild identifies the immutable executable and process for supervision.
@@ -32,26 +33,34 @@ type RunnerBuild struct {
 	StartedAtMillis int64  `json:"started_at_ms,omitempty"`
 }
 
+// RunnerMaintenanceCoverage reports the conservative server-time cutoff of
+// each locally retained grant, including across a return to normal control.
+// A missing observation identifies an older, aggregate-only runner.
+type RunnerMaintenanceCoverage struct {
+	RunDeadlines map[string]int64 `json:"run_deadlines"`
+}
+
 // RunnerRuntime is an observation, not authority to renew another incarnation.
 // Sequence is monotonic within InstanceID. Replayed claims retain their original
 // runtime observation and must still return their original assignment.
 type RunnerRuntime struct {
 	// JournalID identifies the supervisor-owned data directory across process restarts.
 	// An empty ID is the original journal used before rolling generations.
-	JournalID                      string                  `json:"journal_id,omitempty"`
-	Updater                        *UpdaterSelfObservation `json:"updater,omitempty"`
-	Extensions                     *ExtensionHostStatus    `json:"extensions,omitempty"`
-	BoundedRecoveryAuthorizationID string                  `json:"bounded_recovery_authorization_id,omitempty"`
-	ContinuationBackend            string                  `json:"continuation_backend,omitempty"`
-	AgentContinuations             []AgentExecutor         `json:"agent_continuations,omitempty"`
-	AgentExecutors                 []AgentExecutor         `json:"agent_executors,omitempty"`
-	Repositories                   []RunnerRepository      `json:"repositories,omitempty"`
-	ConfigurationSHA256            string                  `json:"configuration_sha256,omitempty"`
-	ConfirmedCancelledUpgradeID    string                  `json:"confirmed_cancelled_upgrade_id,omitempty"`
-	AuthorizationDeadlineMillis    int64                   `json:"authorization_deadline_ms,omitempty"`
-	UpdaterReceipt                 *UpdaterReceipt         `json:"updater_receipt,omitempty"`
-	JournalVersion                 int64                   `json:"journal_version,omitempty"`
-	InstanceID                     string                  `json:"instance_id"`
+	JournalID                      string                     `json:"journal_id,omitempty"`
+	Updater                        *UpdaterSelfObservation    `json:"updater,omitempty"`
+	Extensions                     *ExtensionHostStatus       `json:"extensions,omitempty"`
+	BoundedRecoveryAuthorizationID string                     `json:"bounded_recovery_authorization_id,omitempty"`
+	ContinuationBackend            string                     `json:"continuation_backend,omitempty"`
+	AgentContinuations             []AgentExecutor            `json:"agent_continuations,omitempty"`
+	AgentExecutors                 []AgentExecutor            `json:"agent_executors,omitempty"`
+	Repositories                   []RunnerRepository         `json:"repositories,omitempty"`
+	ConfigurationSHA256            string                     `json:"configuration_sha256,omitempty"`
+	ConfirmedCancelledUpgradeID    string                     `json:"confirmed_cancelled_upgrade_id,omitempty"`
+	MaintenanceCoverage            *RunnerMaintenanceCoverage `json:"maintenance_coverage,omitempty"`
+	AuthorizationDeadlineMillis    int64                      `json:"authorization_deadline_ms,omitempty"`
+	UpdaterReceipt                 *UpdaterReceipt            `json:"updater_receipt,omitempty"`
+	JournalVersion                 int64                      `json:"journal_version,omitempty"`
+	InstanceID                     string                     `json:"instance_id"`
 	// Generation orders process starts using non-rollback local durable state.
 	Generation             int64       `json:"generation"`
 	Sequence               int64       `json:"sequence"`

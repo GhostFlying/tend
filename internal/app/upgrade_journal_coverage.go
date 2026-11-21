@@ -27,12 +27,14 @@ func checkDrainingWindow(ctx context.Context, q store.Querier, window release.Ra
 }
 
 type restartJournal struct {
-	runtime  store.HostRuntimeRow
-	control  protocol.RunnerControl
-	primary  bool
-	live     bool
-	renewals []store.LeaseRow
-	fixed    bool
+	runtime     store.HostRuntimeRow
+	control     protocol.RunnerControl
+	primary     bool
+	live        bool
+	renewals    []store.LeaseRow
+	fixed       bool
+	delegated   bool
+	localCutoff int64
 }
 
 // restartJournals resolves all open Runs, including ones outside the primary
@@ -129,8 +131,12 @@ func classifyRestartRun(ctx context.Context, q store.Querier, batch store.Upgrad
 			return protocol.Errorf(protocol.CodeConflictPayload, "run %s is named in another journal's maintenance grant", run.RunID)
 		}
 	}
+	var localDeadline int64
+	if j != nil && protocol.RunnerOwnsExecution(run.Protocol) && j.runtime.Runtime.MaintenanceCoverage != nil {
+		localDeadline = j.runtime.Runtime.MaintenanceCoverage.RunDeadlines[run.RunID]
+	}
 	if run.ObservedState == protocol.RunUnknown && lease.Status == store.LeaseLapsed {
-		if fixed != nil && fixed.DeadlineMillis > now {
+		if fixed != nil && fixed.DeadlineMillis > now || localDeadline > now {
 			return protocol.Errorf(protocol.CodeConflictPayload, "run %s has a lapsed lease and an unexpired maintenance grant", run.RunID)
 		}
 		if journal != "" {
@@ -158,6 +164,10 @@ func classifyRestartRun(ctx context.Context, q store.Querier, batch store.Upgrad
 	}
 	j.live = true
 	if protocol.RunnerOwnsExecution(run.Protocol) {
+		j.delegated = true
+		if localDeadline != 0 && (j.localCutoff == 0 || localDeadline < j.localCutoff) {
+			j.localCutoff = localDeadline
+		}
 		if lease.MaintenanceDeadline != 0 {
 			if j.control.Mode != protocol.RunnerMaintenance || fixed == nil || fixed.DeadlineMillis != lease.MaintenanceDeadline {
 				return protocol.Errorf(protocol.CodeConflictPayload, "run %s has conflicting fixed execution authority", run.RunID)
@@ -182,6 +192,12 @@ func issueJournalCoverage(ctx context.Context, x *Exec, tx *store.Tx, batch stor
 	}
 	if len(j.renewals) == 0 {
 		return nil, nil
+	}
+	// An aggregate-only ACK cannot reveal the old delegated Run deadlines
+	// after a new grant replaces its reported identity.
+	if rt := j.runtime.Runtime; j.delegated && rt.MaintenanceCoverage == nil && rt.AuthorizationID != "" &&
+		!slices.Contains(rt.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) {
+		return nil, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s must reconcile retained coverage before receiving a new restart grant", rt.InstanceID)
 	}
 	coverage := min(batch.GrantMillis+batch.RestartMillis, (15 * time.Minute).Milliseconds())
 	now := x.Now.UnixMilli()
@@ -246,6 +262,25 @@ func prepareRestartJournals(ctx context.Context, x *Exec, tx *store.Tx, batch *s
 	return nil
 }
 
+// A lapsed Run can reattach from its original journal. Close that renewal
+// path while a server replacement may already use the frozen coverage set.
+func uncoveredRestartReattachment(ctx context.Context, q store.Querier, lease store.LeaseRow, ctl *protocol.RunnerControl, now int64) (bool, error) {
+	if lease.Status != store.LeaseLapsed || protocol.RunnerOwnsExecution(lease.Protocol) ||
+		ctl != nil && ctl.Authorization != nil && ctl.Authorization.DeadlineMillis > now && lease.ExpiresAt >= ctl.Authorization.DeadlineMillis && slices.Contains(ctl.Authorization.RunIDs, lease.RunID) {
+		return false, nil
+	}
+	batch, err := store.LatestUpgrade(ctx, q)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || batch.View.Status != "running" || batch.View.Phase != "server_ready" {
+		return false, err
+	}
+	return slices.ContainsFunc(batch.Hosts, func(h store.UpgradeHost) bool {
+		return h.HostID == lease.HostID
+	}), nil
+}
+
 func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff int64) (int64, error) {
 	if !j.primary && !j.live {
 		return cutoff, nil
@@ -258,6 +293,22 @@ func journalRestartCutoff(j restartJournal, batch store.UpgradeRow, now, cutoff 
 		rt.Runtime.Mode != protocol.RunnerMaintenance && rt.Runtime.Mode != protocol.RunnerReady ||
 		!rt.Online || now-rt.LastHeartbeatAt >= RunnerOfflineAfter.Milliseconds() {
 		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s restart fence is not confirmed", rt.Runtime.InstanceID)
+	}
+	if j.delegated && rt.Runtime.MaintenanceCoverage == nil && slices.Contains(rt.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage) {
+		return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has not acknowledged its local Run coverage", rt.Runtime.InstanceID)
+	}
+	localCutoff := j.localCutoff
+	if j.delegated && rt.Runtime.MaintenanceCoverage == nil && rt.Runtime.AuthorizationID != "" {
+		// Legacy runners report aggregate coverage. A live fixed execution
+		// can still be subject to that bound even after the server cleared
+		// the old control; do not assume the scope was empty.
+		localCutoff = rt.Runtime.AuthorizationDeadlineMillis
+		if localCutoff <= now {
+			return 0, protocol.Errorf(protocol.CodeInvalidTransition, "runner %s has unresolved retained restart coverage", rt.Runtime.InstanceID)
+		}
+	}
+	if localCutoff != 0 {
+		cutoff = min(cutoff, localCutoff-batch.RestartMillis)
 	}
 	if len(j.renewals) == 0 && !j.fixed {
 		return cutoff, nil

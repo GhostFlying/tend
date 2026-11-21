@@ -81,18 +81,19 @@ type RunVerdict struct {
 // that the runner did not report; they never started, so the runner takes
 // them over as if it had just claimed them.
 type HelloResult struct {
-	UsageCollection    bool              `json:"usage_collection,omitempty"`
-	ManagedExtensions  bool              `json:"managed_extensions,omitempty"`
-	NativeUsage        bool              `json:"native_usage,omitempty"`
-	RolloutPreview     bool              `json:"rollout_preview,omitempty"`
-	DeploymentID       string            `json:"deployment_id,omitempty"`
-	AgentContinuation  bool              `json:"agent_continuation,omitempty"`
-	RetainedExecutions []RunExecutionPin `json:"retained_executions,omitempty"`
-	ProtocolMax        int64             `json:"protocol_max,omitempty"`
-	AgentExecution     bool              `json:"agent_execution,omitempty"`
-	AgentInventory     bool              `json:"agent_inventory,omitempty"`
-	RepositoryBindings bool              `json:"repository_bindings,omitempty"`
-	Control            *RunnerControl    `json:"control,omitempty"`
+	MaintenanceCoverage bool              `json:"maintenance_coverage,omitempty"`
+	UsageCollection     bool              `json:"usage_collection,omitempty"`
+	ManagedExtensions   bool              `json:"managed_extensions,omitempty"`
+	NativeUsage         bool              `json:"native_usage,omitempty"`
+	RolloutPreview      bool              `json:"rollout_preview,omitempty"`
+	DeploymentID        string            `json:"deployment_id,omitempty"`
+	AgentContinuation   bool              `json:"agent_continuation,omitempty"`
+	RetainedExecutions  []RunExecutionPin `json:"retained_executions,omitempty"`
+	ProtocolMax         int64             `json:"protocol_max,omitempty"`
+	AgentExecution      bool              `json:"agent_execution,omitempty"`
+	AgentInventory      bool              `json:"agent_inventory,omitempty"`
+	RepositoryBindings  bool              `json:"repository_bindings,omitempty"`
+	Control             *RunnerControl    `json:"control,omitempty"`
 	// LeaseTTLMillis is the lease duration tend currently grants.
 	LeaseTTLMillis int64        `json:"lease_ttl_ms"`
 	Runs           []RunVerdict `json:"runs"`

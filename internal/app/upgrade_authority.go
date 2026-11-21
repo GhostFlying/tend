@@ -195,6 +195,9 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if cutoff <= x.Now.UnixMilli() {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")
 	}
+	if r.ServerGrantDeadline > cutoff {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "current runner coverage cannot confirm the original server restart grant")
+	}
 	if r.ServerGrantDeadline == 0 {
 		r.ServerGrantDeadline = cutoff
 		r.ServerProcess = b.ProcessInstanceID

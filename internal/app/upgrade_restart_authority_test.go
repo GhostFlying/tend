@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -243,5 +244,102 @@ func TestUpgradeChecksOriginalFixedGrantOnDrainingJournal(t *testing.T) {
 	}
 	if got := h.lease(a.RunID); got != lease {
 		t.Fatal("fixed execution was rewritten", got, lease)
+	}
+}
+
+func TestUpgradeObservesRunnerLocalCoverageAfterServerClearsGrant(t *testing.T) {
+	for _, variant := range []struct {
+		name    string
+		scoped  bool
+		short   bool
+		unbound bool
+	}{
+		{name: "legacy expired inside restart budget", short: true},
+		{name: "legacy still valid"},
+		{name: "per-Run evidence expired inside restart budget", scoped: true, short: true},
+		{name: "per-Run evidence still valid", scoped: true},
+		{name: "an old grant unrelated to the live execution", scoped: true, unbound: true},
+	} {
+		t.Run(variant.name, func(t *testing.T) {
+			ctx := t.Context()
+			h, c, rt := restartAuthorityFixture(t, "original-journal", protocol.CurrentRunnerProtocol)
+			a := claimRestartWork(t, h, rt, "live delegated execution")
+			if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
+				t.Fatal(op.Error)
+			}
+			upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256})
+			ack := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+			ack.Sequence++
+			now := h.clock.Now()
+			deadline := now.Add(3 * time.Minute).UnixMilli()
+			if variant.short {
+				deadline = now.Add(45 * time.Second).UnixMilli()
+			}
+			ack.AuthorizationID = "original-grant"
+			ack.AuthorizationDeadlineMillis = deadline
+			if variant.scoped {
+				ack.MaintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: make(map[string]int64)}
+				// A subsequent unrelated grant can supersede the aggregate ACK
+				// while the original worker retains its own shorter deadline.
+				ack.AuthorizationID = "later-grant"
+				ack.AuthorizationDeadlineMillis = now.Add(8 * time.Minute).UnixMilli()
+				if !variant.unbound {
+					ack.MaintenanceCoverage.RunDeadlines[a.RunID] = deadline
+				}
+			}
+			if _, err := h.app.RuntimeHeartbeat(ctx, runner("linux-1"), protocol.HeartbeatPayload{Runtime: &ack}); err != nil {
+				t.Fatal(err)
+			}
+			if l := h.lease(a.RunID); l.MaintenanceDeadline != 0 {
+				t.Fatal("fixture still has a server-side grant", l)
+			}
+			result, err := h.app.ServerUpgradeAuthorize(ctx, restartTestBinding(c, "next"))
+			if variant.short {
+				if protocol.CodeOf(err) != protocol.CodeInvalidTransition || result.Allowed {
+					t.Fatal("replacement could run past the original local deadline", result, err)
+				}
+				return
+			}
+			want := deadline - upgradeRead(h).RestartMillis
+			if variant.unbound {
+				want = now.UnixMilli() + upgradeRead(h).GrantMillis
+			}
+			if err != nil || !result.Allowed || result.ExpiresAt.UnixMilli() != want {
+				t.Fatal("wrong cutoff for actual execution", want, result, err)
+			}
+		})
+	}
+}
+
+func TestUpgradeKeepsUncoveredRenewableRunLapsedAfterAuthorization(t *testing.T) {
+	ctx := t.Context()
+	h, c, rt := restartAuthorityFixture(t, "original-journal", protocol.MinimumRunnerProtocol)
+	rt.Capabilities = append(rt.Capabilities, protocol.CapabilityRetainedReconciliation)
+	original := claimRestartWork(t, h, rt, "lost original renewal")
+	rt.Sequence++
+	if op := h.versionedHello("linux-1", rt); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	if op := startPreparedTestUpgrade(h, "next", c); op.Error != nil {
+		t.Fatal(op.Error)
+	}
+	upgradeTick(h, ServerObservation{MainDrained: true, BinarySHA256: rt.Build.BinarySHA256})
+	ack := upgradeAck(h, "linux-1", protocol.RunnerMaintenance)
+	b := restartTestBinding(c, "next")
+	if g, err := h.app.ServerUpgradeAuthorize(ctx, b); err != nil || !g.Allowed {
+		t.Fatal(g, err)
+	}
+	ack.Sequence++
+	op := h.exec(runner("linux-1"), h.env(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: "linux-1"},
+		protocol.HelloPayload{Runtime: &ack, WorkspaceProtocol: 1, Held: []protocol.HeldRun{{
+			RunID: original.RunID, LeaseID: original.LeaseID, Observed: protocol.RunInterrupted,
+		}}}, nil), Hello{})
+	var reply protocol.HelloResult
+	if op.Error != nil || json.Unmarshal(op.Result, &reply) != nil || len(reply.Runs) != 1 ||
+		reply.Runs[0].Verdict != protocol.VerdictRetain {
+		t.Fatal("unexpected uncovered reattachment result", op, reply)
+	}
+	if h.lease(original.RunID).Status != store.LeaseLapsed || h.run(original.RunID).ObservedState != protocol.RunUnknown {
+		t.Fatal("original Run reacquired renewal beyond the prepared coverage")
 	}
 }

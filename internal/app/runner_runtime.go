@@ -45,6 +45,16 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "execution observations require capability")
 	}
 
+	if coverage := r.MaintenanceCoverage; coverage != nil {
+		if coverage.RunDeadlines == nil {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "runner maintenance coverage requires a Run deadline map")
+		}
+		for id, deadline := range coverage.RunDeadlines {
+			if !protocol.ValidID(protocol.PrefixRun, id) || deadline <= 0 {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "invalid runner maintenance coverage")
+			}
+		}
+	}
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}

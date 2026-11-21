@@ -771,6 +771,7 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 	res := protocol.HelloResult{LeaseTTLMillis: x.LeaseTTL.Milliseconds(), Runs: []protocol.RunVerdict{}, Reassigned: []protocol.Assignment{}}
 	res.UsageCollection = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityUsageCollection)
 	res.NativeUsage = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityNativeUsage)
+	res.MaintenanceCoverage = p.Runtime != nil && slices.Contains(p.Runtime.Capabilities, protocol.CapabilityRunnerMaintenanceCoverage)
 	changed, err := observeRuntime(ctx, tx, host.HostID, p.Runtime, now, true)
 	if err != nil {
 		return Outcome{}, err
@@ -860,6 +861,18 @@ func (Hello) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) 
 		}
 		if lease.MaintenanceExpired(now) {
 			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictRetain, Desired: desired, Reason: "original maintenance execution authorization expired"})
+			continue
+		}
+		uncovered, err := uncoveredRestartReattachment(ctx, q, lease, res.Control, now)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if uncovered {
+			const reason = "original renewal is waiting for the server replacement coverage to settle"
+			if !runtimeSupportsRetainedReconciliation(p.Runtime) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "%s", reason)
+			}
+			res.Runs = append(res.Runs, protocol.RunVerdict{RunID: run.RunID, Verdict: protocol.VerdictRetain, Desired: desired, Reason: reason})
 			continue
 		}
 		protected, err := activeMaintenanceRunProtection(ctx, q, run)

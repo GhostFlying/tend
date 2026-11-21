@@ -111,6 +111,10 @@ sudo systemctl start "user@$uid.service"
 sudo chown -R "$account:" "$scratch"
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+  python3 -B "$scratch/restart_history.py" "$scratch/bridge" "$scratch/old" "$scratch/bundle" "$scratch/restart" "$scratch/bridge-seed"
+
+sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/cross_version.py" "${args[@]}" --controlled-bundle "$scratch/bundle"
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
@@ -128,8 +132,3 @@ sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_D
 sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
   DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
   python3 -B "$scratch/generations.py" "$scratch/dev" "$scratch/bridge" "$scratch/bundle" "$scratch/dev-seed" --legacy-bridge
-
-
-sudo -u "$account" env -i PATH=/usr/bin:/bin HOME="/home/$account" XDG_RUNTIME_DIR="/run/user/$uid" \
-  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-  python3 -B "$scratch/restart_history.py" "$scratch/bridge" "$scratch/bundle" "$scratch/restart" "$scratch/bridge-seed"

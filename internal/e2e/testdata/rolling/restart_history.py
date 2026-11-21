@@ -37,7 +37,7 @@ def seed_history(db, task):
     return run, lease
 
 
-def exercise(root, old, first, second, seed):
+def exercise(root, old, renewal_runner, first, second, seed):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         address = "127.0.0.1:" + str(sock.getsockname()[1])
@@ -62,8 +62,19 @@ def exercise(root, old, first, second, seed):
         with contextlib.closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
             return conn.execute(sql, args).fetchall()
 
-    def command(*args, **kwargs):
-        return subprocess.check_output(args, env=env, timeout=180, **kwargs)
+    def command(*args):
+        return subprocess.check_output(args, env=env, timeout=250)
+
+    def cli(*args):
+        return command(first / "tend", *args)
+
+    def maintenance_confirmed(mode, after=0):
+        return rows("""select 1 from host_runtime r join host_controls c using(host_id)
+                      where r.host_id='compat' and r.online=1 and r.last_heartbeat_at>?
+                      and json_extract(c.control_json,'$.mode')=?
+                      and json_extract(r.runtime_json,'$.applied_control_revision')=c.revision
+                      and json_extract(r.runtime_json,'$.mode') in (?,?)""",
+                    (after, mode, mode, "ready" if mode == "maintenance" else mode))
 
     def upgrade(*args):
         return json.loads(command(first / "tend", "upgrade", *args, "--socket", root / "server.sock", "--json"))
@@ -80,18 +91,28 @@ def exercise(root, old, first, second, seed):
             return proc
 
         db_init = launch(old / "tend-server", cfg, "db-init.log")
-        eventually("old ledger initialized", lambda: rows("select name from sqlite_master where name='hosts'")
-                   and rows("select host_id from hosts where host_id='compat'"), [db_init])
+        journal_env = {"TEND_RUNNER_JOURNAL_ID": "fixture-journal"}
+        registration = launch(renewal_runner / "tend-runner", runner, "registration.log",
+                              dict(journal_env, TEND_UPDATER_PROCESS_INSTANCE_ID="fixture-registration"))
+        eventually("historical runner registers its workspace capabilities",
+                   lambda: rows("select name from sqlite_master where name='host_runtime'")
+                   and rows("select 1 from host_runtime where json_extract(runtime_json,'$.journal_id')='fixture-journal'"),
+                   [db_init, registration])
+        stop(registration)
         stop(db_init)
-        original_task, live_task = command(seed, db).decode().splitlines()
+        original_task, *queued = command(seed, db, "restart-history").decode().splitlines()
         run, lease = seed_history(db, original_task)
         original = snapshot(original_task)
         subprocess.run(["systemctl", "--user", "import-environment", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"],
                        env=env, check=True, timeout=20)
         old_pid = prepare(root, old, old / "tend-server", cfg, env, stack, recovery_fixture=True)
-        active = launch(old / "tend-runner", runner, "runner.log",
-                        {"TEND_RUNNER_JOURNAL_ID": "fixture-journal", "TEND_UPDATER_PROCESS_INSTANCE_ID": "fixture-journal"})
+        active = launch(renewal_runner / "tend-runner", runner, "runner.log",
+                        dict(journal_env, TEND_UPDATER_PROCESS_INSTANCE_ID="fixture-journal"))
         eventually("one live worker in the original journal", lambda: len(list(root.glob("*.gate"))) == 1, [active])
+        live_task, = eventually("original renewal-bound execution is running", lambda: rows(
+            "select task_id from runs where protocol=6 and observed_state='running'"), [active])[0]
+        assert live_task in queued
+        queued_task, = set(queued) - {live_task}
         live = snapshot(live_task)
         assert len(live) == 1 and live[0][2] == "active"
 
@@ -108,6 +129,17 @@ def exercise(root, old, first, second, seed):
         assert cancelled["status"] == "cancelled"
         print(f"38ea guard refused replacement for {run}/{lease}, old process retained", flush=True)
 
+        cli("login", "--server", "http://" + address)
+        cli("host", "set-maintenance", "compat", "--data", '{"mode":"maintenance"}')
+        eventually("renewal-bound runner acknowledged closed admission", lambda: maintenance_confirmed("maintenance"), [active])
+        cli("cancel", live_task, "--data", "{}")
+        eventually("the original protocol 6 worker stopped and released its lease",
+                   lambda: snapshot(live_task)[0][2] == "released", [active])
+        assert not snapshot(queued_task)
+        first_gate, = root.glob("*.gate")
+        assert first_gate.with_suffix(".interrupted").exists()
+        before_recovery = int(time.time() * 1000)
+
         recovery = (first / "tend", "upgrade", "recover", "--release", first, "--config", root / "updater.json",
                     "--unit", f"tend-{root.name}.service", "--request-id", "fixture-migration")
         preview = json.loads(command(*recovery, "--force", "--dry-run"))
@@ -119,7 +151,15 @@ def exercise(root, old, first, second, seed):
         assert installed["process"]["pid"] != old_pid
         assert installed["committed_proof"]["external_recovery"] and not Path(f"/proc/{old_pid}").exists()
         assert snapshot(original_task) == original
-        print("supported external recovery committed; historical Run and lease preserved", flush=True)
+        eventually("the original runner reconfirmed fenced admission on the installed server",
+                   lambda: maintenance_confirmed("maintenance", before_recovery), [active])
+        assert not snapshot(queued_task)
+        print("supported recovery committed with the old live lease settled and admission fenced", flush=True)
+        cli("host", "set-maintenance", "compat", "--data", '{"mode":"normal"}')
+        eventually("original queued work claimed after reopening", lambda: snapshot(queued_task), [active])
+        queued_run, = snapshot(queued_task)
+        assert queued_run[2] == "active"
+        eventually("queued worker reached its gate", lambda: len(list(root.glob("*.gate"))) == 2, [active])
 
         batch = upgrade("start", "--release", second, "--server-only", "--upgrade-id", "corrected-guard")
         eventually("ordinary cutover with the same historical state", lambda: rows(
@@ -129,15 +169,16 @@ def exercise(root, old, first, second, seed):
         assert state["operation"]["id"] == batch["upgrade_id"] and state["operation"]["phase"] == "committed"
         assert state["process"]["pid"] != installed["process"]["pid"]
         assert snapshot(original_task) == original
-        assert snapshot(live_task)[0][:3] == live[0][:3]
-        assert len(list(root.glob("*.gate"))) == 1
-        assert rows("select count(*) from runs") == [(2,)]
+        assert snapshot(queued_task)[0][:3] == queued_run[:3]
+        assert snapshot(live_task)[0][:3] == (*live[0][:2], "released")
+        assert len(list(root.glob("*.gate"))) == 2
+        assert rows("select count(*) from runs") == [(3,)]
         assert rows("select count(*) from runner_window_released_leases") == [(0,)]
-        gate, = root.glob("*.gate")
+        gate, = set(root.glob("*.gate")) - {first_gate}
         with os.fdopen(os.open(gate, os.O_WRONLY | os.O_NONBLOCK), "w") as stream:
             print("complete", file=stream)
         eventually("original executor committed its result", lambda: rows(
-            "select artifact_id from artifacts where run_id=?", (live[0][0],)), [active])
+            "select artifact_id from artifacts where run_id=?", (queued_run[0],)), [active])
         assert snapshot(original_task) == original
         print("corrected guard committed another normal cutover with one original executor and no historical replay", flush=True)
 
