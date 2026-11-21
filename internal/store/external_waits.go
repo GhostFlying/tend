@@ -34,17 +34,27 @@ func (t *Tx) PutExternalWait(ctx context.Context, v protocol.ExternalWait, next 
 }
 
 func TaskExternalWaits(ctx context.Context, q Querier, task, runID, status string) ([]protocol.ExternalWait, error) {
-	query := `SELECT body_json FROM run_external_waits WHERE task_id=?`
+	base := `SELECT body_json, rowid AS sequence, 0 AS immediate FROM run_external_waits WHERE task_id=?`
 	args := []any{task}
 	if runID != "" {
-		query += ` AND run_id=?`
+		base += ` AND run_id=?`
 		args = append(args, runID)
 	}
 	if status != "" {
-		query += ` AND status=?`
+		base += ` AND status=?`
 		args = append(args, status)
 	}
-	rows, err := q.QueryContext(ctx, query+` ORDER BY rowid`, args...)
+	if status == "" || status == protocol.ExternalWaitSatisfied {
+		immediate := `SELECT json_extract(e.body_json,'$.wait') AS body_json,e.event_seq AS sequence,1 AS immediate
+ FROM runs r JOIN events e ON e.object_type='run' AND e.object_id=r.run_id WHERE r.task_id=? AND e.kind=?`
+		args = append(args, task, protocol.EventPRWaitSatisfied)
+		if runID != "" {
+			immediate += ` AND r.run_id=?`
+			args = append(args, runID)
+		}
+		base += ` UNION ALL ` + immediate
+	}
+	rows, err := q.QueryContext(ctx, `SELECT body_json FROM (`+base+`) ORDER BY json_extract(body_json,'$.created_at_ms'),immediate,sequence`, args...)
 	if err != nil {
 		return nil, err
 	}

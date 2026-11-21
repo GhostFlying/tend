@@ -22,8 +22,8 @@ func (s *Server) externalWaits(w http.ResponseWriter, r *http.Request) {
 			return nil, protocol.Errorf(protocol.CodeInvalidRequest, "run_id must be one nonempty original Run ID")
 		}
 		if query.Has("status") {
-			if len(query["status"]) != 1 || !slices.Contains([]string{"stopping", "waiting", "continued", "cancelled"}, status) {
-				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "status must be one of stopping, waiting, continued or cancelled")
+			if len(query["status"]) != 1 || !slices.Contains([]string{"stopping", "waiting", "continued", "cancelled", protocol.ExternalWaitSatisfied}, status) {
+				return nil, protocol.Errorf(protocol.CodeInvalidRequest, "status must be one of stopping, waiting, continued, cancelled or satisfied")
 			}
 		}
 		return store.TaskExternalWaits(r.Context(), q, r.PathValue("id"), runID, status)

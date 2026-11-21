@@ -68,9 +68,17 @@ func stageDeliveryObservations(ctx context.Context, x *Exec, tx *store.Tx) (int,
 			if err != nil {
 				return 0, err
 			}
-			due := row.QueryUntil <= now && row.NextCheckAt <= now && (row.RefreshRequested || (item.Status != "closed" && row.Observation.State != "closed" && row.Observation.State != "merged"))
-			if !due {
+			if row.QueryUntil > now || row.NextCheckAt > now {
 				continue
+			}
+			if !row.RefreshRequested && (item.Status == "closed" || oneOf(row.Observation.State, "closed", "merged")) {
+				waiting, err := hasPRDeliveryWait(ctx, tx.Q(), item.WorkItemID, delivery.DeliveryID)
+				if err != nil {
+					return 0, err
+				}
+				if !waiting {
+					continue
+				}
 			}
 			var status, event string
 			err = tx.Q().QueryRowContext(ctx, `SELECT status,event_id FROM observation_jobs WHERE issue_id=? AND delivery_id=?`, item.WorkItemID, delivery.DeliveryID).Scan(&status, &event)

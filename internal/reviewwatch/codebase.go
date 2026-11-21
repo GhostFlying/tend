@@ -34,6 +34,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 				Status, URL, UpdatedAt, MergedAt, ClosedAt, MergeCommitId string
 				MergedBy, ClosedBy                                        *codebaseActor
 				SourceBranch, TargetBranch                                *struct {
+					Name   string
 					Commit *struct {
 						ID string `json:"Id"`
 					}
@@ -75,8 +76,11 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
 	out := Observation{State: mr.Status, URL: mr.URL, UpdatedAt: mr.UpdatedAt, MergedAt: mr.MergedAt, ClosedAt: mr.ClosedAt, MergeSHA: mr.MergeCommitId, MergedBy: mr.MergedBy.actor()}
+	if mr.TargetBranch != nil {
+		out.TargetRef = mr.TargetBranch.Name
+	}
 	if mr.TargetBranch != nil && mr.TargetBranch.Commit != nil {
-		if !c.cfg.IncludeChecks {
+		if !(c.cfg.IncludeChecks || ref.IncludeChecks) {
 			out.BaseSHA = mr.TargetBranch.Commit.ID
 		}
 		out.TargetSHA = mr.TargetBranch.Commit.ID
@@ -89,7 +93,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		if v.Number > latest && v.SourceCommitId != "" {
 			latest = v.Number
 			out.HeadSHA = v.SourceCommitId
-			if c.cfg.IncludeChecks {
+			if c.cfg.IncludeChecks || ref.IncludeChecks {
 				out.BaseSHA = v.TargetCommitId
 			}
 		}
@@ -100,7 +104,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	if mr.Status == Closed {
 		out.ClosedBy = mr.ClosedBy.actor()
 	}
-	if c.cfg.IncludeChecks && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
+	if (c.cfg.IncludeChecks || ref.IncludeChecks) && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
 		confirmed, err := c.codebaseLineage(ctx, ref, out.TargetSHA, out.MergeSHA)
 		if err != nil {
 			out.LineageErrorKind = "query_failed"
@@ -115,7 +119,7 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 			out.TargetContainsMerge = confirmed
 		}
 	}
-	if c.cfg.IncludeChecks {
+	if c.cfg.IncludeChecks || ref.IncludeChecks {
 		if err := c.codebaseChecks(ctx, ref, &out); err != nil {
 			kind := "query_failed"
 			var failure *Error
@@ -183,7 +187,7 @@ func (c *Client) codebaseChecks(ctx context.Context, ref Ref, out *Observation) 
 	unknown, pending, failed, passed := false, false, false, false
 	for _, r := range checks.Items {
 		state, conclusion := strings.ToLower(r.Status), strings.ToLower(r.Conclusion)
-		out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Name: r.Name, State: state, Conclusion: conclusion, URL: r.DetailsURL})
+		out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Source: "codebase_check_run", Name: r.Name, State: state, Conclusion: conclusion, URL: r.DetailsURL})
 		if state == "queued" || state == "in_progress" {
 			pending = true
 			continue
