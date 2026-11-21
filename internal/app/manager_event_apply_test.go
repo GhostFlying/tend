@@ -319,30 +319,100 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 	}
 }
 
-func TestFault_ManagerProjectionPreservesNewestContextUsage(t *testing.T) {
-	for _, existingIsNewer := range []bool{false, true} {
-		name := "replace_prior_thread_snapshot"
-		if existingIsNewer {
-			name = "preserve_later_thread_snapshot"
+func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing.T) {
+	h, _, issue, as, _ := reviewManagerAssignment(t)
+	ctx := t.Context()
+	id := as.Manager.ConversationID
+	selection, named, _, err := h.app.HostedRuntimeStartupSelection(ctx, id)
+	if err != nil || !named {
+		t.Fatal(selection, named, err)
+	}
+	source, request := h.ids.New(protocol.PrefixMessage), h.ids.New(protocol.PrefixRequest)
+	const thread, turn = "native-thread", "direct-owner-turn"
+	now := h.clock.Now().UnixMilli()
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: source, ConversationID: id, Author: "owner", Body: "Original direct input", CreatedAt: now}); err != nil {
+			return err
 		}
-		t.Run(name, func(t *testing.T) {
+		if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: request, ConversationID: id, IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, Selection: selection, CreatedAt: now}); err != nil {
+			return err
+		}
+		return tx.PutMainTurn(ctx, store.MainTurn{RequestID: request, ThreadID: thread, TurnID: turn, MessageID: source, Status: store.TurnInterrupted}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	facts := []string{
+		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"unfinished","ItemType":"commandExecution","Tool":{"Name":"shell","Input":"retained command","Status":"running"},"Raw":{"status":"inProgress"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"running"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original failure","Status":"failed"}}}`,
+	}
+	for i, raw := range facts {
+		p := protocol.ManagerNativeEvent{Sequence: int64(i + 1), Body: json.RawMessage(raw)}
+		if op := h.runAs(as, protocol.OpManagerNativeEvent, p, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+	}
+	last := int64(len(facts))
+	if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original process stopped", LastSequence: last}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	for seq := int64(1); seq <= last; seq++ {
+		if err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertManagerProjectionWatermarks(t, h, as.RunID, last, last)
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
+ WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='unfinished' AND u.input='retained command' AND u.status='interrupted'`, thread, turn, source) != 1 {
+		t.Fatal("original tool without a result did not retain its source and interrupted state")
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
+ WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='with-result' AND u.status='failed' AND u.output='original failure'`, thread, turn, source) != 1 {
+		t.Fatal("original failure did not replace the interrupted projection")
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM agent_rollout_events WHERE thread_id=? AND turn_id=? AND item_id='unfinished'
+ AND kind='item_started' AND json_extract(data_json,'$.status')='inProgress'`, thread, turn) != 1 {
+		t.Fatal("projection did not preserve the original native start")
+	}
+}
+
+func TestFault_ManagerProjectionPreservesNewestContextUsage(t *testing.T) {
+	const originalThread = "original-thread"
+	for _, tc := range []struct {
+		name, existingThread            string
+		existingRevision, eventRevision int64
+		existingWrittenLater            bool
+		wantThread                      string
+		wantRevision                    int64
+	}{
+		{"replace_prior_thread_snapshot", "other-thread", 1, 1, false, originalThread, 1},
+		{"preserve_later_thread_snapshot", "other-thread", 1, 1, true, "other-thread", 1},
+		{"restore_higher_revision_received_before_live_write", originalThread, 1, 2, true, originalThread, 2},
+		{"preserve_higher_revision_written_before_receipt", originalThread, 2, 1, false, originalThread, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			h, _, _, as, _ := reviewManagerAssignment(t)
 			ctx := t.Context()
 			id := as.Manager.ConversationID
-			existing := protocol.AgentContextUsage{ThreadID: "other-thread", Revision: 1}
-			if !existingIsNewer {
+			existing := protocol.AgentContextUsage{ThreadID: tc.existingThread, Revision: tc.existingRevision}
+			if !tc.existingWrittenLater {
 				if err := h.app.RecordAgentUsage(ctx, id, existing); err != nil {
 					t.Fatal(err)
 				}
 			}
 			h.clock.Advance(time.Second)
-			event := protocol.ManagerNativeEvent{Sequence: 1, Body: json.RawMessage(`{
- "thread_id":"original-thread","native":{"Kind":"context_usage","ContextUsage":{"thread_id":"original-thread","revision":1}}
-}`)}
+			raw, err := json.Marshal(managerProjectionEvent{ThreadID: originalThread, Native: &managerProjectionItem{
+				closedManagerItem: closedManagerItem{Kind: "context_usage"},
+				ContextUsage:      &protocol.AgentContextUsage{ThreadID: originalThread, Revision: tc.eventRevision},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := protocol.ManagerNativeEvent{Sequence: 1, Body: raw}
 			if op := h.runAs(as, protocol.OpManagerNativeEvent, event, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
 				t.Fatal(op)
 			}
-			if existingIsNewer {
+			if tc.existingWrittenLater {
 				h.clock.Advance(time.Second)
 				if err := h.app.RecordAgentUsage(ctx, id, existing); err != nil {
 					t.Fatal(err)
@@ -354,14 +424,13 @@ func TestFault_ManagerProjectionPreservesNewestContextUsage(t *testing.T) {
 			if err := h.app.projectManagerNativeEvent(ctx, as.RunID, 1); err != nil {
 				t.Fatal(err)
 			}
-			wantThread := "original-thread"
-			if existingIsNewer {
-				wantThread = existing.ThreadID
-			}
 			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
 				usage, err := store.ContextUsage(ctx, tx.Q(), id)
-				if err == nil && usage.ThreadID != wantThread {
-					t.Errorf("context usage thread %q, want %q", usage.ThreadID, wantThread)
+				if err == nil && (usage.ThreadID != tc.wantThread || usage.Revision != tc.wantRevision) {
+					t.Errorf("context usage is %q revision %d, want %q revision %d", usage.ThreadID, usage.Revision, tc.wantThread, tc.wantRevision)
+				}
+				if err == nil && tc.existingWrittenLater && usage.UpdatedAt != h.clock.Now().UnixMilli() {
+					t.Errorf("context usage timestamp regressed to %d", usage.UpdatedAt)
 				}
 				return err
 			}); err != nil {

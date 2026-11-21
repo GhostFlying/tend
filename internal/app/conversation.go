@@ -1041,7 +1041,10 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 // an item adds it to the conversation; later ones update it in place.
 // Its request ID is derived from the item and the phase, so a repeated
 // event records it once.
-type RecordToolUse struct{ DeliveryTurn string }
+type RecordToolUse struct {
+	DeliveryTurn     string
+	interruptRunning bool
+}
 
 type recordToolUsePayload struct {
 	TurnID  string              `json:"turn_id"`
@@ -1072,6 +1075,9 @@ func (c RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "turn_id, item_id and tool are required")
 	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
+	}
+	if c.interruptRunning && p.Status == protocol.ToolRunning {
+		p.Status = protocol.ToolInterrupted
 	}
 	p.Input = protocol.RedactOwnerToolInput(p.Tool, p.Input)
 	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn); handled || err != nil {
