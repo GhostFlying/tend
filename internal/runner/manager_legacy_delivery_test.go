@@ -226,3 +226,77 @@ func TestLegacyManagerEndsWithEventUploadUnavailable(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyManagerStartupStopsWhenRetainedEventCannotBeDelivered(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	clock := testkit.NewClock()
+	j, err := journal.Open(ctx, filepath.Join(t.TempDir(), "journal.db"), clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.Close()
+	as := protocol.Assignment{
+		Protocol: protocol.MinimumRunnerProtocol, RunID: "original-run", LeaseID: "original-lease",
+		Role: protocol.RoleIssueManager, Execution: &protocol.RunExecutionPin{},
+		Manager: &protocol.IssueManagerAssignment{ConversationID: "issue"},
+	}
+	if err := j.AcceptAssignment(ctx, as, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.NextAttempt(ctx, as.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.SetPhase(ctx, as.RunID, journal.PhaseStarted); err != nil {
+		t.Fatal(err)
+	}
+	original := protocol.Envelope{RequestID: "original-event", Operation: protocol.OpManagerNativeEvent, Target: runTarget(as)}
+	if err := j.SaveManagerEvent(ctx, as.RunID, &original, json.RawMessage(`{"thread_id":"original-thread"}`)); err != nil {
+		t.Fatal(err)
+	}
+	fake := testkit.NewHarness()
+	firstSend := make(chan struct{})
+	var sent sync.Once
+	client := &http.Client{Transport: uploadRoundTripper(func(req *http.Request) (*http.Response, error) {
+		defer req.Body.Close()
+		var env protocol.Envelope
+		if err := json.NewDecoder(req.Body).Decode(&env); err != nil {
+			return nil, err
+		}
+		if env.Operation != protocol.OpManagerNativeEvent {
+			t.Error("startup continued before settling the retained event", env.Operation)
+			return managerReceiptHTTPResponse(http.StatusOK, rpcResponse{Operation: &protocol.Operation{RequestID: env.RequestID, Status: protocol.OpSucceeded, Result: json.RawMessage(`{}`)}})
+		}
+		if req.Header.Get(headerRun) != as.RunID || env.RequestID != original.RequestID || env.Target != original.Target || !bytes.Equal(env.Payload, original.Payload) {
+			t.Error("startup rewrote the retained event")
+		}
+		sent.Do(func() { close(firstSend) })
+		return nil, errors.New("event upload unavailable")
+	})}
+	r := New(Config{
+		Journal: j, Executions: &eventFailureResolver{closeRecoveryResolver{native: fake}},
+		Now: clock.Now, IDs: testkit.NewIDGen(clock, 1), ServerURL: "http://runner.invalid",
+		HTTPClient: client, RequestTimeout: 100 * time.Millisecond, RetryDelay: 5 * time.Millisecond, Log: slog.New(slog.DiscardHandler),
+	})
+	done := make(chan error, 1)
+	go func() { done <- r.managerNative(ctx, ctx, as) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("startup returned as if it delivered the original event")
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("legacy startup exceeded its delivery budget")
+	}
+	select {
+	case <-firstSend:
+	default:
+		t.Fatal("startup never attempted to deliver the retained event")
+	}
+	pending, err := j.NextManagerEvent(ctx, as.RunID)
+	if err != nil || len(pending) != 1 || pending[0].Envelope.RequestID != original.RequestID {
+		t.Fatal("startup discarded or replaced the retained journal head", pending, err)
+	}
+}
