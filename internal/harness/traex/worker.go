@@ -361,6 +361,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 			}
 		}()
 		var summary string
+		var terminalFailure *protocol.AgentFailure
 	events:
 		for {
 			select {
@@ -435,7 +436,14 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 					case <-ctx.Done():
 						break events
 					}
+				case harness.EventTurnError:
+					if ev.Failure != nil && !ev.Failure.WillRetry {
+						terminalFailure = ev.Failure
+					}
 				case harness.EventTurnCompleted:
+					if ev.TurnStatus == "failed" && (ev.Failure == nil || ev.Failure.Code == "unknown") {
+						ev.Failure = terminalFailure
+					}
 					if spec.Role == protocol.RoleAccept && spec.AcceptanceEvidenceFiles {
 						if err := verdicts.RestoreContext(ctx); err != nil {
 							w.err = err
@@ -483,6 +491,7 @@ func (ws *Workers) Start(ctx context.Context, spec harness.WorkerSpec) (harness.
 							}
 						}
 						turnID = next
+						terminalFailure = nil
 						w.turnMu.Lock()
 						w.turnID = next
 						w.turnMu.Unlock()
@@ -580,12 +589,13 @@ func (ws *Workers) thread(ctx context.Context, s *Session, spec harness.WorkerSp
 func nativeRolloutEvent(threadID string, ev harness.Event) harness.WorkerEvent {
 	ev.Raw = redactedRolloutPayload(threadID, ev)
 	body, _ := json.Marshal(struct {
-		ThreadID  string          `json:"thread_id"`
-		TurnID    string          `json:"turn_id"`
-		ItemID    string          `json:"item_id"`
-		Data      json.RawMessage `json:"data,omitempty"`
-		Continued bool            `json:"continues_run,omitempty"`
-	}{threadID, ev.TurnID, ev.ItemID, ev.Raw, ev.CoordinatorContinued})
+		ThreadID  string                 `json:"thread_id"`
+		TurnID    string                 `json:"turn_id"`
+		ItemID    string                 `json:"item_id"`
+		Data      json.RawMessage        `json:"data,omitempty"`
+		Continued bool                   `json:"continues_run,omitempty"`
+		Failure   *protocol.AgentFailure `json:"failure,omitempty"`
+	}{threadID, ev.TurnID, ev.ItemID, ev.Raw, ev.CoordinatorContinued, ev.Failure})
 	return harness.WorkerEvent{NativeID: ev.ItemID, Kind: "native." + string(ev.Kind), Body: body}
 }
 

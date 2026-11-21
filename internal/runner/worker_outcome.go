@@ -17,14 +17,15 @@ import (
 // workerOutcome is a local observation, independent of the close receipt and
 // upload queue. An acknowledged native event must not erase a failed turn.
 type workerOutcome struct {
-	Version  int    `json:"version"`
-	RunID    string `json:"run_id"`
-	ThreadID string `json:"thread_id"`
-	TurnID   string `json:"turn_id,omitempty"`
-	Attempt  int    `json:"attempt"`
-	Status   string `json:"status"`
-	Source   string `json:"source"`
-	Error    string `json:"error,omitempty"`
+	Version  int                    `json:"version"`
+	RunID    string                 `json:"run_id"`
+	ThreadID string                 `json:"thread_id"`
+	TurnID   string                 `json:"turn_id,omitempty"`
+	Attempt  int                    `json:"attempt"`
+	Status   string                 `json:"status"`
+	Source   string                 `json:"source"`
+	Error    string                 `json:"error,omitempty"`
+	Failure  *protocol.AgentFailure `json:"failure,omitempty"`
 }
 
 const maxWorkerOutcomeBytes = 64 << 10
@@ -116,9 +117,10 @@ func nativeWorkerOutcome(run, thread string, attempt int, event harness.WorkerEv
 		return nil, nil
 	}
 	var body struct {
-		Continued bool   `json:"continues_run"`
-		Thread    string `json:"thread_id"`
-		Turn      string `json:"turn_id"`
+		Continued bool                   `json:"continues_run"`
+		Failure   *protocol.AgentFailure `json:"failure"`
+		Thread    string                 `json:"thread_id"`
+		Turn      string                 `json:"turn_id"`
 		Data      struct {
 			Turn struct {
 				ID     string `json:"id"`
@@ -139,7 +141,7 @@ func nativeWorkerOutcome(run, thread string, attempt int, event harness.WorkerEv
 	if status != "completed" && status != "failed" && status != "interrupted" {
 		status = "unknown"
 	}
-	return &workerOutcome{Version: 1, RunID: run, ThreadID: thread, TurnID: body.Turn, Attempt: attempt, Status: status, Source: "native_terminal"}, nil
+	return &workerOutcome{Version: 1, RunID: run, ThreadID: thread, TurnID: body.Turn, Attempt: attempt, Status: status, Source: "native_terminal", Failure: body.Failure}, nil
 }
 
 func (r *Runner) restoreWorkerOutcome(ctx context.Context, as protocol.Assignment, run journal.Run, p Prepared) (*workerOutcome, error) {
@@ -180,4 +182,35 @@ func (r *Runner) restoreWorkerOutcome(ctx context.Context, as protocol.Assignmen
 		return nil, nil
 	}
 	return saveWorkerOutcome(ctx, p.StateDir, *outcome)
+}
+
+// failedStep passes the original terminal classification through the normal release.
+func (o workerOutcome) failedStep(err error) error {
+	if err == nil {
+		err = errors.New("the original native turn ended " + o.Status)
+	}
+	return failed(protocol.WorkerFailureReason(o.Failure), err)
+}
+
+// settleFailedWorker requires independent closure of the original attempt even
+// when its native terminal outcome is already known.
+func (r *Runner) settleFailedWorker(ctx context.Context, as protocol.Assignment, run journal.Run, execution ResolvedExecution, p Prepared, outcome *workerOutcome) (bool, error) {
+	if outcome == nil || outcome.Source != "native_terminal" || outcome.Status != "failed" {
+		return false, nil
+	}
+	if !run.StoppedConfirmed {
+		observer, ok := execution.Workers.(harness.OwnedWorkerStopObserver)
+		if !ok {
+			return true, harness.ErrOwnedWorkerUnconfirmed
+		}
+		proofCtx, cancel := context.WithTimeout(ctx, r.cfg.RequestTimeout)
+		defer cancel()
+		if err := observer.ObserveOwnedWorkerStop(proofCtx, harness.WorkerSpec{RunID: as.RunID, Dir: p.Dir, StateDir: p.StateDir, Thread: run.Thread, Attempt: run.Attempts}); err != nil {
+			return true, fmt.Errorf("%w: %w", harness.ErrOwnedWorkerUnconfirmed, err)
+		}
+		if err := r.cfg.Journal.ConfirmStopped(ctx, as.RunID); err != nil {
+			return true, err
+		}
+	}
+	return true, outcome.failedStep(nil)
 }

@@ -66,6 +66,9 @@ func (r *Runner) reconcileImplementationResult(ctx context.Context, as protocol.
 	if err != nil {
 		return true, err
 	}
+	if recovered, err := r.settleFailedWorker(ctx, as, run, execution, p, outcome); recovered {
+		return true, err
+	}
 	if protocol.RunnerOwnsExecution(as.Protocol) && !run.StoppedConfirmed && (outcome == nil || outcome.Status == "unknown") {
 		return true, fmt.Errorf("%w: original delegated turn has no terminal observation", harness.ErrRetainedResumePending)
 	}

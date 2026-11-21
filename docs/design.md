@@ -2766,3 +2766,13 @@ GitHub 合入回执及 tree 核对后，下批从已验证截止点开始。
 Tend 的通用负责人指令遵循实际仓库和目标分支规则。集成批次不改变 Issue 交付
 语义、部署授权或升级来源。见 [实施计划](plans/integration-promotion.md) 和
 [操作说明](operations/integration-promotion.md)。
+
+## D267：独立审阅技术失败由当前 Issue 负责人处置
+
+Runner 将原生终态错误和原执行身份保存在 journal 相关记录中。独立确认停妥后，普通
+`runs.release` 结算原 Run、action 与租约。原报告和未知副作用继续沿原身份读取与对账。
+
+已声明的独立审阅和正式绑定的 reviewer Run 失败后，由当前具名 Issue 负责人选择
+下一步。每次明确授权在同一事务记录原失败与后继 action。连续技术失败的同一义务
+最多追加三次执行，用完时提交一次包含原 Run 证据的用户通知。Provider 策略拒绝保留
+其类型，适用处置路径。参见 [实施计划](plans/failed-worker-review-recovery.md)。

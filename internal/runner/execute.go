@@ -373,6 +373,9 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 	}
 	if recovered, recoveryErr := r.reconcileAcceptanceVerdict(runCtx, as); recovered {
 		if recoveryErr != nil {
+			if _, terminalFailure := errors.AsType[*stepError](recoveryErr); terminalFailure {
+				return recoveryErr
+			}
 			return &completionPending{recoveryErr}
 		}
 		return nil
@@ -697,11 +700,17 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			}
 		}
 	}()
+	var observedFailure *workerOutcome
 	for ev := range w.Events() {
-		if p.StateDir != "" && as.Role == protocol.RoleImplement && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
+		if p.StateDir != "" && assignmentWorker(as, r.cfg.Worker) == protocol.WorkerAppServer {
 			outcome, outcomeErr := nativeWorkerOutcome(as.RunID, run.Thread, attempt, ev)
 			if outcomeErr == nil && outcome != nil {
 				_, outcomeErr = saveWorkerOutcome(context.WithoutCancel(ctx), p.StateDir, *outcome)
+				if outcome.Status == "failed" {
+					observedFailure = outcome
+				} else {
+					observedFailure = nil
+				}
 			}
 			if outcomeErr != nil {
 				appendErr = errors.Join(appendErr, outcomeErr)
@@ -785,11 +794,18 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 		// next attempt or its report.
 		return cause
 	}
+	if observedFailure != nil {
+		return observedFailure.failedStep(errors.Join(werr, appendErr))
+	}
 	if appendErr != nil {
 		return appendErr
 	}
 	if werr != nil {
-		return failed("worker_failed", werr)
+		var evidence *protocol.AgentFailure
+		if terminal, ok := errors.AsType[*harness.TerminalWorkerFailure](werr); ok {
+			evidence = &terminal.Evidence
+		}
+		return failed(protocol.WorkerFailureReason(evidence), werr)
 	}
 	return nil
 }

@@ -30,6 +30,7 @@ type implementationReconcileWorkers struct {
 	seen        []harness.WorkerSpec
 	onRecover   func() error
 	observed    []harness.WorkerSpec
+	observeErr  error
 }
 
 func (w *implementationReconcileWorkers) ReconcileImplementationResult(_ context.Context, spec harness.WorkerSpec) (harness.WorkerResult, error) {
@@ -42,7 +43,7 @@ func (w *implementationReconcileWorkers) ReconcileImplementationResult(_ context
 
 func (w *implementationReconcileWorkers) ObserveOwnedWorkerStop(_ context.Context, spec harness.WorkerSpec) error {
 	w.observed = append(w.observed, spec)
-	return nil
+	return w.observeErr
 }
 
 type implementationReconcileSpaces struct {
