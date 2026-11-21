@@ -187,7 +187,7 @@ export class MessagingFeed {
           for (let i = 0; i < remainingIDs.length && !signal.aborted; i += detailBatch) {
             updates.push(
               ...(await Promise.all(
-                ids
+                remainingIDs
                   .slice(i, i + detailBatch)
                   .map((id) =>
                     this.client.get<MessagingMessage>(
