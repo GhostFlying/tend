@@ -209,12 +209,7 @@ func (in managerProjectionInput) project(ctx context.Context, a *App, x *Exec, t
 		return Outcome{}, recordTokenUsage(ctx, tx, *n.RequestUsage, "conversation:"+in.conversation, role, x.Now.UnixMilli())
 	}
 	if n.ContextUsage != nil {
-		var newer bool
-		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_context_usage
- WHERE conversation_id=? AND updated_at>?)`, in.conversation, in.received).Scan(&newer); err != nil || newer {
-			return Outcome{}, err
-		}
-		return Outcome{}, recordAgentUsage(ctx, tx, in.conversation, *n.ContextUsage, in.received)
+		return Outcome{}, in.projectContextUsage(ctx, tx, *n.ContextUsage)
 	}
 	switch n.Kind {
 	case "item_started", protocol.ManagerEventItemCompleted:
@@ -254,6 +249,26 @@ func (in managerProjectionInput) project(ctx context.Context, a *App, x *Exec, t
 		return Outcome{}, nil
 	}
 	return in.projectMessage(ctx, x, tx)
+}
+
+func (in managerProjectionInput) projectContextUsage(ctx context.Context, tx *store.Tx, usage protocol.AgentContextUsage) error {
+	current, err := store.ContextUsage(ctx, tx.Q(), in.conversation)
+	when := in.received
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+	case err != nil:
+		return err
+	case current.ThreadID == usage.ThreadID:
+		if current.Revision >= usage.Revision {
+			return nil
+		}
+		// An earlier receipt can contain a later revision than the live
+		// write. Keep the timestamp used to order cross-thread snapshots.
+		when = max(when, current.UpdatedAt)
+	case current.UpdatedAt > when:
+		return nil
+	}
+	return recordAgentUsage(ctx, tx, in.conversation, usage, when)
 }
 
 // Older attachments may have committed a rollout row before application.
@@ -301,7 +316,15 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 	projection.Principal = protocol.Principal{Kind: protocol.PrincipalMainAgent, Thread: e.ThreadID}
 	if n.Tool != nil {
 		p := recordToolUsePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Tool: n.Tool.Name, Input: n.Tool.Input, Output: n.Tool.Output, Status: n.Tool.Status}
-		return applyManagerProjectionMessage(ctx, &projection, tx, p, RecordToolUse{DeliveryTurn: root})
+		command := RecordToolUse{DeliveryTurn: root}
+		if n.Kind == "item_started" && p.Status == protocol.ToolRunning {
+			_, stoppedThrough, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), in.run)
+			if err != nil {
+				return Outcome{}, err
+			}
+			command.interruptRunning = stopped && stoppedThrough >= in.sequence
+		}
+		return applyManagerProjectionMessage(ctx, &projection, tx, p, command)
 	}
 	p := recordAgentMessagePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Body: n.Text, Status: protocol.AssistantCompleted}
 	return applyManagerProjectionMessage(ctx, &projection, tx, p, RecordAgentMessage{DeliveryTurn: root, Reconciled: true})
