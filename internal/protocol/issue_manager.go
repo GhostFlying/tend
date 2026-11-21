@@ -194,6 +194,8 @@ type IssueManagerView struct {
 	QueueReason           *QueueWaitReason    `json:"queue_reason,omitempty"`
 }
 
+// tend:compat manager-transport-stop-recovery protocol=6 remove=8
+
 // ManagerStoppedTransportLease records a legacy manager watchdog trip while
 // Tend was unreachable. A reason is not proof that a successor is safe.
 const ManagerStoppedTransportLease = "manager transport unavailable at lease deadline"

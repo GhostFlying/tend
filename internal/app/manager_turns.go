@@ -200,16 +200,31 @@ func refreshIssueManagerTasks(ctx context.Context, x *Exec, tx *store.Tx, issue 
 		if (i.State != protocol.IssueActive && i.State != protocol.IssueCancelling) || m.State == "pending" {
 			continue
 		}
-		var pending, queued bool
-		if err = tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM outbox o WHERE destination=? AND status='pending' AND next_attempt_at<=? AND `+store.PendingOutboxServiceable+`),EXISTS(SELECT 1 FROM plan_actions WHERE task_id=? AND kind='coordinate' AND status IN ('pending','dispatched'))`, "background_thread:"+m.ConversationID, x.Now.UnixMilli(), id).Scan(&pending, &queued); err != nil {
+		var pending, queued, transportStopped bool
+		if err = tx.Q().QueryRowContext(ctx, `SELECT
+			EXISTS(SELECT 1 FROM outbox o WHERE destination=? AND status='pending' AND next_attempt_at<=? AND `+store.PendingOutboxServiceable+`),
+			EXISTS(SELECT 1 FROM plan_actions WHERE task_id=? AND kind='coordinate' AND status IN ('pending','dispatched')),
+			EXISTS(SELECT 1 FROM manager_transport_recoveries WHERE task_id=? AND assignment_epoch=?
+				AND issue_revision=? AND task_revision=? AND successor_generation IS NULL)`,
+			"background_thread:"+m.ConversationID, x.Now.UnixMilli(), id, id, m.AssignmentEpoch, i.Revision, task.ControlRevision).
+			Scan(&pending, &queued, &transportStopped); err != nil {
 			return err
 		}
-		if !pending || queued {
+		if queued || (!pending && !transportStopped) {
 			continue
 		}
 		var generation int64
 		if err = tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0)+1 FROM plan_actions WHERE task_id=?`, id).Scan(&generation); err != nil {
 			return err
+		}
+		if !pending {
+			recoveryQueued, err := queueManagerTransportRecovery(ctx, x, tx, m, i, task, generation)
+			if err != nil {
+				return err
+			}
+			if !recoveryQueued {
+				continue
+			}
 		}
 		if err = insertManagerAction(ctx, x, tx, id, generation); err != nil {
 			return err
