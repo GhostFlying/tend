@@ -5,6 +5,7 @@
 必须经 PR 且只允许 rebase merge。必需检查选 GitHub Actions 的
 `integration-check`，关闭「合入前必须与目标分支保持最新」。核对 `main` 的
 strict `check`。开启 intake 前用试点 PR 确认规则与实际检查一致。
+用于启用验证的草稿 PR 应在 Checks 中收到 `integration-check` 的真实结果。
 
 普通 PR 显式指定 `gh pr create --base integration`，用
 `CHECK_BASE=origin/integration make check` 和针对该分支的独立 review。
