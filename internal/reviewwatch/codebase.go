@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
 type codebaseActor struct {
@@ -104,7 +106,26 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 	if mr.Status == Closed {
 		out.ClosedBy = mr.ClosedBy.actor()
 	}
-	if (c.cfg.IncludeChecks || ref.IncludeChecks) && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge {
+	readStatus := c.cfg.IncludeChecks || ref.IncludeChecks
+	readLineage := readStatus && out.State == Merged && out.MergeSHA != "" && out.TargetSHA != "" && !out.TargetContainsMerge
+	collectStatus := func() {
+		if err := c.codebaseChecks(ctx, ref, &out); err != nil {
+			kind := "query_failed"
+			var failure *Error
+			if errors.As(err, &failure) {
+				kind = failure.Kind
+			}
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				kind = "timeout"
+			}
+			out.CI = &protocol.DeliveryCI{HeadSHA: out.HeadSHA, State: "unknown", Checks: []protocol.DeliveryCheck{}, ErrorKind: kind}
+		}
+	}
+	// The candidate is already known. Check and lineage reads each get the
+	// same remaining provider time budget.
+	var status sync.WaitGroup
+	if readLineage {
+		status.Go(collectStatus)
 		confirmed, err := c.codebaseLineage(ctx, ref, out.TargetSHA, out.MergeSHA)
 		if err != nil {
 			out.LineageErrorKind = "query_failed"
@@ -118,20 +139,10 @@ func (c *Client) codebase(ctx context.Context, ref Ref) (Observation, error) {
 		} else {
 			out.TargetContainsMerge = confirmed
 		}
+	} else if readStatus {
+		collectStatus()
 	}
-	if c.cfg.IncludeChecks || ref.IncludeChecks {
-		if err := c.codebaseChecks(ctx, ref, &out); err != nil {
-			kind := "query_failed"
-			var failure *Error
-			if errors.As(err, &failure) {
-				kind = failure.Kind
-			}
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				kind = "timeout"
-			}
-			out.CI = &protocol.DeliveryCI{HeadSHA: out.HeadSHA, State: "unknown", Checks: []protocol.DeliveryCheck{}, ErrorKind: kind}
-		}
-	}
+	status.Wait()
 	return out, nil
 }
 
