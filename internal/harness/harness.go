@@ -9,6 +9,7 @@ import (
 	"errors"
 	"github.com/GhostFlying/tend/internal/harness/nativeusage"
 	"io"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -143,13 +144,45 @@ func (s WorkerSpec) AttachmentOnly() bool {
 	return s.AttachOriginal || s.RetainedResume != nil
 }
 
-// IndependentReview identifies the declared worker role or explicit report obligation.
-func (s WorkerSpec) IndependentReview() bool {
+// IndependentReview identifies the worker role, declared report obligation, or
+// formal report binding added after the Run started.
+func (s WorkerSpec) IndependentReview(ctx context.Context) (bool, error) {
 	if s.Role == protocol.RoleAccept {
-		return true
+		return true, nil
 	}
 	var review briefSpec
-	return json.Unmarshal(s.Spec, &review) == nil && (review.ReviewArtifactID != "" || review.ReviewDeliveryID != "")
+	if json.Unmarshal(s.Spec, &review) != nil {
+		return false, nil
+	}
+	if review.ReviewArtifactID != "" || review.ReviewDeliveryID != "" {
+		return true, nil
+	}
+	if s.ReadContext == nil || !slices.Contains(review.Deliverables, "report") {
+		return false, nil
+	}
+	q := protocol.IssueMaterialsQuery{Kind: "reviews"}
+	for {
+		binding, err := s.ReadContext(ctx, q)
+		if err != nil {
+			return false, err
+		}
+		page := binding.Materials.SharedReviews
+		if page == nil {
+			return false, nil
+		}
+		for _, item := range page.Items {
+			for _, round := range item.Rounds {
+				if round.TaskID == binding.TaskID && round.Result == nil ||
+					round.SupplementTaskID == binding.TaskID && round.SupplementArtifactID == "" {
+					return true, nil
+				}
+			}
+		}
+		if !page.More || page.Next == "" || page.Next == q.After {
+			return false, nil
+		}
+		q.After = page.Next
+	}
 }
 
 // TerminalWorkerFailure retains the provider classification of a failed turn.
