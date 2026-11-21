@@ -105,20 +105,31 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
   useEffect(() => {
     if (!active || !value.replyTo || localQuote) return;
     const id = value.replyTo;
-    const controller = new AbortController();
-    void client
-      .get<MessagingMessage>(
-        `/api/v1/messaging/messages/${encodeURIComponent(id)}`,
-        controller.signal,
-      )
-      .then((message) => {
-        if (!controller.signal.aborted) setSavedQuote({ id, message });
-      })
-      .catch((e) => {
-        if (!controller.signal.aborted) setSavedQuote({ id, error: String(e) });
-      });
-    return () => controller.abort();
-  }, [active, client, localQuote, value.replyTo]);
+    let controller: AbortController | undefined;
+    const refresh = () => {
+      controller?.abort();
+      const request = new AbortController();
+      controller = request;
+      setSavedQuote({ id });
+      void client
+        .get<MessagingMessage>(
+          `/api/v1/messaging/messages/${encodeURIComponent(id)}`,
+          request.signal,
+        )
+        .then((message) => {
+          if (!request.signal.aborted) setSavedQuote({ id, message });
+        })
+        .catch((e) => {
+          if (!request.signal.aborted) setSavedQuote({ id, error: String(e) });
+        });
+    };
+    const unwatch = feed.watchQuote(id, refresh);
+    refresh();
+    return () => {
+      unwatch();
+      controller?.abort();
+    };
+  }, [active, client, feed, localQuote, value.replyTo]);
   const staleQuote = !!quote?.interaction && quote.interaction.state !== "open";
   const pending = useMemo(
     () => [

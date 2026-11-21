@@ -27,6 +27,7 @@ export class MessagingFeed {
   private reading: Promise<void> | undefined;
   private paging: Promise<void> | undefined;
   private readonly stream: EventStream<MessagingEvent>;
+  private quote: { id: string; invalidate: () => void } | undefined;
 
   constructor(private client: Pick<ApiClient, "get" | "openStream" | "noteAlive">) {
     this.stream = new EventStream<MessagingEvent>({
@@ -40,6 +41,7 @@ export class MessagingFeed {
         this.connected = true;
         this.reset ||= fresh || !this.initialized;
         this.forward = true;
+        if (fresh) this.quote?.invalidate();
         void this.read();
       },
       onEvent: (event) => this.handleEvent(event),
@@ -99,6 +101,14 @@ export class MessagingFeed {
     return this.read();
   }
 
+  watchQuote(id: string, invalidate: () => void) {
+    const quote = { id, invalidate };
+    this.quote = quote;
+    return () => {
+      if (this.quote === quote) this.quote = undefined;
+    };
+  }
+
   private handleEvent(event: MessagingEvent) {
     if (!this.controller || this.stopping) return;
     const loadingPage = this.reset || this.forward || this.reading || this.paging;
@@ -119,6 +129,7 @@ export class MessagingFeed {
       return;
     }
     if (event.object_type !== "message") return;
+    if (this.quote?.id === event.object_id) this.quote.invalidate();
     if (event.kind === "messaging.input" || event.kind === "messaging.published")
       this.forward = true;
     if (loadingPage || items.some((m) => m.message_id === event.object_id))
