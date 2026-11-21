@@ -18524,6 +18524,9 @@
         },
         "next": {
           "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/definitions/SharedReviewRequestReceipt"
         }
       },
       "required": [
@@ -19048,6 +19051,26 @@
         "uncertainty_count"
       ],
       "title": "SharedReviewReportReference",
+      "type": "object"
+    },
+    "SharedReviewRequestReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "review": {
+          "$ref": "#/definitions/SharedDeliveryReview"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "status"
+      ],
+      "title": "SharedReviewRequestReceipt",
       "type": "object"
     },
     "SharedReviewResult": {

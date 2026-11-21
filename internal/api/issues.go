@@ -132,6 +132,10 @@ func (s *Server) issueDeliveryReviews(w http.ResponseWriter, r *http.Request) {
 		limit = value
 	}
 	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.SharedDeliveryReviews(r.Context(), q, r.PathValue("id"), r.URL.Query().Get("delivery_id"), r.URL.Query().Get("after"), limit)
+		query := r.URL.Query()
+		if request := query.Get("request_id"); request != "" {
+			return views.SharedDeliveryReviewReceipt(r.Context(), q, r.PathValue("id"), query.Get("delivery_id"), request)
+		}
+		return views.SharedDeliveryReviews(r.Context(), q, r.PathValue("id"), query.Get("delivery_id"), query.Get("after"), limit)
 	})
 }

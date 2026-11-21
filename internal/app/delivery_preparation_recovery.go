@@ -43,7 +43,7 @@ func recoverDeliveryPreparation(ctx context.Context, x *Exec, tx *store.Tx, issu
 	if err := store.DeliveryGrantValid(ctx, tx.Q(), issue, *duty); err != nil {
 		return err
 	}
-	if err := stoppedTaskRecoveryReady(ctx, tx.Q(), task.TaskID, true); err != nil {
+	if err := stoppedTaskRecoveryReady(ctx, tx.Q(), task.TaskID); err != nil {
 		return err
 	}
 	if _, stage, err := taskPredeploymentResult(ctx, tx.Q(), task); err != nil {

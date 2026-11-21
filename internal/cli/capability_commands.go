@@ -50,7 +50,7 @@ var capabilityCommands = []capabilityCommand{
 	{Name: "conversation handoff-audit", Route: "/api/v1/conversation/handoff-audit", Queries: "instance after limit", JSONDefault: true},
 	{Name: "artifact-share list", Route: "/api/v1/issues/{id}/artifact-shares", Queries: "status after limit", JSONDefault: true},
 	{Name: "artifact-share show", Route: "/api/v1/artifact-shares/{id}", JSONDefault: true},
-	{Name: "issue delivery-reviews", Route: "/api/v1/issues/{id}/delivery-reviews", Queries: "delivery=delivery_id after limit", JSONDefault: true},
+	{Name: "issue delivery-reviews", Route: "/api/v1/issues/{id}/delivery-reviews", Queries: "delivery=delivery_id review-request-id=request_id after limit", JSONDefault: true},
 	{Name: "issue deployment-preparation", Route: "/api/v1/issues/{id}/deployment-preparation", JSONDefault: true},
 	{Name: "issue materials", Route: "/api/v1/issues/{id}/materials", Queries: "kind id duty-revision=duty_revision after limit", JSONDefault: true},
 	{Name: "question-inputs show", Route: "/api/v1/decisions/{id}/inputs", JSONDefault: true},

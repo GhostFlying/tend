@@ -104,7 +104,11 @@ func (s *Service) canonicalIssueRead(ctx context.Context, c Call, execution stor
 		case "issues_followups_history":
 			value, err = views.CanonicalIssueFollowupHistory(ctx, tx.Q(), p.IssueID, p.RuleID, p.AfterOccurrence, p.AfterRevision)
 		case "issues_delivery_reviews_read":
-			value, err = views.SharedDeliveryReviews(ctx, tx.Q(), p.IssueID, reviews.DeliveryID, reviews.After, reviews.Limit)
+			if reviews.RequestID != "" {
+				value, err = views.SharedDeliveryReviewReceipt(ctx, tx.Q(), p.IssueID, reviews.DeliveryID, reviews.RequestID)
+			} else {
+				value, err = views.SharedDeliveryReviews(ctx, tx.Q(), p.IssueID, reviews.DeliveryID, reviews.After, reviews.Limit)
+			}
 		case "issues_deliveries_read":
 			value, err = views.CanonicalIssueDeliveries(ctx, tx.Q(), p.IssueID)
 		}

@@ -261,16 +261,16 @@ func observeExternalWait(ctx context.Context, q store.Querier, v *protocol.Exter
 			// Recording the formal verdict is the owner's next useful action.
 			// Its availability cannot depend on that same owner already waking
 			// and recording it while this external wait holds ordinary notices.
-			taskID, version, generation := last.TaskID, last.SpecVersion, last.ImplementGeneration
-			if last.SupplementTaskID != "" {
-				taskID, version, generation = last.SupplementTaskID, last.SupplementSpecVersion, last.SupplementGeneration
-			}
+			taskID := protocol.SharedReviewInputRound(last).TaskID
 			if taskID != "" {
 				task, err := store.GetTask(ctx, q, taskID)
 				if err != nil {
 					return false, "", err
 				}
-				if task.SpecVersion == version && (generation == 0 || task.ImplementGeneration == generation) && task.Lifecycle.Terminal() {
+				// A newer completed execution can carry a report for the owner
+				// to reconcile. Waking leaves all registration and delivery
+				// evidence checks to their normal transactions.
+				if task.Lifecycle.Terminal() {
 					return true, "review_task_" + string(task.Lifecycle), nil
 				}
 			}

@@ -2766,3 +2766,11 @@ GitHub 合入回执及 tree 核对后，下批从已验证截止点开始。
 Tend 的通用负责人指令遵循实际仓库和目标分支规则。集成批次不改变 Issue 交付
 语义、部署授权或升级来源。见 [实施计划](plans/integration-promotion.md) 和
 [操作说明](operations/integration-promotion.md)。
+
+## D266：以实际独立报告登记 PR 审阅
+
+Issue 负责人把真实贡献 Task 与 PR 关联后，独立 reviewer 可读取该候选、要求及正式共享原件。
+完成的正式报告可按当前候选和审阅修订直接登记。登记保存实际报告 Run、独立身份和原 artifact，
+并保留历史轮次及待核实的原操作。原有预绑定、验收导入和审阅适用性继续处理各自已有证据。
+同 Task workspace 预留可以跨已证实停止的执行保留。实际写入者、停止回执和未知外部操作仍需核对。
+审阅请求可按原 ID 回读其提交修订。修订缺失时结果保持未知。参见[实施计划](plans/shared-review-continuation.md)。

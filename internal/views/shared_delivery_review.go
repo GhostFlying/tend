@@ -2,6 +2,9 @@ package views
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -74,4 +77,43 @@ func SharedDeliveryReviews(ctx context.Context, q store.Querier, issueID, delive
 		out.Next = ""
 	}
 	return out, nil
+}
+
+// SharedDeliveryReviewReceipt reads a committed review revision by its original
+// request within the Issue's delivery. It never infers failure from absence.
+func SharedDeliveryReviewReceipt(ctx context.Context, q store.Querier, issueID, deliveryID, requestID string) (protocol.SharedDeliveryReviewPage, error) {
+	out := protocol.SharedDeliveryReviewPage{Items: []protocol.SharedDeliveryReview{}}
+	if deliveryID == "" || !protocol.ValidID(protocol.PrefixRequest, requestID) {
+		return out, protocol.Errorf(protocol.CodeInvalidRequest, "delivery_id and the original request_id are required")
+	}
+	issue, err := store.GetCanonicalIssue(ctx, q, issueID)
+	if err != nil {
+		return out, err
+	}
+	for _, delivery := range issue.Plan.Deliveries {
+		if delivery.DeliveryID != deliveryID {
+			continue
+		}
+		out.Receipt = &protocol.SharedReviewRequestReceipt{RequestID: requestID, Status: "unknown"}
+		var raw string
+		err := q.QueryRowContext(ctx, `SELECT h.body_json FROM shared_delivery_review_history h JOIN shared_delivery_reviews r USING(review_id)
+ WHERE r.provider=? AND r.repository=? AND r.number=? AND h.request_id=?
+ AND EXISTS(SELECT 1 FROM json_each(h.body_json,'$.links') l WHERE json_extract(l.value,'$.issue_id')=? AND json_extract(l.value,'$.delivery_id')=?)
+ ORDER BY h.revision DESC LIMIT 1`, delivery.Provider, delivery.Repository, delivery.Number, requestID, issueID, deliveryID).Scan(&raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		var review protocol.SharedDeliveryReview
+		if err := json.Unmarshal([]byte(raw), &review); err != nil {
+			return out, err
+		}
+		review.Valid = false
+		review.InvalidReason = "historical receipt; read the current review for applicability"
+		out.Receipt.Status, out.Receipt.Review = "committed", &review
+		return out, nil
+	}
+	return out, protocol.Errorf(protocol.CodeNotFound, "delivery is outside this Issue")
 }

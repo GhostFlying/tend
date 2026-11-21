@@ -284,8 +284,13 @@ func TestSharedDeliveryReviewRequiresIndependentIssueTarget(t *testing.T) {
 
 func createSharedReviewerTaskForTest(t *testing.T, h *harness, issue string, requirement ...protocol.AgentRequirement) string {
 	t.Helper()
+	return createSharedReportTaskForTest(t, h, issue, "", requirement...)
+}
+
+func createSharedReportTaskForTest(t *testing.T, h *harness, issue, delivery string, requirement ...protocol.AgentRequirement) string {
+	t.Helper()
 	i := canonicalTaskIssue(t, h, issue)
-	spec := protocol.OwnerTaskSpec{Goal: "Review the complete linked PR candidate using the repository convention", Acceptance: []string{"Submit exact candidate, requirements, repository check and findings in report.shared_review"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "linux-1/beta"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
+	spec := protocol.OwnerTaskSpec{ReviewDeliveryID: delivery, Goal: "Review the complete linked PR candidate using the repository convention", Acceptance: []string{"Submit exact candidate, requirements, repository check and findings in report.shared_review"}, Deliverables: []string{domain.DeliveryReport}, Workspace: protocol.OwnerTaskWorkspace{Mode: domain.WorkspaceTemporary}, AgentSelection: &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "reviewer", AgentID: "linux-1/beta"}, Acceptance: protocol.AgentRequirement{CategoryID: "reviewer"}}}
 	if len(requirement) > 0 {
 		spec.AgentSelection.Implementation = requirement[0]
 	}
