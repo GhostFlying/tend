@@ -87,8 +87,23 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
   const localQuote = data.items.find((m) => m.message_id === value.replyTo);
   const quote = localQuote ?? (savedQuote?.id === value.replyTo ? savedQuote?.message : undefined);
   const missingQuote = !!value.replyTo && !quote;
+  const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
+  const active = visible && tabVisible;
   useEffect(() => {
-    if (!value.replyTo || data.items.some((m) => m.message_id === value.replyTo)) return;
+    const updateVisibility = () => setTabVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", updateVisibility);
+    updateVisibility();
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+  useEffect(() => {
+    if (!active) return;
+    feed.start();
+    return () => {
+      void feed.stop();
+    };
+  }, [active, feed]);
+  useEffect(() => {
+    if (!active || !value.replyTo || localQuote) return;
     const id = value.replyTo;
     const controller = new AbortController();
     void client
@@ -96,12 +111,14 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
         `/api/v1/messaging/messages/${encodeURIComponent(id)}`,
         controller.signal,
       )
-      .then((message) => setSavedQuote({ id, message }))
+      .then((message) => {
+        if (!controller.signal.aborted) setSavedQuote({ id, message });
+      })
       .catch((e) => {
         if (!controller.signal.aborted) setSavedQuote({ id, error: String(e) });
       });
     return () => controller.abort();
-  }, [client, value.replyTo, data.items]);
+  }, [active, client, localQuote, value.replyTo]);
   const staleQuote = !!quote?.interaction && quote.interaction.state !== "open";
   const pending = useMemo(
     () => [
@@ -116,7 +133,6 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
   const cleanup = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     clearTimeout(cleanup.current);
-    feed.start();
     void draft.open();
     let active = true;
     void openOutbox()
@@ -140,11 +156,10 @@ export function Messaging({ visible, connection }: { visible: boolean; connectio
     return () => {
       active = false;
       cleanup.current = setTimeout(() => {
-        void feed.stop();
         void draft.close();
       }, 0);
     };
-  }, [client, draft, feed]);
+  }, [client, draft]);
   useEffect(() => {
     if (connection.status === "online") void queue?.resume();
   }, [connection.status, queue]);

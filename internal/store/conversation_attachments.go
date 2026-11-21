@@ -35,20 +35,34 @@ func (t *Tx) BindConversationAttachment(ctx context.Context, message string, pos
 
 // ConversationAttachments lists only metadata in message attachment order.
 func ConversationAttachments(ctx context.Context, q Querier, message string) ([]protocol.ConversationAttachment, error) {
-	rows, err := q.QueryContext(ctx, `SELECT a.file_id,a.name,a.media_type,a.size,a.sha256 FROM conversation_attachments a JOIN conversation_message_attachments m ON m.file_id=a.file_id WHERE m.message_id=? ORDER BY m.position`, message)
+	var result []protocol.ConversationAttachment
+	err := visitConversationAttachments(ctx, q, `WHERE m.message_id=? ORDER BY m.position`, message, func(_ string, a protocol.ConversationAttachment) {
+		result = append(result, a)
+	})
+	return result, err
+}
+
+// VisitConversationAttachments reads original metadata for a JSON array of
+// selected message IDs. Access to the attachment bytes is checked separately.
+func VisitConversationAttachments(ctx context.Context, q Querier, messages string, visit func(string, protocol.ConversationAttachment)) error {
+	return visitConversationAttachments(ctx, q, `WHERE m.message_id IN (SELECT value FROM json_each(?)) ORDER BY m.message_id,m.position`, messages, visit)
+}
+
+func visitConversationAttachments(ctx context.Context, q Querier, filter, arg string, visit func(string, protocol.ConversationAttachment)) error {
+	rows, err := q.QueryContext(ctx, `SELECT m.message_id,a.file_id,a.name,a.media_type,a.size,a.sha256 FROM conversation_attachments a JOIN conversation_message_attachments m ON m.file_id=a.file_id `+filter, arg)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var result []protocol.ConversationAttachment
 	for rows.Next() {
+		var id string
 		var a protocol.ConversationAttachment
-		if err := rows.Scan(&a.FileID, &a.Name, &a.MediaType, &a.Size, &a.SHA256); err != nil {
-			return nil, err
+		if err := rows.Scan(&id, &a.FileID, &a.Name, &a.MediaType, &a.Size, &a.SHA256); err != nil {
+			return err
 		}
-		result = append(result, a)
+		visit(id, a)
 	}
-	return result, rows.Err()
+	return rows.Err()
 }
 
 // AttachmentSourceMessage returns the first message that attached the original.
