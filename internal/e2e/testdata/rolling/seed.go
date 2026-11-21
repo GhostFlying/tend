@@ -48,7 +48,7 @@ func seed(path string, count int) error {
 func main() {
 	count := 2
 	if len(os.Args) == 3 && os.Args[2] == "rolling" {
-		count = 4
+		count = 5
 	}
 	if err := seed(os.Args[1], count); err != nil {
 		fmt.Fprintln(os.Stderr, err)

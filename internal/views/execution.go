@@ -155,11 +155,16 @@ func readExecutionFacts(ctx context.Context, q store.Querier) (executionFacts, e
 			return facts, err
 		}
 
+		preparingRepos, err := store.DrainingPreparationRepos(ctx, q, h.HostID)
+		if err != nil {
+			return facts, err
+		}
 		facts.hosts = append(facts.hosts, executionHost{Host: scheduler.Host{
-			PauseHandoffs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
-			QuestionHandoffs:       slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
-			IssueOwners:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
-			ContinuationsSupported: slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation), Continuations: continuations, Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
+			DrainingPreparationRepos: preparingRepos,
+			PauseHandoffs:            slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityPauseHandoffs),
+			QuestionHandoffs:         slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityQuestionHandoffs),
+			IssueOwners:              slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueOwner),
+			ContinuationsSupported:   slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityAgentContinuation), Continuations: continuations, Executors: executors, IssueManagers: runtime.Runtime.Protocol >= 2 && slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityIssueManager),
 			ID: h.HostID, OS: h.OS, Active: true, Labels: h.Labels, Repos: h.Repos, Slots: h.Slots, Busy: busy,
 			Worker: h.Worker.Capabilities(), WorkspaceProtocol: h.WorkspaceProtocol,
 			TaskInputs:          slices.Contains(runtime.Runtime.Capabilities, protocol.CapabilityTaskInputs),

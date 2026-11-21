@@ -53,7 +53,11 @@ func cancelUncommittedRunners(ctx context.Context, x *Exec, tx *store.Tx, r stor
 		if err != nil {
 			return err
 		}
-		if ctl.UpgradeID != r.View.UpgradeID || ctl.Mode != protocol.RunnerMaintenance || ctl.CancelledUpgradeID == r.View.UpgradeID {
+		mode := protocol.RunnerMaintenance
+		if h.WarmRevision != 0 {
+			mode = protocol.RunnerNormal
+		}
+		if ctl.UpgradeID != r.View.UpgradeID || ctl.Mode != mode || ctl.CancelledUpgradeID == r.View.UpgradeID {
 			continue
 		}
 		ctl.Revision++
@@ -92,15 +96,23 @@ func reconcileUpgradeRollbacks(ctx context.Context, x *Exec, tx *store.Tx, r *st
 		if err != nil {
 			return false, err
 		}
-		_, runs, err := store.HostSlotCounts(ctx, tx.Q(), h.HostID)
-		if err != nil {
-			return false, err
-		}
 		if ctl.UpgradeID != r.View.UpgradeID || rt.Runtime.UpgradeID != r.View.UpgradeID ||
-			ctl.Mode != protocol.RunnerMaintenance || rt.Runtime.Mode != protocol.RunnerReady ||
-			rt.Runtime.AppliedControlRevision != ctl.Revision || runs != 0 ||
-			rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || len(rt.Runtime.Blockers) != 0 {
+			rt.Runtime.AppliedControlRevision != ctl.Revision {
 			continue
+		}
+		if h.WarmRevision != 0 {
+			if ctl.Mode != protocol.RunnerNormal || rt.Runtime.Mode != protocol.RunnerNormal || rt.Runtime.InstanceID != h.RollingFrom {
+				continue
+			}
+		} else {
+			_, runs, err := store.HostSlotCounts(ctx, tx.Q(), h.HostID)
+			if err != nil {
+				return false, err
+			}
+			if ctl.Mode != protocol.RunnerMaintenance || rt.Runtime.Mode != protocol.RunnerReady || runs != 0 ||
+				rt.Runtime.PendingClaims != 0 || rt.Runtime.PendingOperations != 0 || len(rt.Runtime.Blockers) != 0 {
+				continue
+			}
 		}
 		if h.Configuration != nil && rt.Runtime.ConfigurationSHA256 != h.Configuration.PreviousSHA256 {
 			continue

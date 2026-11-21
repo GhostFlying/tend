@@ -122,12 +122,22 @@ func (a *App) RunnerUpgradeHealth(ctx context.Context, p protocol.Principal, b p
 			if err != nil {
 				return err
 			}
-			ctl, err := runnerControl(ctx, tx.Q(), h.HostID, a.now().UnixMilli())
+			ctl, err := store.GetHostControl(ctx, tx.Q(), h.HostID)
 			if err != nil {
 				return err
 			}
 			health.ServerRevision = r.View.Revision
 			health.ControlRevision = ctl.Revision
+			if h.WarmRevision != 0 && h.Committed == nil {
+				health.ControlRevision = h.WarmRevision
+				if s := h.WarmRuntime; s != nil && ctl.Mode == protocol.RunnerNormal && rollingTargetMatches(r, ctl, rt.Runtime, h.RollingProcess) {
+					health.ServerConfirmed = installedRunnerMatches(s.Runtime, r.Manifest) && runnerSelfMatches(r, h, s.Runtime) && warmCandidateReady(h, a.now().UnixMilli())
+					health.AdmissionFenced = health.ServerConfirmed
+					health.Healthy = health.ServerConfirmed && r.View.Status == "running" && h.HealthInstance == s.Runtime.InstanceID && h.Healthy > 0
+					health.HeartbeatSequence = uint64(max(0, s.Runtime.Sequence))
+				}
+				return nil
+			}
 			runs, err := store.CountJournalRuns(ctx, tx.Q(), h.HostID, rt.Runtime.JournalID)
 			if err != nil {
 				return err

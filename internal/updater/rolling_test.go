@@ -19,7 +19,7 @@ type retirementAuthority struct {
 	confirmed map[string]int
 }
 
-func (a *retirementAuthority) AuthorizeLaunch(ctx context.Context, _ Version, b Binding, _ RollingLaunch, _ string) (Grant, error) {
+func (a *retirementAuthority) AuthorizeLaunch(ctx context.Context, _ Version, b Binding, _ RollingLaunch) (Grant, error) {
 	return a.Authorize(ctx, b)
 }
 func (a *retirementAuthority) Retire(_ context.Context, _ string, in protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {
@@ -306,5 +306,89 @@ func TestEmergencyPrimaryExitBeforeDiscovery(t *testing.T) {
 				t.Fatal("dead primary was restarted or signalled", state)
 			}
 		})
+	}
+}
+
+type pendingRollingHealth struct {
+	*retirementAuthority
+	entered chan struct{}
+	resume  chan struct{}
+}
+
+func (a *pendingRollingHealth) Health(ctx context.Context, binding Binding) (Health, error) {
+	if a.entered != nil {
+		close(a.entered)
+		select {
+		case <-a.resume:
+		case <-ctx.Done():
+			return Health{}, ctx.Err()
+		}
+	}
+	return a.fakeAuthority.Health(ctx, binding)
+}
+
+func TestRollingHealthDoesNotHoldIncumbentStatus(t *testing.T) {
+	h := newHarness(t)
+	h.upgrade(t)
+	auth := &pendingRollingHealth{
+		retirementAuthority: &retirementAuthority{fakeAuthority: h.a},
+		entered:             make(chan struct{}),
+		resume:              make(chan struct{}),
+	}
+	h.s.opts.RollingAuthority = auth
+	incumbent := h.s.state.Process
+	h.s.state.Operation.Rolling = &RollingLaunch{Predecessor: incumbent}
+	if err := h.s.criticalState(); err != nil {
+		t.Fatal(err)
+	}
+	h.s.state.Format = rollingStateFormat
+	if err := h.s.save(); err != nil {
+		t.Fatal(err)
+	}
+	h.until(t, "checking")
+	if h.p.live[incumbent.PID] != incumbent || h.p.stops != 0 {
+		t.Fatal("rolling start stopped the incumbent")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stepDone := make(chan error, 1)
+	go func() { stepDone <- h.s.Step(ctx) }()
+	wait, timeout := context.WithTimeout(t.Context(), 5*time.Second)
+	defer timeout()
+	select {
+	case <-auth.entered:
+	case <-wait.Done():
+		t.Fatal("rolling candidate health read never started")
+	}
+	incumbentControl := make(chan error, 1)
+	go func() {
+		status := h.s.Status()
+		if status.Operation.Phase != "checking" || status.Current.Artifact.SHA256 != incumbent.SHA256 {
+			incumbentControl <- errors.New("current installation changed before health completed")
+			return
+		}
+		// A durable mutation from local control supersedes a health sample
+		// whose observation began on the prior generation.
+		incumbentControl <- h.s.Retry(status.Operation.ID)
+	}()
+	select {
+	case err := <-incumbentControl:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-wait.Done():
+		t.Fatal("candidate transport blocked incumbent's supervisor status")
+	}
+	close(auth.resume)
+	if err := <-stepDone; err != nil {
+		t.Fatal(err)
+	}
+	if current := h.s.Status(); current.Operation.Phase != "checking" || current.Current.Artifact.SHA256 != incumbent.SHA256 {
+		t.Fatal("stale remote health committed a newer operation", current.Operation)
+	}
+	auth.entered = nil
+	h.step(t)
+	if state := h.s.Status(); state.Operation.Phase != "committed" || state.DrainingProcesses[incumbent.LaunchID].Process != incumbent {
+		t.Fatal("fresh health did not commit and preserve the incumbent", state.Operation)
 	}
 }

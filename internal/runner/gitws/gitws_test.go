@@ -103,6 +103,20 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
+func TestClonePreservesOriginalGenerationStaging(t *testing.T) {
+	f := newFixture(t, nil)
+	previous := f.ws.repoPath("tend") + ".partial"
+	if err := os.MkdirAll(previous, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writer := filepath.Join(previous, "active-clone")
+	write(t, writer, "original clone")
+	f.prepare(f.implement())
+	if data, err := os.ReadFile(writer); err != nil || string(data) != "original clone" {
+		t.Fatal("successor replaced the original clone staging directory", string(data), err)
+	}
+}
+
 func TestImplementationWorkspace(t *testing.T) {
 	f := newFixture(t, nil)
 	as := f.implement()

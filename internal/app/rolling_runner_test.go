@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
@@ -93,9 +94,8 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 			if h.countWhere("SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'", closeID) != 1 {
 				t.Fatal("stop settled the unknown close")
 			}
-			count := int64(2)
-			var idle protocol.Assignment
-			var poll *protocol.Envelope
+			idle := claimManager()
+			poll := h.env(protocol.OpManagerNativeClaim, runTarget(idle.RunID), protocol.ManagerNativeClaimPayload{}, nil)
 			pollCommand := ManagerNativeCommand{OperationName: protocol.OpManagerNativeClaim}
 			checkEmptyPoll := func() {
 				t.Helper()
@@ -105,12 +105,7 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 					t.Fatal("original empty native poll lost its starting Run", op, err)
 				}
 			}
-			if scenario.independent {
-				idle = claimManager()
-				poll = h.env(protocol.OpManagerNativeClaim, runTarget(idle.RunID), protocol.ManagerNativeClaimPayload{}, nil)
-				checkEmptyPoll()
-				count++
-			}
+			checkEmptyPoll()
 			c := selfUpgradeFixtureRelease(upgradeFixtureRelease(t, h))
 			c.Manifest.Storage.RunnerJournal.Max = old.JournalVersion
 			c.ServerUpdaterSupported = true
@@ -122,11 +117,11 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 			server := ServerObservation{MainDrained: true, Healthy: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "current-server"}
 			server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
 			for range 5 {
-				if upgradeTick(h, server).Hosts[0].Phase == "draining" {
+				if upgradeTick(h, server).Hosts[0].Phase == "warming" {
 					break
 				}
 			}
-			current := upgradeAck(h, host, protocol.RunnerMaintenance)
+			current := upgradeAck(h, host, protocol.RunnerNormal)
 			old = &current
 			heartbeat := func(r *protocol.RunnerRuntime) protocol.HeartbeatResult {
 				t.Helper()
@@ -137,60 +132,34 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 				}
 				return out
 			}
+			nativeSequence := int64(0)
+			nativeUse := func() {
+				t.Helper()
+				nativeSequence++
+				event := protocol.ManagerNativeEvent{Sequence: nativeSequence, Body: json.RawMessage(`{"thread_id":"original-idle","native":{"Kind":"request_usage"}}`)}
+				command := ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}
+				if op := h.runAs(idle, protocol.OpManagerNativeEvent, event, command); op.Error != nil {
+					t.Fatal(op)
+				}
+			}
+			nativeUse()
 			batch = upgradeRead(h)
 			b := protocol.UpgradeBinding{UpgradeID: batch.View.UpgradeID, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: batch.Hosts[0].TargetHash, InstanceID: host, ProcessInstanceID: "next-instance"}
 			target := protocol.Target{Type: "host", ID: host}
 			req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *selfUpgradeObservation(batch, host, old.InstanceID, old.Build.BinarySHA256)}
-			authorize := func(proof *protocol.RollingPendingProof) protocol.RollingRunnerGrant {
-				t.Helper()
-				req.PendingProof = proof
-				op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
-				var g protocol.RollingRunnerGrant
-				if err := json.Unmarshal(op.Result, &g); op.Error != nil || err != nil {
-					t.Fatal(op, err)
-				}
-				return g
-			}
-			old.PendingClaims, old.PendingOperations = 1, count+1
+			old.PendingClaims, old.PendingOperations = 1, 83
+			old.Blockers = []string{"pending_run_events", "pending_operation", "workspace_operation_active"}
 			heartbeat(old)
-			if grant := authorize(nil); grant.Allowed || grant.PendingCheck != nil {
-				t.Fatal("an unconfirmed claim was eligible for overlap", grant)
-			}
-			old.PendingClaims, old.PendingOperations = 0, count
-			old.Blockers = []string{"pending_operation"}
-			heartbeat(old)
-			if grant := authorize(nil); grant.Allowed || grant.PendingCheck == nil || grant.PendingCheck.Sequence != old.Sequence || grant.PendingCheck.Count != count {
-				t.Fatal("undifferentiated pending operation needed a current proof", grant)
+			req.PendingProof = json.RawMessage(`{"sequence":1,"journal_id":"retained","operations":[]}`)
+			env := h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision))
+			op := h.exec(runner(host), env, AuthorizeRollingRunner{})
+			var grant protocol.UpgradeGrant
+			if err := json.Unmarshal(op.Result, &grant); op.Error != nil || err != nil || !grant.Allowed {
+				t.Fatal("incumbent work blocked candidate launch", op, err)
 			}
 			reply := protocol.ManagerNativeReply{ID: closeID, Result: json.RawMessage(`null`)}
 			originalReply := h.env(protocol.OpManagerNativeReply, runTarget(original.RunID), reply, nil)
-			proof := protocol.RollingPendingProof{Sequence: old.Sequence, JournalID: old.JournalID, Operations: []protocol.RollingPendingOperation{
-				{Operation: protocol.OpManagerNativeReply, RunID: original.RunID, LeaseID: original.LeaseID, CommandID: closeID, RequestID: originalReply.RequestID},
-				{Operation: protocol.OpManagerNativeReply, RunID: original.RunID, LeaseID: original.LeaseID, CommandID: toolID, RequestID: toolReply.RequestID},
-			}}
-			if poll != nil {
-				proof.Operations = append(proof.Operations, protocol.RollingPendingOperation{Operation: protocol.OpManagerNativeClaim, RunID: idle.RunID, LeaseID: idle.LeaseID, RequestID: poll.RequestID})
-			}
-			heartbeat(old)
-			if grant := authorize(&proof); grant.Allowed {
-				t.Fatal("accepted proof for an obsolete heartbeat", grant)
-			}
-			proof.Sequence = old.Sequence
-			proof.Operations[0].LeaseID = h.ids.New(protocol.PrefixLease)
-			if grant := authorize(&proof); grant.Allowed {
-				t.Fatal("accepted another lease as the original", grant)
-			}
-			proof.Operations[0].LeaseID = original.LeaseID
-			if poll != nil {
-				proof.Operations[2].LeaseID = original.LeaseID
-				if grant := authorize(&proof); grant.Allowed {
-					t.Fatal("another lease proved the idle manager poll", grant)
-				}
-				proof.Operations[2].LeaseID = idle.LeaseID
-			}
-			if grant := authorize(&proof); !grant.Allowed {
-				t.Fatal("the original stopped receipt blocked successor launch", grant)
-			}
+
 			ctl := upgradeCtl(h, host)
 			next := testRuntime(b.ProcessInstanceID)
 			next.Generation, next.JournalID, next.JournalVersion = 1, b.ProcessInstanceID, c.Manifest.Storage.RunnerJournal.Max
@@ -199,18 +168,58 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 			if op := h.versionedHello(host, next); op.Error != nil {
 				t.Fatal(op)
 			}
-			_, want := h.createTask(owner, createTaskPayload{Title: "unrelated queued work", Spec: testSpec})
-			claim := func(rt *protocol.RunnerRuntime) (protocol.Assignment, bool) {
-				t.Helper()
-				return h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: rt}, nil))
+			nativeUse()
+			claimRequest := func(rt *protocol.RunnerRuntime) *protocol.Envelope {
+				return h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: rt}, nil)
 			}
+			claim := func(rt *protocol.RunnerRuntime) (protocol.Assignment, bool) {
+				return h.claimWith(host, claimRequest(rt))
+			}
+			if op, _ := h.createTask(owner, createTaskPayload{Title: "admit during warmup", Spec: testSpec}); op.Error != nil {
+				t.Fatal(op)
+			}
+			// Persist an allocation while withholding its identity from the
+			// runner fixture. This is the original claim after a lost reply.
+			lostClaim := claimRequest(old)
+			before, ok := h.claimWith(host, lostClaim)
+			if !ok || before.RunID == original.RunID || before.RunID == idle.RunID {
+				t.Fatal("candidate hello displaced the incumbent", before)
+			}
+			if op := h.runAs(before, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Error != nil {
+				t.Fatal(op)
+			}
+			staleClaim := claimRequest(old)
 			if _, ok := claim(next); ok {
 				t.Fatal("uncommitted candidate claimed work")
 			}
+			if op, _ := h.createTask(owner, createTaskPayload{Title: "unrelated queued work", Spec: testSpec}); op.Error != nil {
+				t.Fatal(op)
+			}
+
 			next.Capabilities = append(next.Capabilities, protocol.CapabilityUpdaterSelfUpdate)
 			next.Updater = selfUpgradeObservation(batch, host, next.InstanceID, next.Build.BinarySHA256)
 			next.Updater.SupervisedProcess.PID = int(next.Build.PID)
+			heartbeat(next)
+			upgradeTick(h, server)
+			health, err := h.app.RunnerUpgradeHealth(ctx, runner(host), b)
+			if err != nil || !health.Healthy || !health.AdmissionFenced || health.NewWorkAccepted {
+				t.Fatal("healthy candidate was not separately fenced", health, err)
+			}
 			next.UpdaterReceipt = committedServerForTest(b)
+			if scenario.version == protocol.CurrentRunnerProtocol {
+				// A committed local candidate can restart while the coordinator
+				// still holds the old admission pointer.
+				next.InstanceID = "candidate-restarted"
+				next.Generation++
+				next.Sequence = 1
+				next.Build.PID++
+				next.Updater.SupervisedProcess.PID = int(next.Build.PID)
+				next.Updater.SupervisedProcess.LaunchID = next.InstanceID
+				next.UpdaterReceipt.CurrentProcessInstanceID = next.InstanceID
+				if op := h.versionedHello(host, next); op.Error != nil {
+					t.Fatal(op)
+				}
+			}
 			heartbeat(next)
 			upgradeTick(h, server)
 			ctl = upgradeCtl(h, host)
@@ -218,25 +227,55 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 			heartbeat(next)
 			drain := heartbeat(old).Control
 			old.AppliedControlRevision = drain.Revision
-			if _, ok := claim(old); ok {
-				t.Fatal("draining predecessor claimed new work")
+			if _, ok := h.claimWith(host, staleClaim); ok {
+				t.Fatal("draining predecessor claimed new work from an outstanding unallocated request")
+			}
+			if got, ok := h.claimWith(host, lostClaim); !ok || got.RunID != before.RunID || got.LeaseID != before.LeaseID {
+				t.Fatal("lost reply did not retain original ownership", got)
+			}
+			if op := h.runAs(before, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "work stopped"}, Release{}); op.Error != nil {
+				t.Fatal(op)
 			}
 			newRun, ok := claim(next)
-			if !ok || newRun.TaskID != want.TaskID || newRun.Protocol != protocol.CurrentRunnerProtocol {
+			if !ok || newRun.TaskID == original.TaskID || newRun.TaskID == idle.TaskID || newRun.Protocol != protocol.CurrentRunnerProtocol {
 				t.Fatal("committed successor could not claim unrelated work", newRun)
 			}
-			if poll != nil {
-				checkEmptyPoll()
-				if l := h.lease(idle.RunID); l.Status != store.LeaseActive || l.LeaseID != idle.LeaseID {
-					t.Fatal("unrelated work displaced a live manager lease", l)
-				}
-				h.createTask(owner, createTaskPayload{Title: "await a physical slot", Spec: testSpec})
-				if _, ok := claim(next); ok {
-					t.Fatal("successor claimed the predecessor's occupied slot")
-				}
+			checkEmptyPoll()
+			nativeUse()
+			if h.countWhere("SELECT COUNT(*) FROM manager_native_events WHERE run_id=?", idle.RunID) != int(nativeSequence) {
+				t.Fatal("candidate handoff interrupted receipt of incumbent native events")
 			}
-			if h.countWhere("SELECT COUNT(*) FROM runs WHERE task_id=?", original.TaskID) != 1 {
-				t.Fatal("another Run took the predecessor's unsettled manager work")
+			var inventory store.AgentInventoryRow
+			if err := h.store.Read(ctx, func(tx *store.ReadTx) error {
+				var err error
+				inventory, err = store.GetAgentInventory(ctx, tx.Q(), host)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			receipt := inventory.Receipt
+			inventoryStatus, err := h.app.ReadAgentInventory(ctx, runner(host), protocol.AgentInventoryStatusPayload{Runtime: old,
+				LocalRevision: receipt.LocalRevision, SnapshotID: receipt.SnapshotID, PublicSHA256: receipt.PublicSHA256})
+			if err != nil || inventoryStatus.Matched == nil || inventoryStatus.Matched.SnapshotID != receipt.SnapshotID {
+				t.Fatal("draining runner could not reconcile its committed inventory", inventoryStatus, err)
+			}
+			var projection protocol.AgentInventoryProjection
+			if err := json.Unmarshal([]byte(inventory.CanonicalJSON), &projection); err != nil {
+				t.Fatal(err)
+			}
+			unpublished := inventoryRequest(h, old, projection, receipt.PublicSHA256, receipt.LocalRevision+1, receipt.ServerRevision, "unpublished")
+			if op := h.exec(runner(host), unpublished, RegisterAgentInventory{}); op.Status != protocol.OpFailed || protocol.CodeOf(op.Error) != protocol.CodeInvalidTransition {
+				t.Fatal("original uncommitted inventory was not conclusively fenced", op)
+			}
+			if l := h.lease(idle.RunID); l.Status != store.LeaseActive || l.LeaseID != idle.LeaseID {
+				t.Fatal("unrelated work displaced a live manager lease", l)
+			}
+			h.createTask(owner, createTaskPayload{Title: "await a physical slot", Spec: testSpec})
+			if _, ok := claim(next); ok {
+				t.Fatal("successor claimed the predecessor's occupied slot")
+			}
+			if h.countWhere("SELECT COUNT(*) FROM runs WHERE task_id=?", idle.TaskID) != 1 {
+				t.Fatal("another Run took the active predecessor manager's work")
 			}
 			retirement := protocol.RunnerRetirement{UpgradeID: b.UpgradeID, Process: req.Updater.SupervisedProcess}
 			retire := func() protocol.RunnerRetirementResult {
@@ -267,22 +306,20 @@ func TestRollingSuccessorAdmitsUnrelatedWorkBeforeOriginalManagerReceiptsSettle(
 			if h.countWhere("SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'", toolID) != 1 {
 				t.Fatal("transport acceptance resolved the native outcome")
 			}
-			if poll != nil {
-				if result := retire(); result.Allowed {
-					t.Fatal("retirement ignored the original active manager", result)
-				}
-				if op := h.runAs(idle, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original idle process exited"}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Error != nil {
-					t.Fatal(op)
-				}
+			if result := retire(); result.Allowed {
+				t.Fatal("retirement ignored the original active manager", result)
 			}
-			old.PendingOperations, old.Blockers, old.Mode = 0, nil, protocol.RunnerReady
+			if op := h.runAs(idle, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "original idle process exited", LastSequence: nativeSequence}, ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Error != nil {
+				t.Fatal(op)
+			}
+			old.PendingClaims, old.PendingOperations, old.Blockers, old.Mode = 0, 0, nil, protocol.RunnerReady
 			heartbeat(old)
-			grant := retire()
-			if !grant.Allowed || grant.Confirmed {
-				t.Fatal("settled predecessor did not get a separate stop grant", grant)
+			stopGrant := retire()
+			if !stopGrant.Allowed || stopGrant.Confirmed {
+				t.Fatal("settled predecessor did not get a separate stop grant", stopGrant)
 			}
 			// Report the supervisor's exact physical-exit proof to finish.
-			retirement.AuthorizationID = grant.AuthorizationID
+			retirement.AuthorizationID = stopGrant.AuthorizationID
 			if result := retire(); !result.Confirmed {
 				t.Fatal("exact retirement acknowledgement did not confirm", result)
 			}
@@ -328,24 +365,17 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
 	for range 5 {
 		view := upgradeTick(h, server)
-		if view.Hosts[0].Phase == "draining" {
+		if view.Hosts[0].Phase == "warming" {
 			break
 		}
 	}
-	old = upgradeAck(h, host, protocol.RunnerMaintenance)
+	old = upgradeAck(h, host, protocol.RunnerNormal)
 	old.Blockers = []string{"run:" + original.RunID}
 	batch = upgradeRead(h)
 	b := protocol.UpgradeBinding{UpgradeID: batch.View.UpgradeID, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: batch.Hosts[0].TargetHash, InstanceID: host, ProcessInstanceID: "next-instance"}
 	req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *selfUpgradeObservation(batch, host, old.InstanceID, old.Build.BinarySHA256)}
-	op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
 	var grant protocol.UpgradeGrant
-	if op.Error != nil || json.Unmarshal(op.Result, &grant) != nil || grant.Allowed {
-		t.Fatal("legacy workspace preparation was not protected", op)
-	}
-	if started := h.runAs(original, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); started.Error != nil {
-		t.Fatal(started)
-	}
-	op = h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
+	op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
 	if op.Error != nil || json.Unmarshal(op.Result, &grant) != nil || !grant.Allowed {
 		t.Fatalf("rolling grant refused at %s/%s: %+v", batch.View.Phase, batch.View.Hosts[0].Phase, op)
 	}
@@ -369,7 +399,7 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	old.Sequence++
 	ref := protocol.LeaseRef{RunID: original.RunID, LeaseID: original.LeaseID}
 	hb, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &old, Runs: []protocol.LeaseRef{ref}})
-	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || hb.Control.Mode != protocol.RunnerMaintenance {
+	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || hb.Control.Mode != protocol.RunnerNormal {
 		t.Fatalf("old lease did not survive handoff: %+v %v", hb, err)
 	}
 	// Owner commands for an existing source follow its Run across handoff.
@@ -422,16 +452,33 @@ func TestRollingRunnerKeepsOriginalLeaseAfterIndependentJournalHello(t *testing.
 	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: candidate}); err != nil {
 		t.Fatal(err)
 	}
-	h.createTask(owner, createTaskPayload{Title: "successor", Spec: testSpec})
+	_, sameRepo := h.createTask(owner, createTaskPayload{Title: "same repository", Spec: testSpec})
 	newClaim := func(rt *protocol.RunnerRuntime) (protocol.Assignment, bool) {
 		return h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Worker: h.worker(host), WorkspaceProtocol: 1, Runtime: rt}, nil))
 	}
 	if _, ok := newClaim(&old); ok {
 		t.Fatal("draining runner admitted new work")
 	}
+	if _, ok := newClaim(candidate); ok {
+		t.Fatal("successor started preparing a repository still owned by the legacy runner")
+	}
+	other := h.createReportTask("independent workspace", temporaryReportSpec())
+	unrelated, ok := newClaim(candidate)
+	if !ok || unrelated.TaskID != other.TaskID {
+		t.Fatal("original repository preparation blocked independent work", unrelated)
+	}
+	if op := h.exec(owner, h.env("tasks.cancel", taskTarget(other.TaskID), nil, rev(h.task(other.TaskID).ControlRevision)), CancelTask{}); op.Error != nil {
+		t.Fatal(op)
+	}
+	if op := h.runAs(unrelated, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "independent work stopped"}, Release{}); op.Error != nil {
+		t.Fatal(op)
+	}
+	if op := h.runAs(original, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Error != nil {
+		t.Fatal(op)
+	}
 	assigned, ok := newClaim(candidate)
-	if !ok || assigned.RunID == original.RunID {
-		t.Fatal("candidate failed to take new work", assigned)
+	if !ok || assigned.TaskID != sameRepo.TaskID {
+		t.Fatal("original preparation receipt did not unblock the repository", assigned)
 	}
 	h.createTask(owner, createTaskPayload{Title: "capacity", Spec: testSpec})
 	if _, ok := newClaim(candidate); ok {
@@ -502,15 +549,90 @@ func TestBusyGenerationReceivesAutomaticRollingTarget(t *testing.T) {
 	server := ServerObservation{MainDrained: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "current-server", Healthy: true}
 	server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
 	for range 5 {
-		if upgradeTick(h, server).Hosts[0].Phase == "draining" {
+		if upgradeTick(h, server).Hosts[0].Phase == "warming" {
 			break
 		}
 	}
-	rt = upgradeAck(h, host, protocol.RunnerMaintenance)
+	rt = upgradeAck(h, host, protocol.RunnerNormal)
 	upgradeTick(h, server)
 	rt.Sequence++
 	hb, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &rt, Runs: []protocol.LeaseRef{{RunID: as.RunID, LeaseID: as.LeaseID}}})
 	if err != nil || len(hb.Runs) != 1 || !hb.Runs[0].Renewed || hb.Control == nil || hb.Control.Upgrade == nil || !hb.Control.Upgrade.Rolling || hb.Control.Upgrade.PrepareOnly || !hb.Control.Upgrade.Updater.Authorized {
 		t.Fatalf("busy generation missing rolling target: control=%+v phase=%+v journal=%q err=%v", hb.Control, upgradeRead(h).View.Hosts, rt.JournalID, err)
+	}
+}
+
+func TestRollingUnconfirmedLaunchKeepsIncumbentClaiming(t *testing.T) {
+	h, c := selfUpgradeFixture(t)
+	selfUpgradeHosts(t, h, true)
+	const host = "linux-1"
+	if op := h.syncConfig(testConfig()); op.Error != nil {
+		t.Fatal(op)
+	}
+	incumbent := upgradeAck(h, host, protocol.RunnerNormal)
+	incumbent.Sequence++
+	incumbent.Build.PID = 91
+	if op := h.versionedHello(host, &incumbent); op.Error != nil {
+		t.Fatal(op)
+	}
+	c.ServerCapabilities = []string{release.ServerCapabilityRunnerJournals}
+	c.ServerUpdaterSupported = true
+	if op := startPreparedTestUpgrade(h, "failed-warmup", c); op.Error != nil {
+		t.Fatal(op)
+	}
+	batch := upgradeRead(h)
+	server := ServerObservation{MainDrained: true, Healthy: true, BinarySHA256: c.ServerHash, ProcessInstanceID: "current-server"}
+	server.Updater = selfUpgradeObservation(batch, "server", server.ProcessInstanceID, c.ServerHash)
+	for range 5 {
+		if upgradeTick(h, server).Hosts[0].Phase == "warming" {
+			break
+		}
+	}
+	old := upgradeAck(h, host, protocol.RunnerNormal)
+	batch = upgradeRead(h)
+	target := protocol.Target{Type: "host", ID: host}
+	b := protocol.UpgradeBinding{UpgradeID: batch.View.UpgradeID, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256,
+		ArtifactSHA256: batch.Hosts[0].TargetHash, InstanceID: host, ProcessInstanceID: "no-start-confirmation"}
+	req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *selfUpgradeObservation(batch, host, old.InstanceID, old.Build.BinarySHA256)}
+	authorize := func() protocol.UpgradeGrant {
+		t.Helper()
+		op := h.exec(runner(host), h.env("runner.rolling_authorize", target, req, rev(old.AppliedControlRevision)), AuthorizeRollingRunner{})
+		var g protocol.UpgradeGrant
+		if err := json.Unmarshal(op.Result, &g); op.Error != nil || err != nil || !g.Allowed {
+			t.Fatal(op, err)
+		}
+		return g
+	}
+	first, retry := authorize(), authorize()
+	if retry.Binding != first.Binding || !retry.ExpiresAt.Equal(first.ExpiresAt) {
+		t.Fatal("original authorization changed after a lost reply", first, retry)
+	}
+	h.clock.Advance(time.Duration(upgradeRead(h).Deadline-h.clock.Now().UnixMilli()+1) * time.Millisecond)
+	if view := upgradeTick(h, server); view.Status != "attention" || upgradeCtl(h, host).Mode != protocol.RunnerNormal {
+		t.Fatal("uncertain candidate displaced the incumbent", view)
+	}
+	old = upgradeAck(h, host, protocol.RunnerNormal)
+	candidate := testRuntime(b.ProcessInstanceID)
+	candidate.JournalID, candidate.UpgradeID, candidate.Mode = b.ProcessInstanceID, b.UpgradeID, protocol.RunnerReady
+	candidate.Build = protocol.RunnerBuild{PID: 92, BinarySHA256: b.ArtifactSHA256}
+	if op := h.versionedHello(host, candidate); op.Error == nil {
+		t.Fatal("candidate registered without verified in-window launch")
+	}
+	want := h.createReportTask("work accepted after candidate timeout", temporaryReportSpec())
+	got, ok := h.claimWith(host, h.env(protocol.OpRunnerClaim, target, protocol.ClaimPayload{Runtime: &old, Worker: h.worker(host), WorkspaceProtocol: 1}, nil))
+	if !ok || got.TaskID != want.TaskID {
+		t.Fatal("unconfirmed candidate disrupted old claims", got)
+	}
+	// Reconcile a definitive supervisor cancellation even while the original
+	// process owns active work and would never report maintenance-ready.
+	old.Sequence++
+	old.Updater = &req.Updater
+	old.UpdaterReceipt = &protocol.UpdaterReceipt{Phase: "cancelled", Binding: b,
+		CurrentProcessInstanceID: old.InstanceID, CurrentSHA256: old.Build.BinarySHA256}
+	if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host), protocol.HeartbeatPayload{Runtime: &old}); err != nil {
+		t.Fatal(err)
+	}
+	if view := upgradeTick(h, server); view.Hosts[0].Phase != "cancelled" || upgradeCtl(h, host).Mode != protocol.RunnerNormal {
+		t.Fatal("confirmed cancellation blocked on incumbent workload", view)
 	}
 }

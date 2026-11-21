@@ -42,7 +42,8 @@ func (r *Runner) maybeUpgrade(ctx context.Context) {
 	r.mu.Unlock()
 	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && (control.Mode == protocol.RunnerNormal || control.Mode == protocol.RunnerMaintenance)
 	ready := observation != nil && observation.Mode == protocol.RunnerReady && confirmed.Mode == protocol.RunnerReady
-	rolling := control.Upgrade != nil && control.Upgrade.Rolling && r.cfg.JournalID != "" && control.Mode == protocol.RunnerMaintenance && confirmed.Mode != protocol.RunnerNormal
+	rolling := control.Upgrade != nil && control.Upgrade.Rolling && r.cfg.JournalID != "" &&
+		(control.Mode == protocol.RunnerNormal || control.Mode == protocol.RunnerMaintenance && confirmed.Mode != protocol.RunnerNormal)
 	if err != nil || !preparing && !ready && !rolling || control.Upgrade == nil || control.UpgradeID == "" || control.CancelledUpgradeID == control.UpgradeID || confirmed.AppliedControlRevision != control.Revision || confirmed.UpgradeID != control.UpgradeID {
 		r.updaterMu.Unlock()
 		return
@@ -382,8 +383,9 @@ func (r *Runner) submitConfiguredUpdater(ctx context.Context, id, dir, digest st
 func (r *Runner) updateUpgradeAttempt(control protocol.RunnerControl, update func()) bool {
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
-	preparing := control.Upgrade != nil && control.Upgrade.PrepareOnly && r.control.Mode == protocol.RunnerNormal
-	if r.control.Revision != control.Revision || r.control.UpgradeID != control.UpgradeID || r.control.Mode != protocol.RunnerMaintenance && !preparing {
+	normalUpgrade := r.control.Mode == protocol.RunnerNormal && control.Upgrade != nil &&
+		(control.Upgrade.PrepareOnly || control.Upgrade.Rolling)
+	if r.control.Revision != control.Revision || r.control.UpgradeID != control.UpgradeID || r.control.Mode != protocol.RunnerMaintenance && !normalUpgrade {
 		return false
 	}
 	r.mu.Lock()

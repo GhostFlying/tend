@@ -39,28 +39,36 @@ func (PutAgentCategory) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outco
 	return Outcome{Result: c, Events: []Event{{ObjectType: "category", ObjectID: c.CategoryID, ObjectVersion: c.Revision, Kind: "category.updated", Body: map[string]any{"state": c.State}}}}, nil
 }
 
-func authorizeInventory(ctx context.Context, q store.Querier, p protocol.Principal, r *protocol.RunnerRuntime) error {
+func authorizeInventory(ctx context.Context, q store.Querier, p protocol.Principal, r *protocol.RunnerRuntime) (protocol.RunnerRuntime, error) {
 	x := &Exec{Principal: p}
 	if _, err := requireActiveHost(ctx, x, q); err != nil {
-		return err
+		return protocol.RunnerRuntime{}, err
 	}
 	if r == nil || !protocol.RunnerProtocolSupported(r.Protocol) || !slices.Contains(r.Capabilities, protocol.CapabilityAgentInventory) {
-		return protocol.Errorf(protocol.CodeForbidden, "agent inventory capability is required")
+		return protocol.RunnerRuntime{}, protocol.Errorf(protocol.CodeForbidden, "agent inventory capability is required")
 	}
 	if err := checkRuntime(ctx, q, p.Subject, r, false); err != nil {
-		return err
+		return protocol.RunnerRuntime{}, err
 	}
 	current, err := store.GetHostRuntime(ctx, q, p.Subject)
 	if err != nil {
-		return err
+		return protocol.RunnerRuntime{}, err
 	}
-	if current.Runtime.InstanceID != r.InstanceID {
-		return protocol.Errorf(protocol.CodeConflictPayload, "host inventory belongs to the current runner")
+	registered := current.Runtime
+	if registered.InstanceID != r.InstanceID {
+		drain, err := store.GetDrainingRunner(ctx, q, p.Subject, r.InstanceID)
+		if errors.Is(err, store.ErrNotFound) {
+			return protocol.RunnerRuntime{}, protocol.Errorf(protocol.CodeConflictPayload, "host inventory requires a registered runner")
+		}
+		if err != nil {
+			return protocol.RunnerRuntime{}, err
+		}
+		registered = drain.Runtime
 	}
-	if !slices.Contains(current.Runtime.Capabilities, protocol.CapabilityAgentInventory) {
-		return protocol.Errorf(protocol.CodeForbidden, "agent inventory was not negotiated")
+	if !slices.Contains(registered.Capabilities, protocol.CapabilityAgentInventory) {
+		return protocol.RunnerRuntime{}, protocol.Errorf(protocol.CodeForbidden, "agent inventory was not negotiated")
 	}
-	return nil
+	return registered, nil
 }
 
 // RegisterAgentInventory records metadata only, without loading any runtime.
@@ -75,17 +83,12 @@ func (RegisterAgentInventory) Authorize(ctx context.Context, x *Exec, q store.Qu
 	if x.Env.Target.Type != "host" || x.Env.Target.ID != x.Principal.Subject {
 		return protocol.Errorf(protocol.CodeForbidden, "inventory belongs to the authenticated host")
 	}
-	if err := authorizeInventory(ctx, q, x.Principal, p.Runtime); err != nil {
+	registered, err := authorizeInventory(ctx, q, x.Principal, p.Runtime)
+	if err != nil {
 		return err
 	}
-	if p.Projection.CapabilityVersion != 0 {
-		current, err := store.GetHostRuntime(ctx, q, x.Principal.Subject)
-		if err != nil {
-			return err
-		}
-		if !runtimeSupportsCapabilityInventory(p.Runtime) || !runtimeSupportsCapabilityInventory(&current.Runtime) {
-			return protocol.Errorf(protocol.CodeForbidden, "capability declaration extension was not negotiated")
-		}
+	if p.Projection.CapabilityVersion != 0 && (!runtimeSupportsCapabilityInventory(p.Runtime) || !runtimeSupportsCapabilityInventory(&registered)) {
+		return protocol.Errorf(protocol.CodeForbidden, "capability declaration extension was not negotiated")
 	}
 	return nil
 }
@@ -124,6 +127,15 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	}
 	if existingErr == nil && existing.Receipt.LocalRevision == p.LocalRevision && existing.CanonicalJSON == string(canonical) {
 		return Outcome{Result: existing.Receipt}, nil
+	}
+	primary, err := store.GetHostRuntime(ctx, tx.Q(), x.Principal.Subject)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if primary.Runtime.InstanceID != p.Runtime.InstanceID {
+		// This is a definitive non-application of the original request, so
+		// an older draining client can forget it after receiving the reply.
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "draining runner cannot publish a new inventory snapshot")
 	}
 	current, err := store.GetAgentInventory(ctx, tx.Q(), x.Principal.Subject)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -184,12 +196,12 @@ func (RegisterAgentInventory) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 	return Outcome{Result: receipt, Events: []Event{{ObjectType: "host", ObjectID: x.Principal.Subject, ObjectVersion: receipt.ServerRevision, Kind: "host.agent_inventory_registered", Body: map[string]any{"local_revision": p.LocalRevision, "public_sha256": hash}}}}, nil
 }
 
-// ReadAgentInventory is read-only reconciliation for the current authenticated
-// process, including a predecessor's recorded inventory request. It is no heartbeat.
+// ReadAgentInventory provides readback of immutable inventory snapshots to
+// the current runner and draining processes on the authenticated host.
 func (a *App) ReadAgentInventory(ctx context.Context, p protocol.Principal, input protocol.AgentInventoryStatusPayload) (protocol.AgentInventoryStatus, error) {
 	result := protocol.AgentInventoryStatus{RequestState: "not_requested"}
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		if err := authorizeInventory(ctx, tx.Q(), p, input.Runtime); err != nil {
+		if _, err := authorizeInventory(ctx, tx.Q(), p, input.Runtime); err != nil {
 			return err
 		}
 		catalog, err := readRunnerAgentCatalog(ctx, tx.Q(), p.Subject, a.now().UnixMilli())

@@ -7,7 +7,6 @@ import (
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/release"
-	"github.com/GhostFlying/tend/internal/runner/journal"
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
@@ -24,24 +23,10 @@ func (r *Runner) rollingRPC(ctx context.Context, operation string, input any, re
 	return json.Unmarshal(op.Result, out)
 }
 
-func (r *Runner) AuthorizeRolling(ctx context.Context, in protocol.RollingAuthorization, journalPath string) (protocol.UpgradeGrant, error) {
-	var result protocol.RollingRunnerGrant
+func (r *Runner) AuthorizeRolling(ctx context.Context, in protocol.RollingAuthorization) (protocol.UpgradeGrant, error) {
+	var result protocol.UpgradeGrant
 	err := r.rollingRPC(ctx, "runner.rolling_authorize", in.Request, &in.Revision, &result)
-	if err != nil || result.Allowed || result.PendingCheck == nil || in.PredecessorJournalID == nil || journalPath == "" {
-		return result.UpgradeGrant, err
-	}
-	operations, err := journal.RollingPendingOperations(ctx, journalPath, *in.PredecessorJournalID, in.Request.Binding.UpgradeID, in.Revision, result.PendingCheck.Count)
-	if err != nil || operations == nil {
-		return result.UpgradeGrant, err
-	}
-	in.Request.PendingProof = &protocol.RollingPendingProof{
-		Sequence:   result.PendingCheck.Sequence,
-		JournalID:  *in.PredecessorJournalID,
-		Operations: operations,
-	}
-	result = protocol.RollingRunnerGrant{}
-	err = r.rollingRPC(ctx, "runner.rolling_authorize", in.Request, &in.Revision, &result)
-	return result.UpgradeGrant, err
+	return result, err
 }
 
 // BootstrapRolling uses the already selected release and the existing host

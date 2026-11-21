@@ -108,10 +108,14 @@ func checkRuntime(ctx context.Context, q store.Querier, host string, r *protocol
 			}
 		}
 		if old.Runtime.JournalID != r.JournalID {
+			batch, _, err := warmCandidate(ctx, q, host, r)
+			if err != nil || batch != nil {
+				return err
+			}
 			if !hello {
 				return protocol.Errorf(protocol.CodeConflictPayload, "runner journal is not registered")
 			}
-			_, err := rollingAdmission(ctx, q, host, old.Runtime, r)
+			_, err = rollingAdmission(ctx, q, host, old.Runtime, r)
 			return err
 		}
 		if old.Runtime.InstanceID == r.InstanceID && old.Runtime.Generation != r.Generation {
@@ -147,7 +151,7 @@ func rollingAdmission(ctx context.Context, q store.Querier, host string, old pro
 		}
 		if err == nil && batch.View.Status == "running" && batch.View.Phase == "runners" {
 			for _, target := range batch.Hosts {
-				if target.HostID == host && target.RollingFrom == old.InstanceID && target.CandidateInstance == next.InstanceID && target.TargetHash == next.Build.BinarySHA256 && target.GrantDeadline > 0 {
+				if target.HostID == host && target.WarmRevision == 0 && target.RollingFrom == old.InstanceID && target.CandidateInstance == next.InstanceID && target.TargetHash == next.Build.BinarySHA256 && target.GrantDeadline > 0 {
 					return target.GrantDeadline, nil
 				}
 			}

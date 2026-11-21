@@ -346,8 +346,13 @@ func (w *Workspaces) clone(ctx context.Context, repo, remoteURL, path string) er
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("gitws: repos dir: %w", err)
 	}
-	tmp := path + ".partial"
-	_ = os.RemoveAll(tmp)
+	// Earlier runners can still be cloning during a rolling handoff.
+	staging, err := os.MkdirTemp(filepath.Dir(path), filepath.Base(path)+".clone-")
+	if err != nil {
+		return fmt.Errorf("gitws: clone staging directory: %w", err)
+	}
+	defer os.RemoveAll(staging)
+	tmp := filepath.Join(staging, "repo")
 	args := []string{"clone", "--bare", "--quiet"}
 	if ref := w.repo(repo).Reference; ref != "" {
 		args = append(args, "--reference", ref, "--dissociate")
@@ -372,7 +377,11 @@ func (w *Workspaces) clone(ctx context.Context, repo, remoteURL, path string) er
 		}
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("gitws: install clone: %w", err)
+		// A clone installed by another generation must have the same origin.
+		origin, readErr := w.git.run(ctx, path, "remote", "get-url", "origin")
+		if readErr != nil || origin != remoteURL {
+			return fmt.Errorf("gitws: install clone: %w", err)
+		}
 	}
 	return nil
 }

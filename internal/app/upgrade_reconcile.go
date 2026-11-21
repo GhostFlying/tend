@@ -138,6 +138,13 @@ func reconcileRunnerCandidate(ctx context.Context, x *Exec, tx *store.Tx, r *sto
 	if err != nil {
 		return false, "", err
 	}
+	if h.WarmRevision != 0 && h.Committed == nil {
+		ctl, err := store.GetHostControl(ctx, tx.Q(), h.HostID)
+		if err != nil {
+			return false, "", err
+		}
+		return reconcileWarmCandidate(ctx, x, tx, r, i, rt, ctl)
+	}
 	ctl, err := runnerControl(ctx, tx.Q(), h.HostID, now)
 	if err != nil {
 		return false, "", err

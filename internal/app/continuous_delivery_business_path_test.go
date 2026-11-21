@@ -169,11 +169,17 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 	var installed protocol.RunnerRuntime
 	for _, host := range upgradeRead(h).View.Hosts {
 		upgradeTick(h, current)
-		upgradeAck(h, host.HostID, protocol.RunnerReady)
-		upgradeTick(h, current)
-		upgradeAck(h, host.HostID, protocol.RunnerReady)
-		grantSelfRunner(t, h, host.HostID, current)
-		retainedHost := upgradeAck(h, host.HostID, protocol.RunnerReady)
+		ctl := upgradeCtl(h, host.HostID)
+		rolling := ctl.Upgrade != nil && ctl.Upgrade.Rolling
+		mode := protocol.RunnerNormal
+		if !rolling {
+			mode = protocol.RunnerReady
+			upgradeAck(h, host.HostID, mode)
+			upgradeTick(h, current)
+			upgradeAck(h, host.HostID, mode)
+			grantSelfRunner(t, h, host.HostID, current)
+		}
+		retainedHost := upgradeAck(h, host.HostID, mode)
 		retainedHost.Sequence++
 		retainedHost.Build.PID = 91
 		retainedHost.Updater = selfProof(host.HostID, retainedHost.InstanceID, retainedHost.Build.BinarySHA256)
@@ -181,7 +187,7 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 			t.Fatal(err)
 		}
 		upgradeTick(h, current)
-		ctl := upgradeCtl(h, host.HostID)
+		ctl = upgradeCtl(h, host.HostID)
 		hash := ""
 		for _, a := range c.Manifest.Artifacts {
 			if a.Role == "runner" {
@@ -189,7 +195,14 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 			}
 		}
 		b := protocol.UpgradeBinding{UpgradeID: id, ReleaseID: c.Manifest.ReleaseID, ManifestSHA256: c.ManifestSHA256, ArtifactSHA256: hash, InstanceID: host.HostID, ProcessInstanceID: "current-" + host.HostID}
-		op := h.exec(runner(host.HostID), h.env("runner.upgrade_authorize", protocol.Target{Type: "host", ID: host.HostID}, b, rev(ctl.Revision)), AuthorizeRunnerUpgrade{})
+		target := protocol.Target{Type: "host", ID: host.HostID}
+		var op protocol.Operation
+		if rolling {
+			req := protocol.RollingRunnerGrantRequest{Binding: b, Updater: *retainedHost.Updater}
+			op = h.exec(runner(host.HostID), h.env("runner.rolling_authorize", target, req, rev(ctl.Revision)), AuthorizeRollingRunner{})
+		} else {
+			op = h.exec(runner(host.HostID), h.env("runner.upgrade_authorize", target, b, rev(ctl.Revision)), AuthorizeRunnerUpgrade{})
+		}
 		var grant protocol.UpgradeGrant
 		if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &grant) != nil || !grant.Allowed {
 			t.Fatal(op, grant)
@@ -202,6 +215,11 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 		}
 		next.Updater = selfProof(host.HostID, b.ProcessInstanceID, b.ArtifactSHA256)
 		next.Build.PID = 91
+		if rolling {
+			next.JournalID = b.ProcessInstanceID
+			next.Build.PID = 92
+			next.Updater.SupervisedProcess.PID = 92
+		}
 		next.Sequence++
 		next.JournalVersion = c.Manifest.Storage.RunnerJournal.Max
 		next.Capabilities = append(next.Capabilities, capabilityUpdater, protocol.CapabilityCompleteReleaseSet, protocol.CapabilityUpdaterSelfUpdate)
@@ -210,11 +228,28 @@ func completeContinuousInstallation(t *testing.T, h *harness, c StartUpgrade, id
 		if op := h.versionedHello(host.HostID, &next); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
-		upgradeTick(h, current)
-		h.clock.Advance(8 * time.Second)
-		upgradeAck(h, host.HostID, protocol.RunnerReady)
-		upgradeTick(h, current)
-		upgradeCommitAck(h, b)
+		if rolling {
+			next.Sequence++
+			if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host.HostID), protocol.HeartbeatPayload{Runtime: &next}); err != nil {
+				t.Fatal(err)
+			}
+			upgradeTick(h, current)
+			health, err := h.app.RunnerUpgradeHealth(t.Context(), runner(host.HostID), b)
+			if err != nil || !health.Healthy || health.NewWorkAccepted {
+				t.Fatal("healthy candidate activated before supervisor commitment", health, err)
+			}
+			next.Sequence++
+			next.UpdaterReceipt = committedServerForTest(b)
+			if _, err := h.app.RuntimeHeartbeat(t.Context(), runner(host.HostID), protocol.HeartbeatPayload{Runtime: &next}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			upgradeTick(h, current)
+			h.clock.Advance(8 * time.Second)
+			upgradeAck(h, host.HostID, protocol.RunnerReady)
+			upgradeTick(h, current)
+			upgradeCommitAck(h, b)
+		}
 		upgradeTick(h, current)
 		upgradeAck(h, host.HostID, protocol.RunnerNormal)
 		upgradeTick(h, current)

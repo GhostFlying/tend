@@ -68,6 +68,10 @@ func (r UpgradeRow) InstallationHosts() []UpgradeHost {
 }
 
 type UpgradeHost struct {
+	// WarmRuntime belongs to the authorized candidate. It does not own the
+	// host's admission pointer until the supervisor's commit is observed.
+	WarmRuntime    *HostRuntimeRow           `json:"warm_runtime,omitempty"`
+	WarmRevision   int64                     `json:"warm_revision,omitempty"`
 	PrimaryOffline bool                      `json:"primary_offline,omitempty"`
 	RollingProcess protocol.RecoveryIdentity `json:"rolling_process,omitzero"`
 	// RollingFrom is the exact process allowed to finish its already-owned runs.

@@ -385,9 +385,12 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 		r.requestHeartbeat()
 	}
 	modeChanged := r.control.Mode != stored.Mode || r.control.UpgradeID != stored.UpgradeID
+	admissionRestored := r.control.Mode == protocol.RunnerMaintenance && next.Mode == protocol.RunnerNormal
 	// Retained self-update targets keep their original request and journal.
 	// Their new control revision consumes the previous local error observation.
-	attemptChanged := modeChanged || next.Mode == protocol.RunnerMaintenance && next.Revision > r.control.Revision && (next.Upgrade == nil || next.Upgrade.Updater != nil)
+	rolling := next.Upgrade != nil && next.Upgrade.Rolling
+	attemptChanged := modeChanged || next.Revision > r.control.Revision &&
+		(next.Mode == protocol.RunnerMaintenance || rolling) && (next.Upgrade == nil || next.Upgrade.Updater != nil)
 	cancelledBootstrap := next.Mode == protocol.RunnerNormal && next.UpgradeID == "" && r.control.UpgradeID == r.cfg.UpgradeID && r.cfg.UpgradeID != "" && next.Revision > r.control.Revision
 	releasedBootstrap := false
 	if q := r.boundedRecovery; q != nil && q.AdmissionRelease != nil && next.Mode == protocol.RunnerNormal {
@@ -403,6 +406,9 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 	defer r.mu.Unlock()
 	if modeChanged {
 		r.resourceReconciled = false
+		if admissionRestored && r.cfg.JournalID != "" {
+			r.requestReconcile()
+		}
 	}
 	if attemptChanged {
 		r.upgradeError = ""

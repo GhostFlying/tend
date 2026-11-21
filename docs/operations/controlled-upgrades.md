@@ -399,11 +399,11 @@ owner 在阶段之后继续登记普通进度，不会替代该阶段的独立�
 
 ### 同机 runner 交接
 
-首次重叠交接使用候选完整包中的 CLI。等 fleet 批次进入该主机的 draining 阶段，在 runner 服务账号环境执行 `tend upgrade runner-handoff --release <完整包目录> --config <runner配置> --upgrade-id <原批次ID>`。该命令使用原 host 凭据，校验同一发布集，更新并保留正在工作的前驱。输出中的 staged 表示本机受理；批次状态和 updater status 分别显示是否提交及哪些进程仍在收尾。回执丢失时沿原批次和包查询。
+接单实例在 `warming` 阶段继续领取和执行。支持该阶段的 runner 自动提交候选完整包。接单版本需要显式引导时，在 runner 服务账号环境执行候选完整包中的 `tend upgrade runner-handoff --release <完整包目录> --config <runner配置> --upgrade-id <原批次ID>`。命令使用原 host 凭据和原监督器绑定。输出 staged 表示本机已受理，候选健康且监督器提交后服务端切换接单权。回执不明时，沿原批次、包和 updater status 查询。未达到切换条件时，前驱仍可接单。
 
-使用内嵌 tsnet 的主机先在提供给后继的 runner 配置中设置 `"side_channel":{"kind":"tailscaled"}`。原进程继续使用已打开的节点身份。新连接的节点名或 tag 须命中 host 的 nodes。可用 socket 字段指向自选 LocalAPI Unix socket。使用直接连接的主机可沿用 server_url。完成首次交接后，由接单 runner 自动提交后续完整包；旧 journal 中的任务结束、待提交回执清空并确认进程退出后分别退役。操作命令的环境需要与服务配置使用同一 TEND_HOST_TOKEN。
+使用内嵌 tsnet 的主机先在提供给后继的 runner 配置中设置 `"side_channel":{"kind":"tailscaled"}`。原进程继续使用已打开的节点身份。新连接的节点名或 tag 须命中 host 的 nodes。可用 socket 字段指向自选 LocalAPI Unix socket。使用直接连接的主机可沿用 server_url。操作命令的环境需要与服务配置使用同一 TEND_HOST_TOKEN。
 
-同机交接时可用 `tend host list --json` 查看接单实例和各收尾实例的 Run 数、协议与心跳。首次从历史 runner 交接会等待已领取的 Run 完成工作区准备，已启动的长任务可以继续运行。每个后续实例使用独立 journal，Git 和 Orca 的共享准备操作按主机资源加锁。工作区清理检查保留的各代 journal 中的原件路径。用量控制发往持有对应 Run 的实例，本机用量对账默认连接当前接单实例。
+用 `tend host list --json` 查看接单实例和各收尾实例的 Run 数、协议与心跳。切换时有在途领取可按同一 Run 身份对账。旧 Run 继续续约并投递原事件、回执和用量，且占用原槽位和工作区。工作区清理沿原预约身份执行。旧 journal 中的任务结束、待提交回执清空并确认进程退出后分别退役。
 
 旧进程确认退出后，当前 runner 使用旧 journal 中的请求、上传游标和本机停止证明继续处理未完的归档、用量和工作区对账。可通过当前 runner 的日志查看重试原因。
 
