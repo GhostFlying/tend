@@ -132,3 +132,39 @@ test("original question answer and exact-run supplement use durable identities; 
     payload: {},
   });
 });
+
+test("lost dismissal response settles when only the original responsibility revision advances", async () => {
+  const factory = new IDBFactory();
+  const journal = new DurableOp("attention:ordinary", factory);
+  const submitted: Envelope[] = [];
+  const original = attentionCommand({ attention_id: "ordinary", revision: 1 }, "withdraw", {
+    mode: "not_needed",
+    expected_responsibility_revision: 1,
+  });
+  let responsibilityRevision = 1;
+  const sender: OpSender = {
+    submit: async (envelope) => {
+      submitted.push(envelope);
+      throw new NetworkError("lost response");
+    },
+    get: async <T>(path: string) => {
+      expect(path).toBe("/api/v1/attentions/ordinary");
+      return {
+        attention_id: "ordinary",
+        revision: 1,
+        responsibility: { revision: responsibilityRevision },
+      } as T;
+    },
+  };
+  expect((await performOwnerCommand(sender, journal, original)).kind).toBe("unknown");
+  expect(await journal.pending()).toMatchObject(submitted[0]!);
+
+  responsibilityRevision = 3;
+  const reopened = new DurableOp("attention:ordinary", factory);
+  expect(await performOwnerCommand(sender, reopened, undefined)).toMatchObject({
+    kind: "stale",
+    currentAttention: { revision: 1, responsibility: { revision: 3 } },
+  });
+  expect(submitted).toHaveLength(1);
+  expect(await reopened.pending()).toBeUndefined();
+});

@@ -215,7 +215,12 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "answer the original report decision or use the Issue lifecycle controls")
 		}
 		var p protocol.WithdrawAttentionPayload
-		if len(x.Env.Payload) != 0 {
+		var selection struct {
+			Mode json.RawMessage `json:"mode"`
+		}
+		// Legacy withdrawal used only the envelope reason and ignored the payload.
+		_ = json.Unmarshal(x.Env.Payload, &selection)
+		if mode := string(selection.Mode); mode != "" && mode != `""` && mode != "null" {
 			if err := decodePayload(x.Env, &p); err != nil {
 				return Outcome{}, err
 			}
