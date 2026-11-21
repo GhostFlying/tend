@@ -103,6 +103,7 @@ export class LiveData {
   private readonly choiceReads = new Map<string, WorkItemRead<WorkItemChoice>>();
   /** Conversation events that arrived while the latest page was being read. */
   private held: LedgerEvent[] | null = null;
+  private heldEarlierAssociations: Map<string, number> | null = null;
   private readonly snapshotReads: Coalesced;
   private readonly detailReads: Coalesced;
   private readonly latestReads: Coalesced;
@@ -336,7 +337,8 @@ export class LiveData {
       this.directChats.refresh();
     if (event.item && (event.item.conversation_id ?? "main") !== this.conversationID) return;
     if (event.kind === "conversation.associations_changed") {
-      void this.refreshAssociations(event.object_id);
+      if (this.held) this.held.push(event);
+      else this.applyAssociationChange(event);
       return;
     }
 
@@ -399,8 +401,16 @@ export class LiveData {
     }
   }
 
+  private applyAssociationChange(event: LedgerEvent): void {
+    const { object_id: messageID, event_seq: seq } = event;
+    if (this.conversationStore.get().items.some((item) => item.message_id === messageID)) {
+      void this.refreshAssociations(messageID);
+    } else {
+      this.heldEarlierAssociations?.set(messageID, seq);
+    }
+  }
+
   private async refreshAssociations(messageID: string): Promise<void> {
-    if (!this.conversationStore.get().items.some((item) => item.message_id === messageID)) return;
     try {
       const associations = await this.api.get<IssueMessageAssociations>(
         `/api/v1/messages/${encodeURIComponent(messageID)}/associations?projection=issues`,
@@ -434,10 +444,12 @@ export class LiveData {
   async loadEarlier(): Promise<void> {
     const state = this.conversationStore.get();
     const first = state.before ?? state.items[0]?.seq;
-    if (!state.more || state.loadingEarlier || !first) {
+    if (!state.more || state.loadingEarlier || !first || this.held) {
       return;
     }
     const generation = this.historyGeneration;
+    const heldAssociations = new Map<string, number>();
+    this.heldEarlierAssociations = heldAssociations;
     this.conversationStore.set({ ...state, loadingEarlier: true });
     try {
       const page = await this.api.get<ConversationPage>(
@@ -454,6 +466,15 @@ export class LiveData {
         before: page.items?.[0]?.seq ?? now.before,
         loadingEarlier: false,
       });
+      const through = page.event_seq ?? 0;
+      for (const item of page.items ?? []) {
+        if (
+          (heldAssociations.get(item.message_id) ?? 0) > through &&
+          !this.withdrawn.has(item.message_id)
+        ) {
+          void this.refreshAssociations(item.message_id);
+        }
+      }
     } catch (err) {
       if (generation !== this.historyGeneration) return;
       this.conversationStore.set({
@@ -461,6 +482,8 @@ export class LiveData {
         loadingEarlier: false,
         error: describe(err),
       });
+    } finally {
+      if (this.heldEarlierAssociations === heldAssociations) this.heldEarlierAssociations = null;
     }
   }
 
@@ -529,6 +552,7 @@ export class LiveData {
   private async readLatest(): Promise<void> {
     if (this.stopped) return;
     this.historyGeneration++;
+    this.heldEarlierAssociations = null;
     this.held = [];
     let through = 0;
     try {
@@ -559,7 +583,9 @@ export class LiveData {
       const held = this.held ?? [];
       this.held = null;
       for (const ev of held) {
-        if (ev.event_seq > through) this.applyItem(ev);
+        if (ev.event_seq <= through) continue;
+        if (ev.kind === "conversation.associations_changed") this.applyAssociationChange(ev);
+        else this.applyItem(ev);
       }
     }
   }
