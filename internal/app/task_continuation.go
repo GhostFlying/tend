@@ -67,12 +67,18 @@ func (ContinueTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 			return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "the Task's current Issue responsibility must be retained before continuation")
 		}
 	}
-	var busy bool
-	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, row.TaskID, row.TaskID).Scan(&busy); err != nil {
-		return Outcome{}, err
-	}
-	if busy {
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the previous run, physical stop and resource receipt before continuing the Task")
+	if spec.ReviewDeliveryID != "" {
+		if err := stoppedReviewerTaskRecoveryReady(ctx, tx.Q(), row.TaskID); err != nil {
+			return Outcome{}, err
+		}
+	} else {
+		var busy bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runs r LEFT JOIN leases l USING(run_id) WHERE r.task_id=? AND (r.observed_state IN ('starting','running','waiting','interrupted','unknown') OR l.status<>'released')) OR EXISTS(SELECT 1 FROM workspaces WHERE occupied_by=?)`, row.TaskID, row.TaskID).Scan(&busy); err != nil {
+			return Outcome{}, err
+		}
+		if busy {
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reconcile the previous run, physical stop and resource receipt before continuing the Task")
+		}
 	}
 	d, err := domain.ContinueTask(toDomain(row, spec.Budget()), expected, p.Reason)
 	if err != nil {

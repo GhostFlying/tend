@@ -5621,6 +5621,7 @@ export interface SharedDeliveryReviewPage {
   items: SharedDeliveryReview[] | null;
   more: boolean;
   next?: string;
+  receipt?: SharedReviewRequestReceipt;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5776,6 +5777,15 @@ export interface SharedReviewCorrection {
   run_id: string;
   spec_version: number;
   task_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "SharedReviewRequestReceipt".
+ */
+export interface SharedReviewRequestReceipt {
+  request_id: string;
+  review?: SharedDeliveryReview;
+  status: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

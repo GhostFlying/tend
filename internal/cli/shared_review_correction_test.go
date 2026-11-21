@@ -49,3 +49,22 @@ func TestIssueReviewCorrectionRetainsActualReportAndOriginalRequest(t *testing.T
 		t.Fatal(code, e.errOut.String(), f.requests)
 	}
 }
+
+func TestIssueDeliveryReviewReceiptReadsOriginalRequest(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	const request = "req_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	f.on("GET /api/v1/issues/issue/delivery-reviews", func(w http.ResponseWriter, r *http.Request, _ []byte) {
+		if r.URL.Query().Get("request_id") != request || r.URL.Query().Get("delivery_id") != "pr" {
+			t.Error("receipt lookup changed the original selector", r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"receipt": protocol.SharedReviewRequestReceipt{RequestID: request, Status: "unknown"}, "items": []any{}, "more": false})
+	})
+	if code := e.main("issue", "delivery-reviews", "issue", "--delivery", "pr", "--review-request-id", request); code != exitOK || len(f.requests) != 1 {
+		t.Fatal(code, e.errOut.String(), f.requests)
+	}
+	var page protocol.SharedDeliveryReviewPage
+	if err := json.Unmarshal(e.out.Bytes(), &page); err != nil || page.Receipt == nil || page.Receipt.RequestID != request || page.Receipt.Status != "unknown" {
+		t.Fatal(page, err)
+	}
+}

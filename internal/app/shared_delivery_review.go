@@ -230,8 +230,14 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			// not settle recurring finding IDs in the next actual review.
 			r.Dispositions = nil
 		case "record":
-			if r.Status != "reviewing" || len(r.Rounds) == 0 {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
+			if p.ReviewerTaskID != "" {
+				if err := recordCompletedSharedReport(ctx, tx.Q(), i, p, &r); err != nil {
+					return Outcome{}, err
+				}
+				break
+			}
+			if len(r.Rounds) == 0 || r.Status != "reviewing" && (r.Status != "waiting" || r.Rounds[len(r.Rounds)-1].Result != nil) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no unresolved frozen shared review")
 			}
 			last := &r.Rounds[len(r.Rounds)-1]
 			previousAcceptance, previousVerdict := last.AcceptanceID, last.AcceptanceVerdict
@@ -263,13 +269,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			} else {
 				last.RunID, last.ArtifactID = run, artifact
 			}
-			r.Status = "changes_requested"
-			if result.Verdict == "passed" {
-				r.Status = "passed"
-			}
-			if result.Verdict == "blocked" || result.Verdict == "inconclusive" {
-				r.Status = "waiting"
-			}
+			r.Status = sharedReviewResultStatus(result.Verdict)
 
 		case "wait":
 			if p.ExpectedReviewRevision == nil || *p.ExpectedReviewRevision != r.Revision {
@@ -279,7 +279,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait requires an unresolved frozen review without a quality conclusion")
 			}
 			last := protocol.SharedReviewInputRound(r.Rounds[len(r.Rounds)-1])
-			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), last.TaskID, false); err != nil {
+			if err := stoppedReviewerTaskRecoveryReady(ctx, tx.Q(), last.TaskID); err != nil {
 				return Outcome{}, err
 			}
 			if last.ReviewerRole == protocol.RoleAccept {
@@ -382,13 +382,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			last.Corrections = append(last.Corrections, protocol.SharedReviewCorrection{RequestID: x.Env.RequestID, TaskID: correction.TaskID, SpecVersion: correction.SpecVersion, RunID: run, ArtifactID: artifact, Profile: pin.Profile, Result: *result, Reason: p.Reason, CreatedAt: x.Now.UnixMilli()})
 			r.AssessedRequirementsDigest, r.AssessmentReason, r.Assessment = "", "", nil
 			last.Result = result
-			r.Status = "changes_requested"
-			if result.Verdict == "passed" {
-				r.Status = "passed"
-			}
-			if result.Verdict == "blocked" || result.Verdict == "inconclusive" {
-				r.Status = "waiting"
-			}
+			r.Status = sharedReviewResultStatus(result.Verdict)
 		case "supplement":
 			if r.Status != "reviewing" || len(r.Rounds) == 0 {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only an unresolved original acceptance import can receive focused evidence")

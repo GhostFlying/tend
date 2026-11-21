@@ -237,7 +237,16 @@ type SharedReviewExistingEvidence struct {
 	ContributionsMore bool                               `json:"contributions_more,omitempty"`
 }
 
+// SharedReviewRequestReceipt reports whether the original request wrote a
+// review revision. A missing historical fact leaves the outcome unknown.
+type SharedReviewRequestReceipt struct {
+	RequestID string                `json:"request_id"`
+	Status    string                `json:"status"`
+	Review    *SharedDeliveryReview `json:"review,omitempty"`
+}
+
 type SharedDeliveryReviewPage struct {
+	Receipt          *SharedReviewRequestReceipt    `json:"receipt,omitempty"`
 	ExistingEvidence []SharedReviewExistingEvidence `json:"existing_evidence,omitempty"`
 	Items            []SharedDeliveryReview         `json:"items"`
 	More             bool                           `json:"more"`
