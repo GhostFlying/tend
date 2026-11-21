@@ -104,6 +104,36 @@ func TestFault_ManagerProjectionRecoversOriginalTail(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The projected row and application marker can both reach the writer
+	// before SQLite rejects the commit. The caller still reads the original
+	// application row before deciding anything remains missing.
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		if _, err := tx.Exec(ctx, `CREATE TABLE test_projection_commit_guard
+ (run_id TEXT REFERENCES runs(run_id) DEFERRABLE INITIALLY DEFERRED)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `CREATE TRIGGER test_projection_commit_failure AFTER UPDATE OF applied ON manager_native_events
+ WHEN NEW.applied=1 AND OLD.seq=1 BEGIN
+  INSERT INTO test_projection_commit_guard(run_id) VALUES('nonexistent-original-run');
+ END`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.projectManagerNativeEvent(ctx, as.RunID, 1); err == nil || !strings.Contains(err.Error(), "store: commit:") {
+		t.Fatal("fault did not reach the SQLite commit boundary", err)
+	}
+	assertManagerProjectionWatermarks(t, h, as.RunID, last, 0)
+	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='cmd'`) != 0 {
+		t.Fatal("the failed commit made a tool projection visible")
+	}
+	if err := h.store.Write(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(ctx, `DROP TRIGGER test_projection_commit_failure`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// Cancellation cannot authorize another write. Reopen SQLite and start
 	// recovery with no attachment, RPC consumer or in-memory cursor.
 	cancelled, cancelAttempt := context.WithCancel(ctx)
