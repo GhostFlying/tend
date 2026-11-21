@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 )
@@ -43,4 +44,42 @@ func (tx *Tx) SaveAttention(ctx context.Context, a protocol.Attention, expected 
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO attention_revisions(attention_id,revision,body_json,request_id) VALUES(?,?,?,?)`, a.AttentionID, a.Revision, string(raw), request)
 	return err
+}
+
+// CanDismissAttention checks the persisted classification and the current
+// Inbox recipient. Callers doing a write must pass the transaction's snapshot.
+func CanDismissAttention(ctx context.Context, q Querier, a protocol.Attention, ownerSubject string) (bool, error) {
+	if ownerSubject == "" || a.ActionClass != protocol.AttentionActionOrdinary ||
+		a.Kind != "action" || a.Status != "open" || a.BlocksClose ||
+		a.TaskID != "" || a.DecisionID != "" || a.ChoiceID != "" || a.ReportFollowOn != nil {
+		return false, nil
+	}
+	r := a.Responsibility
+	if r == nil {
+		return a.IssueID == "" && a.RaisedBy.Kind == protocol.PrincipalOwner && a.RaisedBy.Subject == ownerSubject, nil
+	}
+	if r.RecipientKind != "owner" || (r.RecipientRef != "" && r.RecipientRef != ownerSubject) ||
+		r.OriginIssueID != a.IssueID || r.Revision < 1 {
+		return false, nil
+	}
+	ancestry, err := ResponsibilityAncestry(ctx, q, a.IssueID)
+	if err != nil {
+		return false, err
+	}
+	if !slices.Equal(ancestry, r.Ancestry) {
+		return false, nil
+	}
+	origin, err := GetCanonicalIssue(ctx, q, a.IssueID)
+	if err != nil || origin.AssignmentEpoch != r.OriginAssignmentEpoch {
+		return false, err
+	}
+	if r.IssueID == "" {
+		return true, nil
+	}
+	recipient, err := GetCanonicalIssue(ctx, q, r.IssueID)
+	if err != nil {
+		return false, err
+	}
+	return recipient.AssignmentEpoch == r.AssignmentEpoch && recipient.Assignee.Kind == protocol.IssueAssigneeOwner &&
+		recipient.Assignee.Ref == r.RecipientRef, nil
 }

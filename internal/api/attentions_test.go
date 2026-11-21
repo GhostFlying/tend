@@ -3,22 +3,22 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/GhostFlying/tend/internal/cli"
-	"github.com/GhostFlying/tend/internal/protocol"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/GhostFlying/tend/internal/cli"
+	"github.com/GhostFlying/tend/internal/netx"
+	"github.com/GhostFlying/tend/internal/protocol"
 )
 
-func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
-	e := newEnv(t)
-	e.configure()
-	token := e.login(protocol.ScopeOwner)
-	issue := createOwnerIssueHTTP(t, e, token, "")
+func newAttentionCLI(t *testing.T, e *env, token string) (*cli.Env, *bytes.Buffer, func(...string) protocol.APIResponse) {
+	t.Helper()
 	dir := t.TempDir()
 	deployment, err := e.app.DeploymentID(t.Context())
 	if err != nil {
@@ -45,6 +45,15 @@ func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
 		}
 		return v
 	}
+	return env, &stderr, run
+}
+
+func TestAttentionCLIRealHTTPOriginalDecisionAndInboxIdentity(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	env, stderr, run := newAttentionCLI(t, e, token)
 	due := e.clock.Now().Add(30 * time.Hour).UnixMilli()
 	payload, _ := json.Marshal(protocol.CreateAttentionPayload{IssueID: issue.IssueID, Kind: "decision", Title: "Which result is needed?", Options: []string{"report", "changes"}, BlocksClose: true, LatestActionAt: &due})
 	created := run("create", "--data", string(payload))
@@ -306,5 +315,131 @@ func TestP5ReviewAttentionCLISecondPage(t *testing.T) {
 	second := run("--after", first.Next)
 	if len(second.Items) != 1 || second.More || second.Items[0].AttentionID <= first.Next {
 		t.Fatal("later obligation unreachable", second)
+	}
+}
+
+func TestAttentionCLIDismissOrdinaryAction(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	issue := createOwnerIssueHTTP(t, e, token, "")
+	_, _, run := newAttentionCLI(t, e, token)
+	var action protocol.Attention
+	created := run("create", "--data", `{"kind":"action","title":"Optional follow-up","action_class":"ordinary","issue_id":"`+issue.IssueID+`"}`)
+	if err := json.Unmarshal(created.Operation.Result, &action); err != nil {
+		t.Fatal(err)
+	}
+	var inbox protocol.AttentionPage
+	if st := e.do("GET", "/api/v1/inbox?status=open", token, nil, &inbox); st != http.StatusOK || len(inbox.Items) != 1 || !inbox.Items[0].CanDismiss {
+		t.Fatal(st, inbox)
+	}
+	entry := protocol.PlannerEntry{Kind: "user_action", IssueID: issue.IssueID, AttentionID: action.AttentionID, Title: action.Title, Responsible: "owner", Status: "open", Reason: "Track action"}
+	_, plan := e.op(token, e.envelope("planner.entries_put", protocol.Target{Type: "planner_entry"}, nil, protocol.PutPlannerEntryPayload{Entry: entry}))
+	if err := json.Unmarshal(plan.Operation.Result, &entry); err != nil {
+		t.Fatal(err)
+	}
+
+	withdrawal := run("withdraw", action.AttentionID, "--not-needed")
+	var withdrawn protocol.Attention
+	if err := json.Unmarshal(withdrawal.Operation.Result, &withdrawn); err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn.AttentionID != action.AttentionID || withdrawn.Revision != action.Revision+1 ||
+		withdrawn.Status != "withdrawn" || withdrawn.BlocksClose || withdrawn.WithdrawalMode != protocol.AttentionWithdrawalNotNeeded ||
+		withdrawn.WithdrawnAt != e.clock.Now().UnixMilli() || withdrawn.RaisedBy != action.RaisedBy ||
+		withdrawn.ResolutionActor == nil || withdrawn.ResolutionActor.Kind != protocol.PrincipalOwner || withdrawn.ResolutionActor.Subject != ownerLogin {
+		t.Fatalf("unexpected withdrawal %+v", withdrawn)
+	}
+	if st := e.do("GET", "/api/v1/inbox?status=open", token, nil, &inbox); st != http.StatusOK || len(inbox.Items) != 0 {
+		t.Fatal(st, inbox)
+	}
+	if st := e.do("GET", "/api/v1/inbox?status=withdrawn", token, nil, &inbox); st != http.StatusOK ||
+		len(inbox.Items) != 1 || inbox.Items[0].CanDismiss || inbox.Items[0].Revision != withdrawn.Revision {
+		t.Fatal(st, inbox)
+	}
+	if st := e.do("GET", "/api/v1/planner-entries/"+entry.EntryID, token, nil, &entry); st != http.StatusOK || entry.Status != "cancelled" {
+		t.Fatal(st, entry)
+	}
+}
+
+func TestAttentionDismissRejectsIneligibleAndOtherOwner(t *testing.T) {
+	e := newEnv(t)
+	e.configure()
+	token := e.login(protocol.ScopeOwner)
+	create := func(payload protocol.CreateAttentionPayload) protocol.Attention {
+		t.Helper()
+		_, res := e.op(token, e.envelope("attentions.create", protocol.Target{Type: "attention"}, nil, payload))
+		var a protocol.Attention
+		if err := json.Unmarshal(res.Operation.Result, &a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	ordinary := create(protocol.CreateAttentionPayload{Kind: "action", Title: "Optional", ActionClass: protocol.AttentionActionOrdinary})
+	check := func(token string, a protocol.Attention) {
+		t.Helper()
+		var view protocol.AttentionView
+		path := "/api/v1/attentions/" + a.AttentionID
+		if st := e.do("GET", path, token, nil, &view); st != http.StatusOK || view.CanDismiss {
+			t.Fatal(st, view)
+		}
+		_, res := e.op(token, e.envelope("attentions.withdraw", protocol.Target{Type: "attention", ID: a.AttentionID}, &a.Revision,
+			protocol.WithdrawAttentionPayload{Mode: protocol.AttentionWithdrawalNotNeeded}))
+		if res.Operation.Status != protocol.OpFailed {
+			t.Fatal(res)
+		}
+		if st := e.do("GET", path, token, nil, &view); st != http.StatusOK || view.Status != "open" || view.Revision != a.Revision {
+			t.Fatal(st, view)
+		}
+	}
+	check(token, create(protocol.CreateAttentionPayload{Kind: "action", Title: "Unclassified historical action"}))
+	check(token, create(protocol.CreateAttentionPayload{Kind: "action", Title: "Real blocker", BlocksClose: true}))
+	check(token, create(protocol.CreateAttentionPayload{Kind: "decision", Title: "Approve delivery?", Options: []string{"Approve"}, BlocksClose: true}))
+
+	e.peer.set(netx.Identity{User: "other-owner@example.com"})
+	var other protocol.SessionView
+	if st := e.do("POST", "/api/v1/session", "", protocol.SessionRequest{ClientID: clientID, Scope: protocol.ScopeOwner}, &other); st != http.StatusOK {
+		t.Fatal(st)
+	}
+	check(other.Token, ordinary)
+}
+
+func TestAttentionDismissAndConfirmHaveOneWinner(t *testing.T) {
+	e := newEnv(t)
+	token := e.login(protocol.ScopeOwner)
+	_, created := e.op(token, e.envelope("attentions.create", protocol.Target{Type: "attention"}, nil,
+		protocol.CreateAttentionPayload{Kind: "action", Title: "Optional follow-up", ActionClass: protocol.AttentionActionOrdinary}))
+	var a protocol.Attention
+	if err := json.Unmarshal(created.Operation.Result, &a); err != nil {
+		t.Fatal(err)
+	}
+	target := protocol.Target{Type: "attention", ID: a.AttentionID}
+	dismiss := e.envelope("attentions.withdraw", target, &a.Revision, protocol.WithdrawAttentionPayload{Mode: protocol.AttentionWithdrawalNotNeeded})
+	confirm := e.envelope("attentions.confirm", target, &a.Revision, protocol.ConfirmAttentionPayload{Summary: "Completed"})
+	var wg sync.WaitGroup
+	var results [2]protocol.APIResponse
+	for i, op := range []protocol.Envelope{dismiss, confirm} {
+		wg.Go(func() {
+			_, results[i] = e.op(token, op)
+		})
+	}
+	wg.Wait()
+	winner := results[0].Operation.Status == protocol.OpSucceeded
+	if winner == (results[1].Operation.Status == protocol.OpSucceeded) {
+		t.Fatal(results)
+	}
+	var detail protocol.AttentionView
+	want := "resolved"
+	if winner {
+		want = "withdrawn"
+	}
+	path := "/api/v1/attentions/" + a.AttentionID
+	if st := e.do("GET", path, token, nil, &detail); st != http.StatusOK || detail.Status != want || detail.Revision != a.Revision+1 {
+		t.Fatal(st, detail)
+	}
+	dismiss.RequestID = e.ids.New(protocol.PrefixRequest)
+	e.op(token, dismiss)
+	if st := e.do("GET", path, token, nil, &detail); st != http.StatusOK || detail.Status != want || detail.Revision != a.Revision+1 {
+		t.Fatal(st, detail)
 	}
 }

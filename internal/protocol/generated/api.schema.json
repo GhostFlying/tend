@@ -2197,6 +2197,9 @@
     "AttentionView": {
       "additionalProperties": false,
       "properties": {
+        "action_class": {
+          "type": "string"
+        },
         "archived_at": {
           "type": "integer"
         },
@@ -2204,6 +2207,9 @@
           "type": "string"
         },
         "blocks_close": {
+          "type": "boolean"
+        },
+        "can_dismiss": {
           "type": "boolean"
         },
         "choice": {
@@ -2312,6 +2318,12 @@
           "type": "string"
         },
         "updated_at": {
+          "type": "integer"
+        },
+        "withdrawal_mode": {
+          "type": "string"
+        },
+        "withdrawn_at": {
           "type": "integer"
         }
       },
@@ -5128,6 +5140,9 @@
     "CreateAttentionPayload": {
       "additionalProperties": false,
       "properties": {
+        "action_class": {
+          "type": "string"
+        },
         "blocks_close": {
           "type": "boolean"
         },
@@ -22933,6 +22948,19 @@
       "title": "WebhookSubscriptionPayload",
       "type": "object"
     },
+    "WithdrawAttentionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_responsibility_revision": {
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        }
+      },
+      "title": "WithdrawAttentionPayload",
+      "type": "object"
+    },
     "WithdrawMessagePayload": {
       "additionalProperties": false,
       "properties": {},
@@ -24116,6 +24144,9 @@
     },
     "WebhookSubscriptionPayload": {
       "$ref": "#/definitions/WebhookSubscriptionPayload"
+    },
+    "WithdrawAttentionPayload": {
+      "$ref": "#/definitions/WithdrawAttentionPayload"
     },
     "WithdrawMessagePayload": {
       "$ref": "#/definitions/WithdrawMessagePayload"

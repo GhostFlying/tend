@@ -120,7 +120,7 @@ CLI 覆盖全部用户业务、管理和诊断能力；Web、Telegram 提供其�
 | `attentions.present` | `attention present` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
 | `attentions.respond` | `attention respond` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `attentions.update` | `attention update` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | API | CLI 分发与 Envelope |
-| `attentions.withdraw` | `attention withdraw` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
+| `attentions.withdraw` | `attention withdraw` | 明确撤回理由，或对符合条件的普通待办使用 `--not-needed`；恢复保留原 request_id、attention revision 和适用的 responsibility revision | Inbox | CLI 经真实 HTTP 验证 |
 | `categories.put` | `category put` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `control.set_mode` | `pause` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |
 | `conversation.compact` | `conversation compact` | 完整 JSON；原 request_id；revision/epoch 见业务合同 | Web | CLI 分发与 Envelope |

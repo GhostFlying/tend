@@ -392,7 +392,9 @@ function AttentionForm({
         ? submittedExplanation(pendingAnswer, !!a.choice)
         : text;
   const shownChoice = pendingAnswer?.option ?? choice;
-  const run = async (action: "respond" | "confirm" | "read" | "archive" | "reconcile") => {
+  const run = async (
+    action: "respond" | "confirm" | "dismiss" | "read" | "archive" | "reconcile",
+  ) => {
     let sourceMessageID: string | undefined;
     if (
       action === "confirm" &&
@@ -450,11 +452,18 @@ function AttentionForm({
                 summary: shownText,
                 ...(sourceMessageID ? { source_message_id: sourceMessageID } : {}),
               })
-            : attentionCommand(
-                a,
-                "present",
-                action === "read" ? { read: !a.read_at } : { archived: !a.archived_at },
-              );
+            : action === "dismiss"
+              ? attentionCommand(a, "withdraw", {
+                  mode: "not_needed",
+                  ...(a.responsibility
+                    ? { expected_responsibility_revision: a.responsibility.revision }
+                    : {}),
+                })
+              : attentionCommand(
+                  a,
+                  "present",
+                  action === "read" ? { read: !a.read_at } : { archived: !a.archived_at },
+                );
     try {
       const out = await operation.execute(command);
       setResult(out);
@@ -541,7 +550,7 @@ function AttentionForm({
       )}
       <p className={`${styles.muted} ${styles.detailMeta}`}>
         <Badge>{kindLabel(a.kind)}</Badge> <span>·</span>{" "}
-        <span>{a.historical ? "历史提示" : statusLabel(a.status)}</span>
+        <span>{a.historical ? "历史提示" : attentionStatusLabel(a)}</span>
       </p>
       {a.kind === "decision" && (
         <>
@@ -655,7 +664,7 @@ function AttentionForm({
         </>
       )}
       {a.source_message_id && <AttentionOriginalMessage id={a.source_message_id} />}
-      {a.kind === "action" && (
+      {a.kind === "action" && a.status !== "withdrawn" && (
         <label>
           <h3>处理结果</h3>
           <Textarea
@@ -711,6 +720,20 @@ function AttentionForm({
             <p role="alert">{source.error || source.content.error}</p>
           )}
         </>
+      )}
+      {a.status === "withdrawn" && (
+        <section aria-label="撤回记录">
+          {a.withdrawal_mode !== "not_needed" && a.resolution && <p>{a.resolution}</p>}
+          <p className={styles.muted}>
+            {a.resolution_actor
+              ? a.resolution_actor.kind === "owner" && a.resolution_actor.subject
+                ? a.resolution_actor.subject
+                : actorLabel(a.resolution_actor)
+              : "未记录操作者"}
+            {" · "}
+            {a.withdrawn_at ? new Date(a.withdrawn_at).toLocaleString("zh-CN") : "未记录撤回时间"}
+          </p>
+        </section>
       )}
       {a.status === "resolved" && a.resolution_source_id && (
         <SourceDetails id={a.resolution_source_id} />
@@ -769,6 +792,11 @@ function AttentionForm({
             onClick={() => void run("confirm")}
           >
             提交处理结果
+          </Button>
+        )}
+        {a.can_dismiss && (
+          <Button variant="secondary" disabled={blocked} onClick={() => void run("dismiss")}>
+            无需处理
           </Button>
         )}
         <Button variant="secondary" onClick={onBack}>
@@ -868,6 +896,12 @@ function kindLabel(kind: string): string {
     )[kind] ?? kind
   );
 }
+function attentionStatusLabel(a: AttentionView) {
+  return a.status === "withdrawn" && a.withdrawal_mode === "not_needed"
+    ? "已撤回 · 无需处理"
+    : statusLabel(a.status);
+}
+
 function statusLabel(status: string): string {
   return (
     (

@@ -5,6 +5,7 @@ import type {
   PresentAttentionPayload,
   RespondAttentionPayload,
   UpdateAttentionPayload,
+  WithdrawAttentionPayload,
   PutIssueDeadlinePayload,
   CancelIssueDeadlinePayload,
   PutPlannerEntryPayload,
@@ -16,6 +17,7 @@ interface AttentionPayloads {
   confirm: ConfirmAttentionPayload;
   present: PresentAttentionPayload;
   update: UpdateAttentionPayload;
+  withdraw: WithdrawAttentionPayload;
 }
 
 export function createAttentionCommand(payload: CreateAttentionPayload): OwnerCommand {

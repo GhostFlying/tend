@@ -30,6 +30,7 @@ func (s *Server) attentions(w http.ResponseWriter, r *http.Request) {
 		f.Limit = n
 	}
 	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
+		f.ViewerSubject = p.Subject
 		if r.Pattern == "GET /api/v1/inbox" && f.Recipient == "owner" {
 			f.OwnerSubject = p.Subject
 		}
@@ -37,7 +38,7 @@ func (s *Server) attentions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (s *Server) attention(w http.ResponseWriter, r *http.Request) {
-	s.read(w, r, func(_ protocol.Principal, q store.Querier) (any, error) {
-		return views.Attention(r.Context(), q, r.PathValue("id"))
+	s.read(w, r, func(p protocol.Principal, q store.Querier) (any, error) {
+		return views.OwnerAttention(r.Context(), q, r.PathValue("id"), p.Subject)
 	})
 }

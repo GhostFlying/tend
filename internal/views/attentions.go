@@ -10,7 +10,7 @@ import (
 type AttentionFilter struct {
 	IssueID, Kind, Status, After  string
 	Recipient, ResponsibleIssueID string
-	OwnerSubject                  string
+	OwnerSubject, ViewerSubject   string
 	IncludeArchived               bool
 	ActionableOnly                bool
 	Limit                         int
@@ -30,10 +30,15 @@ func Attention(ctx context.Context, q store.Querier, id string) (protocol.Attent
 	return (&attentionReader{}).read(ctx, q, id)
 }
 
+func OwnerAttention(ctx context.Context, q store.Querier, id, ownerSubject string) (protocol.AttentionView, error) {
+	return (&attentionReader{ownerSubject: ownerSubject}).read(ctx, q, id)
+}
+
 // A page shares scheduling facts instead of rereading the full scheduler inputs
 // for every linked task. Standalone reads initialize them only when needed.
 type attentionReader struct {
-	execution *executionFacts
+	execution    *executionFacts
+	ownerSubject string
 }
 
 func (reader *attentionReader) read(ctx context.Context, q store.Querier, id string) (protocol.AttentionView, error) {
@@ -42,6 +47,10 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 		return protocol.AttentionView{}, err
 	}
 	v := protocol.AttentionView{Attention: a}
+	v.CanDismiss, err = store.CanDismissAttention(ctx, q, a, reader.ownerSubject)
+	if err != nil {
+		return v, err
+	}
 	var taskRevision int64
 	if a.IssueID != "" {
 		issue, err := store.GetIssue(ctx, q, a.IssueID)
@@ -132,7 +141,7 @@ func (reader *attentionReader) read(ctx context.Context, q store.Querier, id str
 	return v, nil
 }
 func Attentions(ctx context.Context, q store.Querier, f AttentionFilter) (protocol.AttentionPage, error) {
-	return (&attentionReader{}).list(ctx, q, f)
+	return (&attentionReader{ownerSubject: f.ViewerSubject}).list(ctx, q, f)
 }
 
 func (reader *attentionReader) list(ctx context.Context, q store.Querier, f AttentionFilter) (protocol.AttentionPage, error) {
