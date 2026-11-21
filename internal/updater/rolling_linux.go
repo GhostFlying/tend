@@ -19,8 +19,8 @@ import (
 )
 
 // Use the selected runner's transport even when the retained process predates
-// rolling RPCs. This invocation never opens a journal or starts workers.
-func (a journalAuthority) AuthorizeLaunch(ctx context.Context, v Version, b Binding, launch RollingLaunch) (Grant, error) {
+// rolling RPCs. This invocation can inspect the predecessor journal read-only.
+func (a journalAuthority) AuthorizeLaunch(ctx context.Context, v Version, b Binding, launch RollingLaunch, journal string) (Grant, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	var grant Grant
@@ -40,7 +40,7 @@ func (a journalAuthority) AuthorizeLaunch(ctx context.Context, v Version, b Bind
 	if err != nil {
 		return grant, err
 	}
-	input, err := json.Marshal(protocol.RollingAuthorization{Revision: launch.Revision, Request: protocol.RollingRunnerGrantRequest{Binding: b, Updater: launch.Observation}})
+	input, err := json.Marshal(protocol.RollingAuthorization{Revision: launch.Revision, Request: protocol.RollingRunnerGrantRequest{Binding: b, Updater: launch.Observation}, PredecessorJournalID: &journal})
 	if err != nil {
 		return grant, err
 	}

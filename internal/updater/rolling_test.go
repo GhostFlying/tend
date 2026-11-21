@@ -19,7 +19,7 @@ type retirementAuthority struct {
 	confirmed map[string]int
 }
 
-func (a *retirementAuthority) AuthorizeLaunch(ctx context.Context, _ Version, b Binding, _ RollingLaunch) (Grant, error) {
+func (a *retirementAuthority) AuthorizeLaunch(ctx context.Context, _ Version, b Binding, _ RollingLaunch, _ string) (Grant, error) {
 	return a.Authorize(ctx, b)
 }
 func (a *retirementAuthority) Retire(_ context.Context, _ string, in protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error) {

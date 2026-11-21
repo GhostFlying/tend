@@ -31,13 +31,18 @@ func upgradeHarness(t *testing.T) (*harness, StartUpgrade) {
 			t.Fatal(op)
 		}
 	}
+	return h, upgradeFixtureRelease(t, h)
+}
+
+func upgradeFixtureRelease(t *testing.T, h *harness) StartUpgrade {
+	t.Helper()
 	var schema int64
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
 		return tx.Q().QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migrations`).Scan(&schema)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return h, StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
+	return StartUpgrade{Manifest: release.Manifest{Format: 1, ReleaseID: "release-new", Protocol: release.Range{Min: protocol.MinimumRunnerProtocol, Max: protocol.CurrentRunnerProtocol}, Storage: release.Storage{ServerSchema: release.Range{Min: 27, Max: schema}, RunnerJournal: release.Range{Min: 9, Max: 10}}, Artifacts: []release.Artifact{{Role: "server", OS: "linux", Arch: "amd64", Path: "server", Size: 20, SHA256: strings.Repeat("c", 64)}, {Role: "runner", OS: "linux", Arch: "amd64", Path: "runner", Size: 10, SHA256: strings.Repeat("b", 64)}}}, ManifestSHA256: strings.Repeat("d", 64), ManifestSize: 128, ServerHash: strings.Repeat("c", 64), ServerInstance: "server"}
 }
 
 // startPreparedTestUpgrade models downloads acknowledged through actual heartbeats.

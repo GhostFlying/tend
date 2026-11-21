@@ -53,6 +53,10 @@ func (j *Journal) retainBody(ctx context.Context, body string) (string, error) {
 }
 
 func (j *Journal) readBody(ctx context.Context, body string) (string, error) {
+	return readSpoolBody(ctx, body, j.spoolStore)
+}
+
+func readSpoolBody(ctx context.Context, body string, open func() (*blobstore.Store, error)) (string, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal([]byte(body), &fields) != nil || len(fields) != 1 || fields["tend_spool"] == nil {
 		return body, nil
@@ -65,7 +69,7 @@ func (j *Journal) readBody(ctx context.Context, body string) (string, error) {
 	if r.Version != 1 || r.Bytes <= 0 {
 		return "", errors.New("journal: invalid spool reference")
 	}
-	s, err := j.spoolStore()
+	s, err := open()
 	if err != nil {
 		return "", err
 	}

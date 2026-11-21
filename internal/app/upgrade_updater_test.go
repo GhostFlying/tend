@@ -14,6 +14,10 @@ import (
 func selfUpgradeFixture(t *testing.T) (*harness, StartUpgrade) {
 	t.Helper()
 	h, c := upgradeHarness(t)
+	return h, selfUpgradeFixtureRelease(c)
+}
+
+func selfUpgradeFixtureRelease(c StartUpgrade) StartUpgrade {
 	c.ReleaseSet = &release.Set{Format: 2, ReleaseID: c.Manifest.ReleaseID, Commit: strings.Repeat("a", 40), OS: "linux", Arch: "amd64", ManifestSHA256: c.ManifestSHA256, Artifacts: append([]release.Artifact{}, c.Manifest.Artifacts...)}
 	for _, role := range []string{"updater", "cli"} {
 		c.ReleaseSet.Artifacts = append(c.ReleaseSet.Artifacts, release.Artifact{Role: role, OS: "linux", Arch: "amd64", Path: role, Size: 12, SHA256: strings.Repeat("e", 64)})
@@ -21,7 +25,7 @@ func selfUpgradeFixture(t *testing.T) (*harness, StartUpgrade) {
 	c.ReleaseSetSHA256 = strings.Repeat("f", 64)
 	raw, _ := json.Marshal(c.ReleaseSet)
 	c.ReleaseSetSize = int64(len(raw))
-	return h, c
+	return c
 }
 func selfUpgradeHosts(t *testing.T, h *harness, self bool) {
 	t.Helper()

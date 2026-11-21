@@ -2680,6 +2680,8 @@ runner 协议和调度不变。见 [实施计划](plans/issue-owner-execution-pr
 
 runner 的接单权按主机唯一，未结束 Run 按原 journal 归属。候选以完整发布集、受监督的前驱进程和原升级授权注册；确认健康并取得本机提交回执后才能接单。收尾实例各自续约、交付、确认停止，允许同协议连续切换。内嵌 tsnet 的前驱继续持有原节点，配置旁路的后继通过主机 tailscaled 访问同一 server。详见 [滚动升级与历史 runner 通信](plans/rolling-runner-generations.md)。
 
+维护版本已应答后，如果前驱的全部待处理操作均属于原负责人 Run，后继可在核对范围后取得启动授权。可核对的操作包括已确认停止和释放 lease 的原 native 关闭或工具结果回复，以及独立 journal 内有效 lease 所属的空闲原生命令轮询。授权工具用原监督器指定的前驱 journal 核对待处理集合，服务端按当前心跳核验原 Run、lease 和操作归属。新领取仍需候选健康和持久提交，待处理操作和物理退出仍约束退役。详见 [收尾回执与同机 runner 启动授权](plans/rolling-runner-receipt-settlement.md)。
+
 ## D260：协议窗口前的强制维护
 
 本机操作员可以用完整发布集发起 `upgrade start --force-maintenance`。当前 server 在安装前登记越窗 runner 的原监督器进程身份、journal、Run 和 lease，立即关闭越窗接单实例的领取权。兼容实例继续领取和执行，主会话在这个阶段也可以工作。无论是否接单、是否有未结束 Run，固定监督器都可立即取得精确的有期限停止授权。唯一接单实例停止后，监督器经独立主机连接回报退出并保持停机，server 在收到精确退出回执之后才进入发布包准备和安装。

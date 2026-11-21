@@ -36,7 +36,7 @@ type DrainingProcess struct {
 }
 
 type RollingAuthority interface {
-	AuthorizeLaunch(context.Context, Version, Binding, RollingLaunch) (Grant, error)
+	AuthorizeLaunch(context.Context, Version, Binding, RollingLaunch, string) (Grant, error)
 	Health(context.Context, Binding) (Health, error)
 	Retire(context.Context, string, protocol.RunnerRetirement) (protocol.RunnerRetirementResult, error)
 }
