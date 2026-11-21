@@ -613,6 +613,7 @@ export interface TendAPI {
   WebhookSubscription?: WebhookSubscription;
   WebhookSubscriptionPage?: WebhookSubscriptionPage;
   WebhookSubscriptionPayload?: WebhookSubscriptionPayload;
+  WithdrawAttentionPayload?: WithdrawAttentionPayload;
   WithdrawMessagePayload?: WithdrawMessagePayload;
   WithdrawMessageResult?: WithdrawMessageResult;
   WorkItemChoice?: WorkItemChoice;
@@ -747,9 +748,11 @@ export interface CapabilityReference {
  * via the `definition` "AttentionView".
  */
 export interface AttentionView {
+  action_class?: string;
   archived_at?: number;
   attention_id: string;
   blocks_close?: boolean;
+  can_dismiss?: boolean;
   choice?: WorkItemChoice;
   choice_id?: string;
   created_at: number;
@@ -785,6 +788,8 @@ export interface AttentionView {
   task_title?: string;
   title: string;
   updated_at: number;
+  withdrawal_mode?: string;
+  withdrawn_at?: number;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -3619,6 +3624,7 @@ export interface CreateActionPayload {
  * via the `definition` "CreateAttentionPayload".
  */
 export interface CreateAttentionPayload {
+  action_class?: string;
   blocks_close?: boolean;
   choice_id?: string;
   decision_id?: string;
@@ -8126,6 +8132,14 @@ export interface WebhookSubscriptionPayload {
   key_ref?: string;
   subscription_id?: string;
   title?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "WithdrawAttentionPayload".
+ */
+export interface WithdrawAttentionPayload {
+  expected_responsibility_revision?: number;
+  mode?: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

@@ -16,13 +16,15 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	action := args[0]
 	fs := newFlags(e, "attention "+action)
 	identity := fs.String("id", "", "stable new business object ID; retain it across submissions")
-	data := fs.String("data", "", "inline JSON payload or original Envelope; latest_action_at omitted preserves, 0 clears the deadline")
+	data := fs.String("data", "", "inline JSON payload or original Envelope; create uses action_class=ordinary for optional actions; latest_action_at omitted preserves, 0 clears the deadline")
 	file := fs.String("file", "", "JSON file; - reads stdin")
 	req := fs.String("request-id", "", "original request identity for retry")
 	revision := fs.Int64("revision", -1, "attention revision; resolve/escalate use responsibility.revision")
 	epoch := fs.Int64("epoch", -1, "resolve/escalate expected responsibility assignment epoch")
 	inferredEpoch := false
 	reason := fs.String("reason", "", "explicit control reason")
+	notNeeded := fs.Bool("not-needed", false, "withdraw an eligible ordinary Inbox action without a reason")
+	responsibilityRevision := fs.Int64("responsibility-revision", 0, "original responsibility revision for a routed --not-needed action")
 	dry := fs.Bool("dry-run", false, "print the complete request without sending")
 	issue := fs.String("issue", "", "origin Issue filter")
 	recipient := fs.String("recipient", "owner", "owner, agent, main or all")
@@ -37,6 +39,18 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 	pos, err := parse(fs, args[1:])
 	if err != nil {
 		return err
+	}
+	if (*notNeeded || *responsibilityRevision != 0) && action != "withdraw" {
+		return usagef("--not-needed and --responsibility-revision are only valid for attention withdraw")
+	}
+	if *responsibilityRevision < 0 || *responsibilityRevision != 0 && !*notNeeded {
+		return usagef("--responsibility-revision requires --not-needed and a positive revision")
+	}
+	if *notNeeded && (*data != "" || *file != "" || *reason != "") {
+		return usagef("--not-needed does not take a reason or JSON payload")
+	}
+	if *notNeeded && *responsibilityRevision != 0 && *revision < 1 {
+		return usagef("--responsibility-revision requires the original --revision")
 	}
 	c, err := e.client(protocol.ScopeOwner)
 	if err != nil {
@@ -123,6 +137,9 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 				return err
 			}
 			*revision = current.Revision
+			if *notNeeded && current.Responsibility != nil {
+				*responsibilityRevision = current.Responsibility.Revision
+			}
 			if action == "resolve" || action == "escalate" {
 				if current.Responsibility == nil {
 					return usagef("attention has no delegated responsibility")
@@ -134,6 +151,13 @@ func runAttention(ctx context.Context, e *Env, args []string) error {
 				}
 			}
 		}
+	}
+	if *notNeeded {
+		payload := protocol.WithdrawAttentionPayload{Mode: protocol.AttentionWithdrawalNotNeeded}
+		if *responsibilityRevision > 0 {
+			payload.ExpectedResponsibilityRevision = responsibilityRevision
+		}
+		body, _ = json.Marshal(payload)
 	}
 	if len(body) == 0 {
 		body = []byte(`{}`)

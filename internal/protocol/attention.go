@@ -1,10 +1,16 @@
 package protocol
 
+const AttentionActionOrdinary = "ordinary"
+const AttentionWithdrawalNotNeeded = "not_needed"
+
 // Attention is an original question or action, never an assignment or lease.
 // Responsibility determines whether an Agent or a human must handle it.
 // Decision answers stay in their original decision/choice, not in this record.
 type Attention struct {
 	ReportFollowOn         *ReportFollowOn          `json:"report_follow_on,omitempty"`
+	ActionClass            string                   `json:"action_class,omitempty"`
+	WithdrawalMode         string                   `json:"withdrawal_mode,omitempty"`
+	WithdrawnAt            int64                    `json:"withdrawn_at,omitempty"`
 	ResolutionOwnerSubject string                   `json:"resolution_owner_subject,omitempty"`
 	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
 	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
@@ -93,6 +99,7 @@ type HandleAttentionPayload struct {
 type AttentionView struct {
 	// DeliveryDecision applies the delivery answer contract to this original decision.
 	DeliveryDecision bool   `json:"delivery_decision,omitempty"`
+	CanDismiss       bool   `json:"can_dismiss,omitempty"`
 	Historical       bool   `json:"historical,omitempty"`
 	HistoricalReason string `json:"historical_reason,omitempty"`
 	Attention
@@ -124,7 +131,13 @@ type AttentionPage struct {
 	More  bool            `json:"more"`
 	Next  string          `json:"next,omitempty"`
 }
+type WithdrawAttentionPayload struct {
+	Mode                           string `json:"mode,omitempty"`
+	ExpectedResponsibilityRevision *int64 `json:"expected_responsibility_revision,omitempty"`
+}
+
 type CreateAttentionPayload struct {
+	ActionClass string `json:"action_class,omitempty"`
 	// Omission leaves the action time unknown; zero also means unknown.
 	LatestActionAt        *int64   `json:"latest_action_at,omitempty"`
 	LatestActionTimezone  string   `json:"latest_action_timezone,omitempty"`

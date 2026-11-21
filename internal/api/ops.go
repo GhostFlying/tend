@@ -139,7 +139,7 @@ func (s *Server) ops(w http.ResponseWriter, r *http.Request) {
 	}
 	if op.Status == protocol.OpFailed && op.Error != nil && op.Error.Code == protocol.CodeStaleRevision && env.Target.Type == "attention" {
 		_ = s.store.Read(r.Context(), func(tx *store.ReadTx) error {
-			v, err := views.Attention(r.Context(), tx.Q(), env.Target.ID)
+			v, err := views.OwnerAttention(r.Context(), tx.Q(), env.Target.ID, p.Subject)
 			if err == nil {
 				res.CurrentAttention = &v
 			}

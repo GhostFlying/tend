@@ -114,6 +114,9 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 		if a.Kind == "information" && p.BlocksClose {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "information does not block Issue closure")
 		}
+		if a.Title != p.Title || p.BlocksClose {
+			a.ActionClass = ""
+		}
 		a.Title, a.BlocksClose = p.Title, p.BlocksClose
 		if r := a.Responsibility; r != nil {
 			previous := r.Revision
@@ -211,6 +214,38 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 		if a.ReportFollowOn != nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "answer the original report decision or use the Issue lifecycle controls")
 		}
+		var p protocol.WithdrawAttentionPayload
+		if len(x.Env.Payload) != 0 {
+			if err := decodePayload(x.Env, &p); err != nil {
+				return Outcome{}, err
+			}
+		}
+		reason := x.Env.Reason
+		switch p.Mode {
+		case "":
+			if a.Status != "open" || strings.TrimSpace(reason) == "" {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "withdraw an open attention with a reason")
+			}
+		case protocol.AttentionWithdrawalNotNeeded:
+			actor := x.ActualPrincipal()
+			if actor.Kind != protocol.PrincipalOwner || actor.Subject == "" {
+				return Outcome{}, protocol.Errorf(protocol.CodeForbidden, "dismissing an Inbox action requires its actual owner")
+			}
+			r, expected := a.Responsibility, p.ExpectedResponsibilityRevision
+			if (r == nil) != (expected == nil) || r != nil && r.Revision != *expected {
+				return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "attention responsibility changed")
+			}
+			allowed, err := store.CanDismissAttention(ctx, tx.Q(), a, actor.Subject)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if !allowed {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "only a current ordinary Inbox action can be dismissed")
+			}
+			reason = "No further action needed"
+		default:
+			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported attention withdrawal mode")
+		}
 		if a.Kind == "decision" {
 			if a.DecisionID == "" {
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "withdraw legacy choices through their original business path")
@@ -229,10 +264,9 @@ func (c AttentionCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Out
 				return Outcome{}, err
 			}
 		}
-		if a.Status != "open" || strings.TrimSpace(x.Env.Reason) == "" {
-			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "withdraw an open attention with a reason")
-		}
-		a.Status, a.Resolution = "withdrawn", x.Env.Reason
+		actor := x.ActualPrincipal()
+		a.Status, a.Resolution = "withdrawn", reason
+		a.WithdrawalMode, a.WithdrawnAt, a.ResolutionActor = p.Mode, x.Now.UnixMilli(), &actor
 	default:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported attention operation")
 	}
@@ -292,6 +326,10 @@ func createAttentionWithReport(ctx context.Context, x *Exec, tx *store.Tx, repor
 	if !oneOf(p.Kind, "decision", "action", "information") || strings.TrimSpace(p.Title) == "" || p.Kind == "information" && p.BlocksClose {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "attention kind/title and nonblocking information are required")
 	}
+	if p.ActionClass != "" && (p.ActionClass != protocol.AttentionActionOrdinary || p.Kind != "action" || p.BlocksClose || p.TaskID != "" ||
+		(p.IssueID == "" && (x.ActualPrincipal().Kind != protocol.PrincipalOwner || x.ActualPrincipal().Subject == ""))) {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "ordinary actions must be explicitly classified, nonblocking and free of task or question control")
+	}
 	if old, err := store.GetAttention(ctx, tx.Q(), x.Env.Target.ID); err == nil {
 		var raw string
 		if err := tx.Q().QueryRowContext(ctx, `SELECT body_json FROM attention_revisions WHERE attention_id=? AND revision=1`, old.AttentionID).Scan(&raw); err != nil {
@@ -305,7 +343,7 @@ func createAttentionWithReport(ctx context.Context, x *Exec, tx *store.Tx, repor
 		if err := setAttentionActionTime(&wanted, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 			return Outcome{}, err
 		}
-		if initial.IssueID != p.IssueID || initial.TaskID != p.TaskID || initial.Kind != p.Kind || initial.Title != p.Title || initial.BlocksClose != p.BlocksClose || initial.SourceMessageID != p.SourceMessageID || p.DecisionID != "" && initial.DecisionID != p.DecisionID || initial.ChoiceID != p.ChoiceID || !attentionActionTimeEqual(initial, wanted) || initial.LatestActionTimezone != wanted.LatestActionTimezone {
+		if initial.ActionClass != p.ActionClass || initial.IssueID != p.IssueID || initial.TaskID != p.TaskID || initial.Kind != p.Kind || initial.Title != p.Title || initial.BlocksClose != p.BlocksClose || initial.SourceMessageID != p.SourceMessageID || p.DecisionID != "" && initial.DecisionID != p.DecisionID || initial.ChoiceID != p.ChoiceID || !attentionActionTimeEqual(initial, wanted) || initial.LatestActionTimezone != wanted.LatestActionTimezone {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "attention identity already has a different obligation")
 		}
 		if p.Kind == "decision" && p.DecisionID == "" && p.ChoiceID == "" {
@@ -356,7 +394,7 @@ func createAttentionWithReport(ctx context.Context, x *Exec, tx *store.Tx, repor
 	if p.DecisionID != "" && p.ChoiceID != "" || p.Kind != "decision" && (p.DecisionID != "" || p.ChoiceID != "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "only a decision attention references one question")
 	}
-	a := protocol.Attention{ReportFollowOn: report, AttentionID: x.Env.Target.ID, IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
+	a := protocol.Attention{ActionClass: p.ActionClass, ReportFollowOn: report, AttentionID: x.Env.Target.ID, IssueID: p.IssueID, TaskID: p.TaskID, Kind: p.Kind, Title: p.Title, Status: "open", DecisionID: p.DecisionID, ChoiceID: p.ChoiceID, SourceMessageID: p.SourceMessageID, RaisedBy: x.ActualPrincipal(), BlocksClose: p.BlocksClose, CreatedAt: x.Now.UnixMilli()}
 	if err := setAttentionActionTime(&a, p.LatestActionAt, p.LatestActionTimezone, p.LatestActionReminders); err != nil {
 		return Outcome{}, err
 	}
