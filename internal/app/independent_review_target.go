@@ -50,7 +50,7 @@ func declaredIndependentReviewTarget(ctx context.Context, q store.Querier, i pro
 
 // A failure with a known target stays with its original Task until an actual
 // retry outcome exists. A fully observed different candidate has its own review.
-func canStartIndependentReviewTarget(ctx context.Context, q store.Querier, target independentReviewTarget, task string) (bool, error) {
+func canStartIndependentReviewTarget(ctx context.Context, q store.Querier, target independentReviewTarget, task, approvedRoot string) (bool, error) {
 	if target.key == "" {
 		return true, nil
 	}
@@ -58,9 +58,9 @@ func canStartIndependentReviewTarget(ctx context.Context, q store.Querier, targe
 	err := q.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM independent_review_run_targets t JOIN independent_review_failures f USING(run_id)
 		JOIN independent_review_failures root ON root.run_id=f.root_run_id
-		WHERE t.target_key=? AND f.task_id<>? AND root.resolution_run_id IS NULL
+		WHERE t.target_key=? AND f.task_id<>? AND root.run_id<>? AND root.resolution_run_id IS NULL
 		 AND (t.head_sha='' OR ?='' OR (t.head_sha=? AND t.base_sha=?)))`,
-		target.key, task, target.head, target.head, target.base).Scan(&blocked)
+		target.key, task, approvedRoot, target.head, target.head, target.base).Scan(&blocked)
 	return !blocked, err
 }
 
@@ -78,27 +78,31 @@ func filterIndependentReviewCandidates(ctx context.Context, q store.Querier, row
 		if err := json.Unmarshal([]byte(row.SpecJSON), &spec); err != nil {
 			return nil, nil, err
 		}
-		primary, err := store.GetTaskIssueOwner(ctx, q, row.Action.TaskID)
-		if errors.Is(err, store.ErrNotFound) {
-			eligible = append(eligible, row)
+		target, err := independentReviewTargetForTask(ctx, q, row.Action.TaskID, spec)
+		if err != nil {
+			return nil, nil, err
+		}
+		excludeTask := row.Action.TaskID
+		failure, err := pendingIndependentReviewFailure(ctx, q, row.Action.TaskID, protocol.RunRole(row.Action.Kind), row.Action.TargetArtifactID, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		if failure != nil && failure.specVersion != row.Action.TargetSpecVersion {
+			if target.key == "" {
+				continue
+			}
+			// Revalidate a revised Task's candidate at claim. A provider
+			// rollback can restore the original failed obligation.
+			excludeTask = ""
+		}
+		approvedRoot, original, err := approvedIndependentReviewRetry(ctx, q, row.Action)
+		if err != nil {
+			return nil, nil, err
+		}
+		if approvedRoot != "" && original.key != "" && target != original {
 			continue
 		}
-		if err != nil {
-			return nil, nil, err
-		}
-		i, err := store.GetCanonicalIssue(ctx, q, primary)
-		if errors.Is(err, store.ErrNotFound) {
-			eligible = append(eligible, row)
-			continue
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		target, err := declaredIndependentReviewTarget(ctx, q, i, spec)
-		if err != nil {
-			return nil, nil, err
-		}
-		ok, err := canStartIndependentReviewTarget(ctx, q, target, row.Action.TaskID)
+		ok, err := canStartIndependentReviewTarget(ctx, q, target, excludeTask, approvedRoot)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -108,6 +112,24 @@ func filterIndependentReviewCandidates(ctx context.Context, q store.Querier, row
 		}
 	}
 	return eligible, targets, nil
+}
+
+func independentReviewTargetForTask(ctx context.Context, q store.Querier, task string, spec domain.Spec) (independentReviewTarget, error) {
+	primary, err := store.GetTaskIssueOwner(ctx, q, task)
+	if errors.Is(err, store.ErrNotFound) {
+		return independentReviewTarget{}, nil
+	}
+	if err != nil {
+		return independentReviewTarget{}, err
+	}
+	issue, err := store.GetCanonicalIssue(ctx, q, primary)
+	if errors.Is(err, store.ErrNotFound) {
+		return independentReviewTarget{}, nil
+	}
+	if err != nil {
+		return independentReviewTarget{}, err
+	}
+	return declaredIndependentReviewTarget(ctx, q, issue, spec)
 }
 
 func saveIndependentReviewTarget(ctx context.Context, tx *store.Tx, run string, target independentReviewTarget) error {
@@ -138,4 +160,20 @@ func boundIndependentReviewTarget(ctx context.Context, q store.Querier, rc runCo
 		return independentReviewTarget{}, err
 	}
 	return independentReviewPRTarget(ref, head, base), nil
+}
+
+func approvedIndependentReviewRetry(ctx context.Context, q store.Querier, action store.ActionRow) (string, independentReviewTarget, error) {
+	var root string
+	var target independentReviewTarget
+	err := q.QueryRowContext(ctx, `SELECT f.root_run_id,COALESCE(t.target_key,''),COALESCE(t.head_sha,''),COALESCE(t.base_sha,'')
+		FROM independent_review_failures f JOIN plan_actions approved ON approved.action_id=f.retry_action_id
+		LEFT JOIN independent_review_run_targets t ON t.run_id=f.run_id
+		WHERE approved.task_id=? AND approved.kind=? AND approved.target_spec_version=?
+		 AND COALESCE(approved.target_artifact_id,'')=? AND approved.generation=?`,
+		action.TaskID, action.Kind, action.TargetSpecVersion, action.TargetArtifactID, action.Generation).
+		Scan(&root, &target.key, &target.head, &target.base)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", target, nil
+	}
+	return root, target, err
 }
