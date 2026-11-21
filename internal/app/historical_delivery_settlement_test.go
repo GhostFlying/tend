@@ -133,7 +133,7 @@ func TestHistoricalDeliveryMaintenanceLeavesBoundResponsibilityForOwnerAssessmen
 	}
 }
 
-func TestHistoricalDeliveryBaselineOnlyChangeNotifiesExistingOwnerWindow(t *testing.T) {
+func TestHistoricalDeliveryBaselineOnlyChangeRefreshesProjectionWithoutOwnerWake(t *testing.T) {
 	h, issue, source, _, batch := historicalDeploymentHarnessFixture(t, hostedManagerHarness(t), "merged")
 	issue = assignHostedManager(t, h, canonicalTaskIssue(t, h, issue.IssueID))
 	h.app.serverDeliveryObservations = true
@@ -157,8 +157,8 @@ func TestHistoricalDeliveryBaselineOnlyChangeNotifiesExistingOwnerWindow(t *test
 	}
 	record(true)
 	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		// Clear the earlier notification's due marker, preserving its history,
-		// so a checked-only result cannot pass as the new baseline notice.
+		// Clear the earlier owner window so the read measures only work
+		// introduced by this provider observation.
 		if _, err := tx.Exec(t.Context(), `UPDATE issue_change_notifications SET due_at=0 WHERE issue_id=?`, issue.IssueID); err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func TestHistoricalDeliveryBaselineOnlyChangeNotifiesExistingOwnerWindow(t *test
 			return err
 		}
 		// Exercise the same D190 path as a real settled upgrade, rather than
-		// letting a separate explicit owner refresh create the notification.
+		// requesting a separate explicit refresh after maintenance.
 		return refreshDeliveryBaselineQueries(t.Context(), &Exec{Now: h.clock.Now(), IDs: h.ids, serverDeliveryObservations: true}, tx)
 	}); err != nil {
 		t.Fatal(err)
@@ -181,8 +181,15 @@ func TestHistoricalDeliveryBaselineOnlyChangeNotifiesExistingOwnerWindow(t *test
 		if err := tx.Q().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM issue_change_notifications WHERE issue_id=? AND due_at>0 AND kind='work_item.delivery_changed'`, issue.IssueID).Scan(&changed); err != nil {
 			return err
 		}
-		if changed != 1 {
-			t.Fatal("baseline-only observation did not enter the owner's existing coalescing window", changed)
+		if changed != 0 {
+			t.Fatal("baseline-only observation entered the owner's coalescing window", changed)
+		}
+		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, duty.Candidate.DeliveryID)
+		if err != nil {
+			return err
+		}
+		if got := observation.Observation; got.BaselineUpgradeID != "later-platform-maintenance" || got.RefreshPending {
+			t.Fatal("baseline-only fact did not refresh the existing delivery projection", got)
 		}
 		return nil
 	}); err != nil {

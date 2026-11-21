@@ -25,10 +25,23 @@ func recordIssueChangeEvent(ctx context.Context, x *Exec, tx *store.Tx, event Ev
 	if event.ObjectType != "issue" && event.ObjectType != "work_item" {
 		return nil
 	}
-	if event.Kind == "work_item.delivery_checked" {
-		// An unchanged provider snapshot advances observation time only. It is
-		// not a new Issue fact and must not keep resetting the owner's window.
+	switch event.Kind {
+	case "work_item.delivery_checked", "work_item.delivery_changed", "work_item.delivery_query_started":
+		// Provider observations update the delivery ledger. New execution starts
+		// through an explicit wait or a dedicated business input.
 		return nil
+	}
+	if event.Kind == deliveryMergeVerifiedEvent {
+		var covered bool
+		if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM run_external_waits w
+ JOIN runs r ON r.run_id=w.run_id AND r.role='issue_manager'
+ WHERE w.status IN ('stopping','waiting','continued') AND json_extract(w.body_json,'$.kind')='pr'
+ AND json_extract(w.body_json,'$.issue_id')=? AND json_extract(w.body_json,'$.target_id')=?
+ AND json_extract(w.body_json,'$.pr_evidence.fact_revision')=?
+ AND json_extract(w.body_json,'$.pr_evidence.state')='merged')`,
+			event.ObjectID, event.Body["delivery_id"], event.Body["fact_revision"]).Scan(&covered); err != nil || covered {
+			return err
+		}
 	}
 	var canonical bool
 	if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_controls WHERE issue_id=?)`, event.ObjectID).Scan(&canonical); err != nil || !canonical {

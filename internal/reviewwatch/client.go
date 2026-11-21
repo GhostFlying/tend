@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/procx"
@@ -26,9 +27,12 @@ const (
 
 // Ref is an explicit remote identity; no checkout or current branch is used.
 type Ref struct {
-	Provider   string
-	Repository string
-	Number     int64
+	Provider        string
+	Repository      string
+	Number          int64
+	IncludeChecks   bool
+	PreservePartial bool
+	CheckAttempts   []protocol.PRCheckAttempt
 }
 
 // Actor contains only identity, never email addresses or other account data.
@@ -43,6 +47,7 @@ type Observation struct {
 	LineageErrorKind    string               `json:"lineage_error_kind,omitempty"`
 	Mergeability        string               `json:"mergeability,omitempty"`
 	CI                  *protocol.DeliveryCI `json:"ci,omitempty"`
+	TargetRef           string               `json:"target_ref,omitempty"`
 	TargetSHA           string               `json:"target_sha,omitempty"`
 	TargetContainsMerge bool                 `json:"target_contains_merge,omitempty"`
 	BaseSHA             string               `json:"base_sha,omitempty"`
@@ -124,7 +129,7 @@ func (c *Client) Observe(ctx context.Context, ref Ref) (Observation, error) {
 	default:
 		return Observation{}, &Error{Kind: "unsupported_provider"}
 	}
-	if ctx.Err() != nil && !(result.State != "" && ((result.CI != nil && result.CI.ErrorKind != "") || result.LineageErrorKind != "")) {
+	if ctx.Err() != nil && !(result.State != "" && ((result.CI != nil && result.CI.ErrorKind != "") || result.LineageErrorKind != "" || len(ref.CheckAttempts) > 0)) {
 		return Observation{}, fmt.Errorf("review observation cancelled: %w", ctx.Err())
 	}
 	return result, err
@@ -150,9 +155,9 @@ func commandError(err error) error {
 	return &Error{Kind: "query_failed"}
 }
 
-const githubChecksQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRef{target{oid}} mergeable mergeStateStatus commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubChecksQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRefName baseRef{target{oid}} mergeable mergeStateStatus commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){totalCount nodes{... on CheckRun{id name status conclusion detailsUrl checkSuite{app{slug} workflowRun{url}}} ... on StatusContext{id context state targetUrl}}}}}}} updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
-const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRef{target{oid}} mergeable updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
+const githubQuery = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number url state isDraft headRefOid baseRefOid baseRefName baseRef{target{oid}} mergeable updatedAt closedAt mergedAt mergeCommit{oid} mergedBy{login ... on User{id} ... on Bot{id}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{createdAt actor{login ... on User{id} ... on Bot{id}}}}}}}}`
 
 func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	parts := strings.Split(ref.Repository, "/")
@@ -160,7 +165,7 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 		return Observation{}, &Error{Kind: "invalid_reference"}
 	}
 	query := githubQuery
-	if c.cfg.IncludeChecks {
+	if c.cfg.IncludeChecks || ref.IncludeChecks {
 		query = githubChecksQuery
 	}
 	body, err := c.cfg.Exec(ctx, c.cfg.GitHubBin, []string{"api", "graphql", "-f", "query=" + query, "-f", "owner=" + parts[0], "-f", "repo=" + parts[1], "-F", "number=" + strconv.FormatInt(ref.Number, 10)})
@@ -179,15 +184,15 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 									State    string
 									Contexts struct {
 										TotalCount int
-										Nodes      []struct{ Name, Status, Conclusion, DetailsURL, Context, State, TargetURL string }
+										Nodes      []githubCheckContext
 									}
 								}
 							}
 						}
 					}
-					URL, State, HeadRefOid, BaseRefOid, UpdatedAt, ClosedAt, MergedAt string
-					BaseRef                                                           *struct{ Target *struct{ OID string } }
-					MergeCommit                                                       *struct {
+					URL, State, HeadRefOid, BaseRefOid, BaseRefName, UpdatedAt, ClosedAt, MergedAt string
+					BaseRef                                                                        *struct{ Target *struct{ OID string } }
+					MergeCommit                                                                    *struct {
 						OID string `json:"oid"`
 					}
 					MergedBy      *Actor
@@ -237,19 +242,16 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	if state != Open && state != Merged && state != Closed {
 		return Observation{}, &Error{Kind: "unknown_state"}
 	}
-	out := Observation{Draft: pr.IsDraft, Mergeability: strings.ToLower(pr.Mergeable), BaseSHA: pr.BaseRefOid, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
+	out := Observation{Draft: pr.IsDraft, Mergeability: strings.ToLower(pr.Mergeable), BaseSHA: pr.BaseRefOid, TargetRef: pr.BaseRefName, State: state, HeadSHA: pr.HeadRefOid, URL: pr.URL, UpdatedAt: pr.UpdatedAt, MergedAt: pr.MergedAt, ClosedAt: pr.ClosedAt, MergedBy: identity(pr.MergedBy)}
 	if len(pr.Commits.Nodes) == 1 {
 		commit := pr.Commits.Nodes[0].Commit
 		if commit.OID == out.HeadSHA && commit.StatusCheckRollup != nil {
 			rollup := commit.StatusCheckRollup
 			out.CI = &protocol.DeliveryCI{HeadSHA: commit.OID, State: strings.ToLower(rollup.State), Checks: []protocol.DeliveryCheck{}, Truncated: rollup.Contexts.TotalCount > len(rollup.Contexts.Nodes)}
 			for _, check := range rollup.Contexts.Nodes {
-				if check.Name != "" {
-					out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Name: check.Name, State: strings.ToLower(check.Status), Conclusion: strings.ToLower(check.Conclusion), URL: check.DetailsURL})
-				} else {
-					out.CI.Checks = append(out.CI.Checks, protocol.DeliveryCheck{Name: check.Context, State: strings.ToLower(check.State), URL: check.TargetURL})
-				}
+				out.CI.Checks = append(out.CI.Checks, check.normalize(ref.Repository, pr.URL))
 			}
+
 			if out.CI.Truncated {
 				out.CI.State = "unknown"
 			}
@@ -261,12 +263,21 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 	if pr.MergeCommit != nil {
 		out.MergeSHA = pr.MergeCommit.OID
 	}
+	var attemptChecks []protocol.DeliveryCheck
+	var attemptRead sync.WaitGroup
+	if len(ref.CheckAttempts) > 0 {
+		head := out.HeadSHA
+		attemptRead.Go(func() {
+			attemptChecks = c.githubPinnedChecks(ctx, ref, head)
+		})
+	}
 	if state == Merged && out.MergeSHA != "" && out.TargetSHA != "" {
+		keepPRFacts := c.cfg.IncludeChecks || ref.IncludeChecks || ref.PreservePartial || len(ref.CheckAttempts) > 0
 		// Compare immutable commits: a later branch move cannot change the
 		// lineage proof for the target observed in the GraphQL snapshot.
 		body, err := c.cfg.Exec(ctx, c.cfg.GitHubBin, []string{"api", "repos/" + ref.Repository + "/compare/" + out.MergeSHA + "..." + out.TargetSHA})
 		if err != nil {
-			if c.cfg.IncludeChecks {
+			if keepPRFacts {
 				out.LineageErrorKind = "query_failed"
 				var failure *Error
 				if errors.As(commandError(err), &failure) {
@@ -275,24 +286,26 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 				if ctx.Err() != nil {
 					out.LineageErrorKind = "timeout"
 				}
-				return out, nil
+			} else {
+				return Observation{}, commandError(err)
 			}
-			return Observation{}, commandError(err)
-		}
-		var comparison struct {
-			Status          string
-			MergeBaseCommit struct {
-				SHA string `json:"sha"`
-			} `json:"merge_base_commit"`
-		}
-		if json.Unmarshal(body, &comparison) != nil {
-			if c.cfg.IncludeChecks {
-				out.LineageErrorKind = "invalid_response"
-				return out, nil
+		} else {
+			var comparison struct {
+				Status          string
+				MergeBaseCommit struct {
+					SHA string `json:"sha"`
+				} `json:"merge_base_commit"`
 			}
-			return Observation{}, &Error{Kind: "invalid_response"}
+			if json.Unmarshal(body, &comparison) != nil {
+				if keepPRFacts {
+					out.LineageErrorKind = "invalid_response"
+				} else {
+					return Observation{}, &Error{Kind: "invalid_response"}
+				}
+			} else {
+				out.TargetContainsMerge = (comparison.Status == "ahead" || comparison.Status == "identical") && comparison.MergeBaseCommit.SHA == out.MergeSHA
+			}
 		}
-		out.TargetContainsMerge = (comparison.Status == "ahead" || comparison.Status == "identical") && comparison.MergeBaseCommit.SHA == out.MergeSHA
 	}
 	// A merged review is distinct from an explicit close. Never attribute it to
 	// an earlier close/reopen cycle or substitute its merger as the closing user.
@@ -301,6 +314,13 @@ func (c *Client) github(ctx context.Context, ref Ref) (Observation, error) {
 		if event.CreatedAt == pr.ClosedAt {
 			out.ClosedBy = identity(event.Actor)
 		}
+	}
+	attemptRead.Wait()
+	if len(attemptChecks) > 0 {
+		if out.CI == nil {
+			out.CI = &protocol.DeliveryCI{HeadSHA: out.HeadSHA, State: "unknown", Checks: []protocol.DeliveryCheck{}}
+		}
+		out.CI.AttemptChecks = attemptChecks
 	}
 	return out, nil
 }

@@ -458,7 +458,7 @@ func (r *Runner) work(ctx, runCtx context.Context, as protocol.Assignment, a *ac
 			waitMu.Lock()
 			defer waitMu.Unlock()
 			v, err := r.externalWaitRequest(call, as, p, payload)
-			if err == nil {
+			if err == nil && v.Status != protocol.ExternalWaitSatisfied {
 				cause := &externalWaitYield{wait: v}
 				stopAttempt(cause)
 				return v, cause
