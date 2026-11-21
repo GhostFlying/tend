@@ -2674,6 +2674,12 @@ runner 协议和调度不变。见 [实施计划](plans/issue-owner-execution-pr
 
 完整发布集可以只安装 server 及其本机 updater。升级接纳将该范围持久写入原批次；参与重启租约保护的 runner 保持原程序、journal 和任务。旧 runner 以原身份确认重启授权，原 Run 可在新 server 上续期和交付。对目标协议窗口之外的存活实例普通升级必须在停止 server 前拒绝，正在进行的批次也不能接纳越窗实例。部署候选的安装范围与原授权必须一致。详见 [滚动升级与历史 runner 通信](plans/rolling-runner-generations.md)。
 
+### D258 补充：按原执行权核对 server 重启覆盖
+
+签发 server 替换授权前，按冻结的 Run 协议、Task/action/lease 和原 journal 归属核对开放执行。协议 6 的当前租约继续获得固定覆盖，覆盖及 runner 确认后的保守截止必须容纳整个重启预算。协议 7 的固定执行权随原写入者保留；已有维护 grant 约束某个仍活跃的 Run 时，用原 grant 和期限计算覆盖。接单 runner 保持维护准入确认，仍有活执行的收尾 runner 确认各自的维护控制。 runner 的维护 ACK 可附带本地逐 Run 保守截止，包括退出上一轮维护后仍保留的 grant。 心跳完成新旧 Server 的兼容协商。同一实例、代次、journal、控制修订和授权身份的 Hello 可以沿用最近的逐 Run 证据，保留其原观测时间。只报告聚合截止的旧 runner 以该截止作为有潜在固定授权的执行上限，新的续租 grant 不能遮蔽这份证据。
+
+已 lapsed 的 unknown Run 需要可验证的 journal 归属或原隔离凭据。继任 server 保留原 Run、原 lease、工作区、物理容量和待对账的外部请求。重启资格不会补记退出或释放。无归属、活授权冲突和越过协议窗口仍拒绝。见 [实施计划](plans/server-restart-journal-coverage.md)。
+
 ### D128 补充：保留 Issue 的具名负责人
 
 首次按类别领取时，服务端把具体 Agent 写入 Issue。关闭、重开、看板状态变更和暂停恢复沿用该身份。重开后可以领取新的协调 Task，原 Task、Run 和完成记录保留。旧记录仍保存类别时，从具名 assignee 恢复目标。原 Agent 暂不可用时，队列报告正在等待的身份。

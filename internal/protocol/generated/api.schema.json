@@ -17871,6 +17871,32 @@
       "title": "RunnerControl",
       "type": "object"
     },
+    "RunnerMaintenanceCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "observed_at_ms": {
+          "type": "integer"
+        },
+        "run_deadlines": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "run_deadlines"
+      ],
+      "title": "RunnerMaintenanceCoverage",
+      "type": "object"
+    },
     "RunnerRepository": {
       "additionalProperties": false,
       "properties": {
@@ -17963,6 +17989,9 @@
         },
         "journal_version": {
           "type": "integer"
+        },
+        "maintenance_coverage": {
+          "$ref": "#/definitions/RunnerMaintenanceCoverage"
         },
         "mode": {
           "type": "string"

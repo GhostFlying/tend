@@ -209,6 +209,7 @@ type Runner struct {
 	usageCommits                    nativeusage.CommitQueue
 	nativeUsageSupported            bool
 	usageCollectionSupported        bool
+	maintenanceCoverageSupported    bool
 	agentExecutionSupported         bool
 	managedExtensionsSupported      bool
 	retainedExecutions              []protocol.RunExecutionPin
@@ -225,7 +226,7 @@ type Runner struct {
 	instanceID                      string
 	generation                      int64
 	sequence                        int64
-	grantDeadlines                  map[string]time.Time
+	grantDeadlines                  map[string]maintenanceRunDeadline
 	helloConfirmed                  bool
 	grantServerDeadline             int64
 	grantID                         string
@@ -290,7 +291,7 @@ func New(cfg Config) *Runner {
 		ttl:            time.Minute,
 		ttlWake:        make(chan struct{}),
 		active:         map[string]*active{},
-		grantDeadlines: map[string]time.Time{},
+		grantDeadlines: map[string]maintenanceRunDeadline{},
 	}
 }
 
@@ -525,6 +526,7 @@ func (r *Runner) claims(ctx context.Context) {
 			r.cfg.Log.ErrorContext(ctx, "could not inspect runner state", "err", err)
 			return
 		}
+		runtime.MaintenanceCoverage = nil
 		r.controlMu.Lock()
 		if r.control.Mode == protocol.RunnerMaintenance || r.bootstrapMaintenance || r.boundedRecovery != nil && r.boundedRecovery.AdmissionRelease == nil {
 			r.controlMu.Unlock()
@@ -657,6 +659,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	runtime.MaintenanceCoverage = nil
 	runtime.Updater = nil
 	runtime.ProtocolMax = protocol.CurrentRunnerProtocol
 	env, err := r.newEnvelope(protocol.OpRunnerHello, protocol.Target{Type: "host", ID: r.cfg.HostID}, protocol.HelloPayload{Held: held, Version: r.cfg.Version, Worker: r.cfg.Worker, WorkspaceProtocol: 1, Runtime: runtime})
@@ -680,6 +683,7 @@ func (r *Runner) helloLocked(ctx context.Context) error {
 	}
 	r.nativeUsageSupported = res.NativeUsage
 	r.usageCollectionSupported = res.UsageCollection
+	r.maintenanceCoverageSupported = res.MaintenanceCoverage
 	r.wakeNativeUsage()
 	r.previewSupported = res.RolloutPreview && res.DeploymentID != "" && len(r.cfg.RolloutRoots) > 0
 	r.previewDeployment = res.DeploymentID
@@ -1181,6 +1185,9 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	op, err := r.c.do(hbCtx, r.c.host(), env)
 	if err != nil {
 		// The watchdog fences runs whose deadline passes meanwhile.
+		if runtime.MaintenanceCoverage != nil && protocol.CodeOf(err) == protocol.CodeInvalidRequest {
+			r.requestReconcile() // A reconnected older server must negotiate again.
+		}
 		r.cfg.Log.WarnContext(ctx, "heartbeat failed", "err", err)
 		return
 	}
@@ -1191,6 +1198,13 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	r.retiredWork = res.RetiredWork
 	r.mu.Unlock()
+	r.controlMu.Lock()
+	coverageChanged := r.maintenanceCoverageSupported != res.MaintenanceCoverage
+	r.maintenanceCoverageSupported = res.MaintenanceCoverage
+	r.controlMu.Unlock()
+	if coverageChanged && res.MaintenanceCoverage {
+		r.requestHeartbeat() // Report existing Run deadlines to the successor.
+	}
 	r.acceptHistoryReads(ctx, res.HistoryReads, res.HistoryAcknowledged)
 	r.acceptRetained(res.RetainedExecutions)
 	r.setTTL(res.LeaseTTLMillis)
@@ -1282,7 +1296,7 @@ func (r *Runner) watchdog(ctx context.Context) {
 				if !maintenance {
 					continue
 				}
-				deadline = r.grantDeadlines[id]
+				deadline = r.grantDeadlines[id].local
 			}
 			if !a.reporting && !deadline.IsZero() && !now.Before(deadline) {
 				late = append(late, id)

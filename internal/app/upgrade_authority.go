@@ -166,11 +166,12 @@ func (authorizeServerUpgrade) Authorize(_ context.Context, x *Exec, _ store.Quer
 }
 func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	b := c.Binding
+	now := x.Now.UnixMilli()
 	r, err := store.GetUpgrade(ctx, tx.Q(), b.UpgradeID)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if upgradeBatchExpired(r, x.Now.UnixMilli()) {
+	if upgradeBatchExpired(r, now) {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "upgrade batch deadline expired; reconcile or cancel this batch")
 	}
 	if !bindingMatches(r, b) || b.InstanceID != r.ServerInstance || b.ArtifactSHA256 != r.ServerHash || b.ProcessInstanceID == "" || r.View.Status != "running" || r.View.Phase != "server_ready" {
@@ -179,31 +180,27 @@ func (c authorizeServerUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx
 	if r.ServerProcess != "" && r.ServerProcess != b.ProcessInstanceID {
 		return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "server candidate changed")
 	}
-	cutoff := capUpgradeDeadline(&r, x.Now.UnixMilli()+r.GrantMillis+r.RestartMillis) - r.RestartMillis
-	for _, h := range r.Hosts {
-		cutoff, err = drainingRestartCutoff(ctx, tx.Q(), r, h.HostID, x.Now, cutoff)
-		if err != nil {
-			return Outcome{}, err
-		}
-		if h.PrimaryOffline {
-			continue
-		}
-		ctl, err := runnerControl(ctx, tx.Q(), h.HostID, x.Now.UnixMilli())
-		if err != nil {
-			return Outcome{}, err
-		}
-		rt, err := store.GetHostRuntime(ctx, tx.Q(), h.HostID)
-		if err != nil {
-			return Outcome{}, err
-		}
-		covered, err := confirmedRestartCutoff(ctl, rt, x.Now, r.RestartMillis)
-		if err != nil {
-			return Outcome{}, err
-		}
-		cutoff = min(cutoff, covered)
+	if r.ServerGrantDeadline == 0 && r.Deadline > 0 && now >= r.Deadline {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "server restart preparation expired before authorization")
 	}
-	if cutoff <= x.Now.UnixMilli() {
+	cutoff := capUpgradeDeadline(&r, now+r.GrantMillis+r.RestartMillis) - r.RestartMillis
+	for _, h := range r.Hosts {
+		journals, err := restartJournals(ctx, tx.Q(), r, h, now)
+		if err != nil {
+			return Outcome{}, err
+		}
+		for _, j := range journals {
+			cutoff, err = journalRestartCutoff(j, r, now, cutoff)
+			if err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
+	if cutoff <= now {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "confirmed runner coverage cannot fit the restart budget")
+	}
+	if r.ServerGrantDeadline > cutoff {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "current runner coverage cannot confirm the original server restart grant")
 	}
 	if r.ServerGrantDeadline == 0 {
 		r.ServerGrantDeadline = cutoff

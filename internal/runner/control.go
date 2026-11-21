@@ -13,6 +13,11 @@ import (
 	"github.com/GhostFlying/tend/internal/updater"
 )
 
+type maintenanceRunDeadline struct {
+	local        time.Time
+	serverMillis int64
+}
+
 func (r *Runner) loadControl(ctx context.Context) error {
 	r.controlMu.Lock()
 	defer r.controlMu.Unlock()
@@ -164,6 +169,21 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 	blockers = append(blockers, r.resourceBlockers...)
 	authorizationID := r.grantID
 	authorizationDeadline := r.grantServerDeadline
+	var maintenanceCoverage *protocol.RunnerMaintenanceCoverage
+	if r.maintenanceCoverageSupported {
+		maintenanceCoverage = &protocol.RunnerMaintenanceCoverage{RunDeadlines: map[string]int64{}}
+		for _, run := range runs {
+			id := run.Assignment.RunID
+			if deadline, ok := r.grantDeadlines[id]; ok && protocol.RunnerOwnsExecution(run.Assignment.Protocol) {
+				maintenanceCoverage.RunDeadlines[id] = deadline.serverMillis
+			}
+		}
+		for id, active := range r.active {
+			if deadline, ok := r.grantDeadlines[id]; ok && protocol.RunnerOwnsExecution(active.as.Protocol) {
+				maintenanceCoverage.RunDeadlines[id] = deadline.serverMillis
+			}
+		}
+	}
 	phase, upgradeError, downloaded := r.upgradePhase, r.upgradeError, r.downloadedBytes
 	r.mu.Unlock()
 	mode := r.control.Mode
@@ -186,7 +206,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		upgradeID = r.cfg.UpgradeID
 	}
 	capabilities := []string{protocol.CapabilityExternalWaits, protocol.CapabilityPauseHandoffs, protocol.CapabilityPauseReceiptDeferral, protocol.CapabilityUsageCollection, protocol.CapabilityNativeUsage, protocol.CapabilityProtocolNegotiation, protocol.CapabilityRunnerHeartbeat, protocol.CapabilityRunnerMaintenance, protocol.CapabilityRetainedReconciliation, protocol.CapabilityStrictRetainedResume, protocol.CapabilityTaskInputs, protocol.CapabilityWorkerQuestions, protocol.CapabilitySupervisorQuestions, protocol.CapabilityQuestionHandoffs, protocol.CapabilityWorkerObservation, protocol.CapabilityAcceptanceExecution, protocol.CapabilityWorkerQuestionContext}
-	capabilities = append(capabilities, protocol.CapabilityRunMessages, protocol.CapabilityEventSync)
+	capabilities = append(capabilities, protocol.CapabilityRunMessages, protocol.CapabilityEventSync, protocol.CapabilityRunnerMaintenanceCoverage)
 	capabilities = append(capabilities, protocol.CapabilityBoundedRunnerRecovery)
 	capabilities = append(capabilities, protocol.CapabilityAcceptanceEvidenceFiles)
 	if len(r.cfg.RolloutRoots) > 0 {
@@ -261,7 +281,7 @@ func (r *Runner) runtimeObservation(ctx context.Context) (*protocol.RunnerRuntim
 		continuations = slices.DeleteFunc(continuations, func(e protocol.AgentExecutor) bool { return e.Pin.Extensions != (protocol.ExtensionExecutionPin{}) })
 	}
 	r.sequence++
-	return &protocol.RunnerRuntime{JournalID: r.cfg.JournalID, Updater: updaterObservation, Extensions: extensionStatus, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: eventCount + requestCount + int64(len(releases)) + messageDeliveries, Blockers: blockers, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
+	return &protocol.RunnerRuntime{JournalID: r.cfg.JournalID, Updater: updaterObservation, Extensions: extensionStatus, BoundedRecoveryAuthorizationID: recoveryID, ContinuationBackend: continuationBackend, AgentContinuations: continuations, AgentExecutors: executors, Repositories: repositories, ConfigurationSHA256: configurationSHA, JournalVersion: journal.CurrentVersion, InstanceID: r.instanceID, Generation: r.generation, Sequence: r.sequence, Protocol: r.runnerProtocol, ProtocolMin: r.runnerProtocol, ProtocolMax: r.runnerProtocol, Build: r.cfg.Build, Capabilities: capabilities, Mode: mode, UpgradePhase: phase, UpgradeError: upgradeError, DownloadedBytes: downloaded, UpgradeID: upgradeID, AppliedControlRevision: r.control.Revision, PendingClaims: claims, PendingOperations: eventCount + requestCount + int64(len(releases)) + messageDeliveries, Blockers: blockers, MaintenanceCoverage: maintenanceCoverage, AuthorizationID: authorizationID, AuthorizationDeadlineMillis: authorizationDeadline, UpdaterReceipt: receipt, ConfirmedCancelledUpgradeID: confirmedCancelled}, nil
 }
 
 func sameGrant(a, b *protocol.MaintenanceAuthorization) bool {
@@ -430,9 +450,11 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 		r.grantServerDeadline = grant.DeadlineMillis - haircut - elapsedMillis
 		deadline := sent.Add(time.Duration(grant.RemainingMillis-haircut) * time.Millisecond)
 		for _, id := range grant.RunIDs {
-			r.grantDeadlines[id] = maxTime(r.grantDeadlines[id], deadline)
-			if a := r.active[id]; a != nil && a.deadline.Before(r.grantDeadlines[id]) {
-				a.deadline = r.grantDeadlines[id]
+			if deadline.After(r.grantDeadlines[id].local) {
+				r.grantDeadlines[id] = maintenanceRunDeadline{local: deadline, serverMillis: r.grantServerDeadline}
+			}
+			if a := r.active[id]; a != nil && a.deadline.Before(r.grantDeadlines[id].local) {
+				a.deadline = r.grantDeadlines[id].local
 			}
 		}
 		r.grantID = grant.ID
@@ -440,16 +462,10 @@ func (r *Runner) applyControl(ctx context.Context, next *protocol.RunnerControl,
 
 	return nil
 }
-func maxTime(a, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
-}
 func (r *Runner) authorizedDeadline(runID string, normal time.Time) time.Time {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if grant := r.grantDeadlines[runID]; grant.After(normal) {
+	if grant := r.grantDeadlines[runID].local; grant.After(normal) {
 		return grant
 	}
 	return normal

@@ -45,6 +45,16 @@ func validateRuntime(r *protocol.RunnerRuntime) error {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "execution observations require capability")
 	}
 
+	if coverage := r.MaintenanceCoverage; coverage != nil {
+		if coverage.RunDeadlines == nil || coverage.ObservedAtMillis != 0 {
+			return protocol.Errorf(protocol.CodeInvalidRequest, "runner maintenance coverage requires a Run deadline map and no server timestamp")
+		}
+		for id, deadline := range coverage.RunDeadlines {
+			if !protocol.ValidID(protocol.PrefixRun, id) || deadline <= 0 {
+				return protocol.Errorf(protocol.CodeInvalidRequest, "invalid runner maintenance coverage")
+			}
+		}
+	}
 	if negotiated != r.Protocol {
 		return protocol.Errorf(protocol.CodeInvalidRequest, "runner protocol does not match negotiation")
 	}
@@ -205,6 +215,21 @@ func runnerControl(ctx context.Context, q store.Querier, host string, now int64)
 	return c, nil
 }
 
+// Hello omits the extension for the strict legacy decoder. A newer Hello
+// cannot erase or refresh an earlier scoped ACK of the same applied control.
+func preserveMaintenanceCoverage(next, old protocol.RunnerRuntime, now int64) protocol.RunnerRuntime {
+	if coverage := next.MaintenanceCoverage; coverage != nil {
+		stamped := *coverage
+		stamped.ObservedAtMillis = now
+		next.MaintenanceCoverage = &stamped
+	} else if next.InstanceID == old.InstanceID && next.Generation == old.Generation && next.JournalID == old.JournalID &&
+		next.Protocol == old.Protocol && next.AppliedControlRevision == old.AppliedControlRevision &&
+		next.UpgradeID == old.UpgradeID && next.AuthorizationID == old.AuthorizationID {
+		next.MaintenanceCoverage = old.MaintenanceCoverage
+	}
+	return next
+}
+
 // observeRuntime is called by hello and heartbeat, never by a retransmitted
 // claim. Receiving an old sequence cannot keep a lost process online.
 func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.RunnerRuntime, now int64, hello bool) (bool, error) {
@@ -225,7 +250,7 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 			if drain.Runtime.Sequence >= r.Sequence {
 				return false, &protocol.Error{Code: protocol.CodeConflictPayload, Message: "runner observation sequence is stale", Details: json.RawMessage(`{"reason":"stale_sequence"}`)}
 			}
-			return false, tx.ObserveDrainingRunner(ctx, host, *r, now)
+			return false, tx.ObserveDrainingRunner(ctx, host, preserveMaintenanceCoverage(*r, drain.Runtime, now), now)
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return false, err
@@ -259,7 +284,7 @@ func observeRuntime(ctx context.Context, tx *store.Tx, host string, r *protocol.
 		}
 	}
 	changed := fresh || !old.Online || old.Runtime.InstanceID != r.InstanceID || old.Runtime.Mode != r.Mode || old.Runtime.AppliedControlRevision != r.AppliedControlRevision || old.Runtime.AuthorizationID != r.AuthorizationID || old.Runtime.UpgradeID != r.UpgradeID || old.Runtime.UpgradePhase != r.UpgradePhase || old.Runtime.UpgradeError != r.UpgradeError || old.Runtime.ConfirmedCancelledUpgradeID != r.ConfirmedCancelledUpgradeID || old.Runtime.DownloadedBytes != r.DownloadedBytes || old.Runtime.Build != r.Build || !slices.Equal(old.Runtime.Repositories, r.Repositories) || !slices.Equal(old.Runtime.Capabilities, r.Capabilities) || !slices.Equal(old.Runtime.AgentExecutors, r.AgentExecutors) || !slices.Equal(old.Runtime.AgentContinuations, r.AgentContinuations) || old.Runtime.ContinuationBackend != r.ContinuationBackend
-	if err := tx.PutHostRuntime(ctx, host, store.HostRuntimeRow{Runtime: *r, LastHeartbeatAt: now, Online: true}); err != nil {
+	if err := tx.PutHostRuntime(ctx, host, store.HostRuntimeRow{Runtime: preserveMaintenanceCoverage(*r, old.Runtime, now), LastHeartbeatAt: now, Online: true}); err != nil {
 		return false, err
 	}
 	if err := recordRunnerCancellationConfirmation(ctx, tx, host, *r, now); err != nil {

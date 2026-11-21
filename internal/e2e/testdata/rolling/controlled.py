@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import shutil
 import subprocess
 import sys
 import time
@@ -13,7 +14,7 @@ def write_private(path, content):
     path.chmod(0o600)
 
 
-def prepare(root, bundle, initial, server_config, env, stack, *, drain_timeout=None):
+def prepare(root, bundle, initial, server_config, env, stack, *, drain_timeout=None, recovery_fixture=False):
     # The hosted job creates this account on a fresh VM. Refuse a developer's
     # service manager even if this module is invoked directly.
     if pwd.getpwuid(os.getuid()).pw_name != "tend-wire-fixture":
@@ -31,13 +32,19 @@ def prepare(root, bundle, initial, server_config, env, stack, *, drain_timeout=N
     server_env = root / "server.env"
     write_private(server_env, "".join(f"{key}={env[key]}\n" for key in
                                       ("HOME", "XDG_CONFIG_HOME", "TEND_SERVER_SECRET")))
-    write_private(config, json.dumps({
+    updater_config = {
         "instance_id": "fixture", "role": "server", "state_dir": str(state), "initial_binary": str(initial),
         "args": ["-config", str(server_config)], "env_files": [str(server_env)], "log_path": str(root / "service.log"),
         "authority_socket": str(control), "authorize_url": "http://localhost/updater/authorize",
         "health_url": "http://localhost/updater/health", "protocol": manifest["protocol"]["max"],
         "storage_version": manifest["storage"]["server_schema"]["max"],
-    }))
+    }
+    fixed = bundle / "tend-updater"
+    if recovery_fixture:
+        fixed = root / "fixed-updater"
+        shutil.copy2(bundle / "tend-updater", fixed)
+        updater_config["data_files"] = [str(Path(server["data_dir"]) / "tend.db")]
+    write_private(config, json.dumps(updater_config))
     unit = root / ("tend-" + root.name + ".service")
     write_private(unit, f"""[Service]
 Type=simple
@@ -47,7 +54,7 @@ Environment=XDG_RUNTIME_DIR=%t
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
 MemoryAccounting=yes
 TasksAccounting=yes
-ExecStart={bundle}/tend-updater serve --config {config}
+ExecStart={fixed} serve --config {config}
 ExecStartPost=/usr/bin/python3 {Path(__file__).resolve()} {initial} {server_config} {server_env}
 """)
     def systemctl(*args, check=True):
