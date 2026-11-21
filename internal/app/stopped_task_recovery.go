@@ -42,3 +42,32 @@ func stoppedTaskRecoveryReady(ctx context.Context, q store.Querier, task string)
 	}
 	return rows.Err()
 }
+
+// A logical result can release the lease before its runner finishes writing in
+// the reserved workspace. Require an explicit stop from each writer, or the
+// workspace proof covering all its runs in the same journal.
+func stoppedReviewerTaskRecoveryReady(ctx context.Context, q store.Querier, task string) error {
+	if err := stoppedTaskRecoveryReady(ctx, q, task); err != nil {
+		return err
+	}
+	var missing bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM task_workspace_bindings b JOIN workspaces w USING(workspace_id)
+ JOIN workspace_runs wr USING(workspace_id) JOIN runs r USING(run_id)
+ LEFT JOIN runner_journal_runs j ON j.run_id=r.run_id
+ LEFT JOIN workspace_journal_releases p ON p.workspace_id=w.workspace_id AND p.task_id=r.task_id AND p.journal_id=COALESCE(j.journal_id,'')
+ LEFT JOIN run_external_waits e ON e.run_id=r.run_id
+ LEFT JOIN run_question_handoffs question ON question.run_id=r.run_id
+ LEFT JOIN run_pause_handoffs pause ON pause.run_id=r.run_id
+ WHERE b.task_id=? AND w.occupied_by=r.task_id
+ GROUP BY w.workspace_id,r.task_id,COALESCE(j.journal_id,'')
+ HAVING COUNT(*)>COALESCE(MAX(p.run_count),0) AND COUNT(*) FILTER (
+ WHERE r.runner_stopped_at=0 AND COALESCE(json_extract(e.body_json,'$.stopped'),0)=0
+ AND COALESCE(question.stopped,0)=0 AND COALESCE(pause.stopped,0)=0)>0)`, task).Scan(&missing); err != nil {
+		return err
+	}
+	if missing {
+		return protocol.Errorf(protocol.CodeUnknownOutcome, "the reserved reviewer workspace still needs its original runner stop or journal release proof")
+	}
+	return nil
+}

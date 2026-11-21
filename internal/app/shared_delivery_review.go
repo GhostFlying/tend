@@ -236,8 +236,8 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				}
 				break
 			}
-			if r.Status != "reviewing" || len(r.Rounds) == 0 {
-				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no active frozen shared review")
+			if len(r.Rounds) == 0 || r.Status != "reviewing" && (r.Status != "waiting" || r.Rounds[len(r.Rounds)-1].Result != nil) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "there is no unresolved frozen shared review")
 			}
 			last := &r.Rounds[len(r.Rounds)-1]
 			previousAcceptance, previousVerdict := last.AcceptanceID, last.AcceptanceVerdict
@@ -279,7 +279,7 @@ func (ReviewIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "wait requires an unresolved frozen review without a quality conclusion")
 			}
 			last := protocol.SharedReviewInputRound(r.Rounds[len(r.Rounds)-1])
-			if err := stoppedTaskRecoveryReady(ctx, tx.Q(), last.TaskID); err != nil {
+			if err := stoppedReviewerTaskRecoveryReady(ctx, tx.Q(), last.TaskID); err != nil {
 				return Outcome{}, err
 			}
 			if last.ReviewerRole == protocol.RoleAccept {

@@ -67,7 +67,7 @@ func recordCompletedSharedReport(ctx context.Context, q store.Querier, issue pro
 	if err != nil {
 		return err
 	}
-	if err := stoppedTaskRecoveryReady(ctx, q, task.TaskID); err != nil {
+	if err := stoppedReviewerTaskRecoveryReady(ctx, q, task.TaskID); err != nil {
 		return err
 	}
 
@@ -76,8 +76,13 @@ func recordCompletedSharedReport(ctx context.Context, q store.Querier, issue pro
 	// original round, even if a newer report has already completed.
 	if n := len(r.Rounds); n > 0 && r.Rounds[n-1].Result == nil {
 		last := &r.Rounds[n-1]
-		if last.ReviewerRole == protocol.RoleAccept || last.AcceptanceID != "" || last.SupplementTaskID != "" || last.TaskID != task.TaskID {
-			return protocol.Errorf(protocol.CodeInvalidTransition, "settle the original review evidence through its existing Task and role")
+		if last.ReviewerRole == protocol.RoleAccept || last.AcceptanceID != "" || last.SupplementTaskID != "" {
+			return protocol.Errorf(protocol.CodeInvalidTransition, "settle the original review evidence through its existing role")
+		}
+		if last.TaskID != task.TaskID {
+			if err := stoppedReviewerTaskRecoveryReady(ctx, q, last.TaskID); err != nil {
+				return err
+			}
 		}
 		_, priorRun, priorArtifact, err := store.ReadSharedReviewResult(ctx, q, *r, *last)
 		switch {

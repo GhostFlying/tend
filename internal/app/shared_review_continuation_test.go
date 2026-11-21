@@ -34,6 +34,14 @@ func reviewReceiptForTest(t *testing.T, h *harness, issue, request string) *prot
 	return receipt
 }
 
+func confirmReviewerStopForTest(t *testing.T, h *harness, run protocol.Assignment) {
+	t.Helper()
+	stop := protocol.SessionStopPayload{PhysicalExit: true, EventSequence: 1}
+	if op := h.runAs(run, protocol.OpRunsRecordSessionStop, stop, RecordSessionStop{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+}
+
 func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.T) {
 	h, runtime, issue, source, finalCandidate, _ := sharedReviewFixture(t)
 	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityExternalWaits)
@@ -57,6 +65,12 @@ func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.
 	if resource.OccupiedBy != task {
 		t.Fatal("fixture lost retained workspace", resource)
 	}
+	beforeStop := h.env("tasks.continue", taskTarget(task), protocol.ContinueTaskPayload{Reason: "Continue the completed reviewer"}, rev(h.task(task).ControlRevision))
+	op, err := h.app.Execute(t.Context(), owner, beforeStop, ContinueTask{})
+	if technicalWaitErrorCode(op, err) != protocol.CodeUnknownOutcome {
+		t.Fatal("the logical report was treated as physical stop", op, err)
+	}
+	confirmReviewerStopForTest(t, h, initial)
 	if op := continueTaskForTest(t, h, task, "Review the corrected candidate in the retained workspace"); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -72,6 +86,7 @@ func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.
 	if op := h.runAs(second, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "Independent reviewer process exited without a report"}, Release{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	confirmReviewerStopForTest(t, h, second)
 	if op := h.requestAction(task, protocol.ActionImplement, 3); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -79,7 +94,7 @@ func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.
 	if !ok || retry.TaskID != task || retry.Generation != 3 {
 		t.Fatal(retry)
 	}
-	op := h.runAs(retry, protocol.OpRunsWaitExternal, protocol.WaitExternalPayload{WaitKey: "same-review", Kind: "review", TargetID: r.ReviewID, IssueID: issue.IssueID, Reason: "Await candidate disposition", Recovery: "Read the original review and current candidate"}, WaitExternal{})
+	op = h.runAs(retry, protocol.OpRunsWaitExternal, protocol.WaitExternalPayload{WaitKey: "same-review", Kind: "review", TargetID: r.ReviewID, IssueID: issue.IssueID, Reason: "Await candidate disposition", Recovery: "Read the original review and current candidate"}, WaitExternal{})
 	var wait protocol.ExternalWait
 	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &wait) != nil {
 		t.Fatal(op)
@@ -87,7 +102,7 @@ func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.
 	current := canonicalTaskIssue(t, h, issue.IssueID)
 	waitInput := protocol.UpdateSharedDeliveryReviewPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: current.AssignmentEpoch, Reason: "Check the original reviewer stop"}, Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: rev(r.Revision)}
 	original := h.env("issues.review_delivery", protocol.Target{Type: "issue", ID: issue.IssueID}, waitInput, rev(current.Revision))
-	op, err := h.app.Execute(t.Context(), owner, original, ReviewIssueDelivery{})
+	op, err = h.app.Execute(t.Context(), owner, original, ReviewIssueDelivery{})
 	if technicalWaitErrorCode(op, err) != protocol.CodeUnknownOutcome {
 		t.Fatal("wait accepted without physical stop", op, err)
 	}
@@ -127,6 +142,7 @@ func TestSharedReviewCompletedReportAfterFailedGenerationAndReminder(t *testing.
 	report := observed
 	report.HeadSHA, report.BaseSHA, report.RequirementsDigest = c.HeadSHA, c.BaseSHA, c.RequirementsDigest
 	submitSharedReviewForTest(t, h, next, report, "passed")
+	confirmReviewerStopForTest(t, h, next)
 	if op := sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}); protocol.CodeOf(op.Error) != protocol.CodeInvalidTransition {
 		t.Fatal("the legacy exact binding must not silently accept a different generation", op)
 	}
@@ -162,7 +178,12 @@ func TestSharedReviewRegisterCompletedReportWithoutPrebinding(t *testing.T) {
 	linked := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
 	task := createSharedReportTaskForTest(t, h, issue.IssueID, "pr")
 	expectWorkCode(t, sharedReviewAction(t, h, issue.IssueID, completedReviewInput(linked, task)), protocol.CodeInvalidTransition)
-	executeSharedReviewForTest(t, h, runtime, linked, task, "passed")
+	reviewer, ok := h.claimInputRun(runtime)
+	if !ok || reviewer.TaskID != task {
+		t.Fatal(reviewer)
+	}
+	submitSharedReviewForTest(t, h, reviewer, linked, "passed")
+	confirmReviewerStopForTest(t, h, reviewer)
 
 	input := completedReviewInput(linked, task)
 	stale := input
@@ -212,6 +233,7 @@ func TestSharedReviewWaitAndReceiptPreserveStoppedWorkspace(t *testing.T) {
 	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "Reviewer exited before reaching a conclusion"}, Release{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
+	confirmReviewerStopForTest(t, h, as)
 	before := h.resourceForTask(task)
 	if before.OccupiedBy != task {
 		t.Fatal(before)
@@ -225,5 +247,97 @@ func TestSharedReviewWaitAndReceiptPreserveStoppedWorkspace(t *testing.T) {
 	}
 	if got := reviewReceiptForTest(t, h, issue.IssueID, env.RequestID); got.Status != "committed" || got.Review.Status != "waiting" || got.Review.Revision != waiting.Revision {
 		t.Fatal("lost response cannot be read by original identity", got)
+	}
+}
+
+func TestSharedReviewRegistersLateOriginalReportAfterWaiting(t *testing.T) {
+	h, runtime, issue, source, moved, _ := sharedReviewFixture(t)
+	runtime.Capabilities = append(runtime.Capabilities, protocol.CapabilityExternalWaits)
+	runtime.Sequence++
+	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
+	task := createSharedReportTaskForTest(t, h, issue.IssueID, "pr")
+	frozen := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: task}))
+	first, ok := h.claimInputRun(runtime)
+	if !ok || first.TaskID != task {
+		t.Fatal(first)
+	}
+	op := h.runAs(first, protocol.OpRunsWaitExternal, protocol.WaitExternalPayload{WaitKey: "reviewer-wait", Kind: "review", TargetID: frozen.ReviewID, IssueID: issue.IssueID, Reason: "Retain the original candidate", Recovery: "Resume this independent review"}, WaitExternal{})
+	var wait protocol.ExternalWait
+	if op.Status != protocol.OpSucceeded || json.Unmarshal(op.Result, &wait) != nil {
+		t.Fatal(op)
+	}
+	if op := h.runAs(first, protocol.OpRunsYieldExternalWait, protocol.YieldExternalWaitPayload{WaitID: wait.WaitID}, YieldExternalWait{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "wait", DeliveryID: "pr", ExpectedReviewRevision: rev(frozen.Revision)}))
+	moved.HeadSHA = strings.Repeat("e", 40)
+	observeDeliveryForTest(t, h, issue.IssueID, moved, "open", "")
+	h.clock.Advance(externalWaitReminder)
+	if err := h.app.SweepExternalWaits(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runtime.Sequence++
+	if op := h.versionedHello("linux-1", runtime); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	next, ok := h.claimInputRun(runtime)
+	if !ok || next.TaskID != task || next.Generation != first.Generation || next.RunID == first.RunID {
+		t.Fatal(next)
+	}
+	submitSharedReviewForTest(t, h, next, frozen, "changes_requested")
+	confirmReviewerStopForTest(t, h, next)
+	original := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+	if original.Valid || original.Status != "changes_requested" || original.HeadSHA != frozen.HeadSHA ||
+		original.CurrentCandidate == nil || original.CurrentCandidate.HeadSHA != moved.HeadSHA ||
+		original.Rounds[0].RunID != next.RunID || original.Rounds[0].ArtifactID != h.task(task).CurrentArtifactID || original.Rounds[0].Result.Findings[0].ID != "F1" {
+		t.Fatal("the late report must settle its original candidate only", original)
+	}
+}
+
+func TestSharedReviewRegistersAnotherLegalTaskAfterOriginalStops(t *testing.T) {
+	h, runtime, issue, source, _, _ := sharedReviewFixture(t)
+	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
+	first := createSharedReportTaskForTest(t, h, issue.IssueID, "pr")
+	frozen := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: first}))
+	as, ok := h.claimInputRun(runtime)
+	if !ok || as.TaskID != first {
+		t.Fatal(as)
+	}
+	if op := h.runAs(as, protocol.OpRunsRelease, protocol.ReleasePayload{Reason: "Reviewer exited before the original report"}, Release{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	second := createSharedReportTaskForTest(t, h, issue.IssueID, "pr")
+	successor, ok := h.claimInputRun(runtime)
+	if !ok || successor.TaskID != second {
+		t.Fatal(successor)
+	}
+	submitSharedReviewForTest(t, h, successor, frozen, "passed")
+	confirmReviewerStopForTest(t, h, successor)
+	i := canonicalTaskIssue(t, h, issue.IssueID)
+	input := completedReviewInput(frozen, second)
+	input.ExpectedAssignmentEpoch, input.Reason = i.AssignmentEpoch, "Register this reviewer's actual successor report"
+	op, err := h.app.Execute(t.Context(), owner, h.env("issues.review_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, input, rev(i.Revision)), ReviewIssueDelivery{})
+	if technicalWaitErrorCode(op, err) != protocol.CodeUnknownOutcome {
+		t.Fatal("a new report concealed the missing workspace stop receipt of the original Task", op, err)
+	}
+	confirmReviewerStopForTest(t, h, as)
+	r := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, input))
+	if !r.Valid || len(r.Rounds) != 2 || !reflect.DeepEqual(r.Rounds[0], frozen.Rounds[0]) || r.Rounds[1].TaskID != second || r.Rounds[1].RunID != successor.RunID || r.Rounds[1].Reviewer != frozen.Reviewer {
+		t.Fatal("the legal successor did not retain the original reviewer and unfinished round", r)
+	}
+}
+
+func TestSharedReviewReceiptSurvivesFinalUnlink(t *testing.T) {
+	h, _, issue, source, _, _ := sharedReviewFixture(t)
+	linked := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: source}))
+	i := canonicalTaskIssue(t, h, issue.IssueID)
+	input := protocol.UpdateSharedDeliveryReviewPayload{IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: i.AssignmentEpoch, Reason: "Unlink the last contribution"}, Action: "unlink", DeliveryID: "pr", TaskID: source}
+	env := h.env("issues.review_delivery", protocol.Target{Type: "issue", ID: i.IssueID}, input, rev(i.Revision))
+	unlinked := sharedReviewResult(t, h.exec(owner, env, ReviewIssueDelivery{}))
+	if got := reviewReceiptForTest(t, h, i.IssueID, env.RequestID); got.Status != "committed" || got.Review.Revision != linked.Revision+1 || len(got.Review.Links) != 0 || got.Review.Revision != unlinked.Revision {
+		t.Fatal("the original receipt was lost after removing its final link", got)
 	}
 }

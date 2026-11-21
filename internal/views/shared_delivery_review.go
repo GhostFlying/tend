@@ -98,7 +98,9 @@ func SharedDeliveryReviewReceipt(ctx context.Context, q store.Querier, issueID, 
 		var raw string
 		err := q.QueryRowContext(ctx, `SELECT h.body_json FROM shared_delivery_review_history h JOIN shared_delivery_reviews r USING(review_id)
  WHERE r.provider=? AND r.repository=? AND r.number=? AND h.request_id=?
- AND EXISTS(SELECT 1 FROM json_each(h.body_json,'$.links') l WHERE json_extract(l.value,'$.issue_id')=? AND json_extract(l.value,'$.delivery_id')=?)
+ AND EXISTS(SELECT 1 FROM shared_delivery_review_history scope, json_each(scope.body_json,'$.links') l
+ WHERE scope.review_id=h.review_id AND scope.revision IN (h.revision,h.revision-1)
+ AND json_extract(l.value,'$.issue_id')=? AND json_extract(l.value,'$.delivery_id')=?)
  ORDER BY h.revision DESC LIMIT 1`, delivery.Provider, delivery.Repository, delivery.Number, requestID, issueID, deliveryID).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return out, nil

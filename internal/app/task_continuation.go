@@ -68,7 +68,7 @@ func (ContinueTask) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, 
 		}
 	}
 	if spec.ReviewDeliveryID != "" {
-		if err := stoppedTaskRecoveryReady(ctx, tx.Q(), row.TaskID); err != nil {
+		if err := stoppedReviewerTaskRecoveryReady(ctx, tx.Q(), row.TaskID); err != nil {
 			return Outcome{}, err
 		}
 	} else {
