@@ -730,7 +730,8 @@ func (r *Runner) replayManagerClose(ctx context.Context, as protocol.Assignment)
 // A completed native call retains its exact reply while the connection is
 // unavailable. Keep the original session alive for its already admitted turn.
 func (r *Runner) deliverActiveManagerReceipt(ctx, liveSession context.Context, as protocol.Assignment, env *protocol.Envelope) error {
-	if env.Operation != protocol.OpManagerNativeReply {
+	// Legacy replies share the reverse claim loop. Keep that wait bounded.
+	if !as.EventSync || env.Operation != protocol.OpManagerNativeReply {
 		return r.sendManagerReceipt(ctx, as, env)
 	}
 	var reply protocol.ManagerNativeReply
