@@ -313,13 +313,10 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 			return Outcome{}, err
 		}
 		if method == "close" && p.Error == "" {
-			var last, pending int64
-			if err = tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0),COALESCE(SUM(CASE WHEN applied=0 THEN 1 ELSE 0 END),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&last, &pending); err != nil {
+			if err := requireManagerEventExtent(ctx, tx.Q(), run, p.LastSequence); err != nil {
 				return Outcome{}, err
 			}
-			if last != p.LastSequence {
-				return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native close must cover all applied events")
-			}
+			var pending int64
 			if err := settleClosedManagerToolResults(ctx, tx, run); err != nil {
 				return Outcome{}, err
 			}
@@ -427,12 +424,8 @@ func (c ManagerNativeCommand) Apply(ctx context.Context, x *Exec, tx *store.Tx) 
 		if p.Reason == "" || p.LastSequence < 0 {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "stop proof requires reason and event cursor")
 		}
-		var last int64
-		if err := tx.Q().QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM manager_native_events WHERE run_id=?`, run).Scan(&last); err != nil {
+		if err := requireManagerEventExtent(ctx, tx.Q(), run, p.LastSequence); err != nil {
 			return Outcome{}, err
-		}
-		if last != p.LastSequence {
-			return Outcome{}, protocol.Errorf(protocol.CodeUnknownOutcome, "native events must be acknowledged before stop")
 		}
 		if err := tx.RecordManagerPhysicalClose(ctx, run, x.Env.RequestID, p.LastSequence, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
@@ -875,11 +868,35 @@ func (a *App) ManagerRunEnded(ctx context.Context, run string) (bool, error) {
 	return ended, err
 }
 
+// An original tail receipt promises a continuous received extent. Its
+// application proof is a separate check.
+func requireManagerEventExtent(ctx context.Context, q store.Querier, run string, lastSequence int64) error {
+	var last, count int64
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0),COUNT(*) FROM manager_native_events WHERE run_id=?`, run).Scan(&last, &count); err != nil {
+		return err
+	}
+	if count != last || last != lastSequence {
+		return protocol.Errorf(protocol.CodeUnknownOutcome, "native receipt does not cover the continuous original event extent")
+	}
+	return nil
+}
+
 func (a *App) ManagerAppliedCursor(ctx context.Context, run string) (int64, error) {
 	var cursor int64
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
-		return tx.Q().QueryRowContext(ctx, `SELECT COALESCE((SELECT MIN(seq)-1 FROM manager_native_events WHERE run_id=? AND applied=0),(SELECT MAX(seq) FROM manager_native_events WHERE run_id=?),0)`, run, run).Scan(&cursor)
+		var err error
+		cursor, err = managerAppliedCursor(ctx, tx.Q(), run)
+		return err
 	})
+	return cursor, err
+}
+
+func managerAppliedCursor(ctx context.Context, q store.Querier, run string) (int64, error) {
+	var cursor int64
+	err := q.QueryRowContext(ctx, `SELECT MIN(COALESCE((SELECT MIN(seq)-1 FROM manager_native_events WHERE run_id=?1 AND applied=0), max_seq),
+ COALESCE((SELECT MIN(e.seq)-2 FROM manager_native_events e WHERE e.run_id=?1 AND e.seq>1
+   AND NOT EXISTS(SELECT 1 FROM manager_native_events p WHERE p.run_id=e.run_id AND p.seq=e.seq-1)), max_seq))
+ FROM (SELECT COALESCE(MAX(seq),0) AS max_seq FROM manager_native_events WHERE run_id=?1)`, run).Scan(&cursor)
 	return cursor, err
 }
 

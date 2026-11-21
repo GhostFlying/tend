@@ -106,14 +106,27 @@ func bufferBackgroundTool(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	if err != nil || !handled {
 		return handled, Outcome{}, err
 	}
-	var old string
-	err = tx.Q().QueryRowContext(ctx, `SELECT status FROM background_replies WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID).Scan(&old)
+	var old, oldRecord string
+	err = tx.Q().QueryRowContext(ctx, `SELECT status,tool_json FROM background_replies WHERE batch_id=? AND thread_id=? AND turn_id=? AND item_id=?`, b.BatchID, x.Principal.Thread, p.TurnID, p.ItemID).Scan(&old, &oldRecord)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return true, Outcome{}, err
 	}
 	out := Outcome{Result: map[string]any{"background_batch_id": b.BatchID, "retained": true}}
 	if err == nil && old != string(protocol.ToolRunning) && (old != string(protocol.ToolInterrupted) || p.Status == protocol.ToolRunning) {
 		return true, out, nil
+	}
+	if old == string(p.Status) {
+		original, err := store.ResolveToolRecord(ctx, tx.Q(), oldRecord)
+		if err != nil {
+			return true, Outcome{}, err
+		}
+		var retained recordToolUsePayload
+		if err := json.Unmarshal([]byte(original), &retained); err != nil {
+			return true, Outcome{}, err
+		}
+		if retained == p {
+			return true, out, nil
+		}
 	}
 	raw, err := json.Marshal(p)
 	if err != nil {

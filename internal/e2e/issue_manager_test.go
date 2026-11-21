@@ -184,6 +184,10 @@ func TestFault_ManagerAcknowledgesOriginalEventAfterWriterDeadline(t *testing.T)
 	runRunnerManager(t, false, false, false, "ack_writer")
 }
 
+func TestFault_ManagerRecoversProjectionAfterSQLiteFaultDuringDrain(t *testing.T) {
+	runRunnerManager(t, false, false, false, "projection_sqlite")
+}
+
 func TestEndToEndIssueOwnerSteerSameNativeTurn(t *testing.T) {
 	runRunnerManager(t, false, false, false, "urgent")
 }
@@ -198,6 +202,9 @@ func TestEndToEndWorkerTextOnlyPublishesNativeCompletedItems(t *testing.T) {
 
 func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archiveMode string) {
 	urgent := archiveMode == "urgent"
+	projectionFault := archiveMode == "projection_sqlite"
+	const firstProjectionItem = "failed-projection"
+	const nextProjectionItem = "after-failed-projection"
 	workerText := strings.HasPrefix(archiveMode, "worker_text_")
 	textInterrupted := archiveMode == "worker_text_interrupted"
 	const processFragment = "worker fragment 🙂!"
@@ -239,6 +246,16 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		s.exec(protocol.Principal{Kind: protocol.PrincipalSystem}, "config.sync", protocol.Target{Type: "config"}, app.ConfigPayload{Repos: []app.RepoConfig{{Repo: "tend", RemoteURL: "https://example.com/tend.git"}}, Hosts: []app.HostConfig{{HostID: "linux-1", OS: "linux", Arch: "amd64", Slots: 1, Repos: []string{"tend"}, TokenHash: runnerapi.HashToken(hostToken), Nodes: []string{"tag:tend-runner"}}}}, app.SyncConfig{})
 	}
 	var wg sync.WaitGroup
+	if projectionFault {
+		if err := s.store.Write(ctx, func(tx *store.Tx) error {
+			_, err := tx.Exec(ctx, `CREATE TRIGGER test_projection_failure BEFORE INSERT ON agent_rollout_events
+ WHEN NEW.item_id='failed-projection' BEGIN SELECT RAISE(ABORT,'isolated event projection fault'); END`)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		wg.Go(func() { s.app.RunManagerEventRecovery(ctx, quiet()) })
+	}
 	category := protocol.DefaultIssueManagerCategory
 	zero := int64(0)
 	execute := func(op string, target protocol.Target, payload any, revision *int64, command app.Command) protocol.Operation {
@@ -273,7 +290,7 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		client = &http.Client{Transport: partition}
 	}
 	log := quiet()
-	if archiveMode == "offline-turn" {
+	if archiveMode == "offline-turn" || projectionFault {
 		log = runnerTestLog(t)
 	}
 	archivePending := make(chan struct{}, 1)
@@ -435,6 +452,13 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		if item.BoardStatus() != protocol.IssueInProgress {
 			failures <- fmt.Sprintf("executing manager left Issue in %s", item.BoardStatus())
 			return "failed"
+		}
+		if projectionFault {
+			for _, id := range []string{firstProjectionItem, nextProjectionItem} {
+				raw, _ := json.Marshal(map[string]any{"type": "reasoning", "id": id, "summary": []string{"original item"}})
+				th.Emit(harness.Event{Kind: harness.EventItemCompleted, TurnID: turn, ItemID: id, ItemType: "reasoning", Raw: raw})
+			}
+			return "completed"
 		}
 		if externalWait {
 			if prWait && s.count(`SELECT COUNT(*) FROM run_external_waits WHERE status='continued'`) > 0 {
@@ -769,6 +793,68 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 	}
 	if prWait {
 		recordPR()
+	}
+	if projectionFault {
+		defer func() {
+			if !t.Failed() {
+				return
+			}
+			_ = s.store.Read(ctx, func(tx *store.ReadTx) error {
+				for _, query := range []string{
+					`SELECT json_object('run',run_id,'state',observed_state,'stop',native_close_sequence,'stopped',native_closed_at) FROM runs`,
+					`SELECT json_object('run',run_id,'seq',seq,'kind',json_extract(body_json,'$.native.Kind'),'item',json_extract(body_json,'$.native.ItemID'),'applied',applied) FROM manager_native_events ORDER BY rowid`,
+					`SELECT json_object('run',run_id,'seq',seq,'attempts',attempts,'failure',failure_code) FROM manager_event_apply_failures`,
+				} {
+					rows, err := tx.Q().QueryContext(ctx, query)
+					if err != nil {
+						return err
+					}
+					for rows.Next() {
+						var result string
+						if err := rows.Scan(&result); err != nil {
+							rows.Close()
+							return err
+						}
+						t.Log(result)
+					}
+					if err := rows.Close(); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}()
+		waitBusinessContinuity(t, "the original close waits for the failed projection", func() bool {
+			select {
+			case failure := <-failures:
+				t.Fatal(failure)
+			default:
+			}
+			return s.count(`SELECT COUNT(*) FROM manager_event_apply_failures f
+ JOIN manager_native_events e USING(run_id,seq) JOIN manager_native_requests n USING(run_id)
+ WHERE json_extract(e.body_json,'$.native.ItemID')=? AND e.applied=0 AND n.method='close' AND n.status IN ('started','unknown')`, firstProjectionItem) == 1
+		})
+		if s.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE item_id=?`, nextProjectionItem) != 0 {
+			t.Fatal("drain applied a later event across the failed original sequence")
+		}
+		if err := s.store.Write(ctx, func(tx *store.Tx) error {
+			_, err := tx.Exec(ctx, `DROP TRIGGER test_projection_failure`)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		waitBusinessContinuity(t, "the isolated fault clears and database recovery consumes both original items", func() bool {
+			return s.count(`SELECT COUNT(*) FROM manager_native_events WHERE applied=1
+ AND json_extract(body_json,'$.native.ItemID') IN (?,?)`, firstProjectionItem, nextProjectionItem) == 2
+		})
+		waitBusinessContinuity(t, "the same close records its physical stop", func() bool {
+			return s.count(`SELECT COUNT(*) FROM manager_native_requests n JOIN runs r USING(run_id)
+ WHERE n.method='close' AND n.status='completed' AND n.request_id=r.native_close_id`) == 1
+		})
+		if items := s.count(`SELECT COUNT(*) FROM agent_rollout_events WHERE item_id IN (?,?)`, firstProjectionItem, nextProjectionItem); items != 2 || attempts.Load() != 1 {
+			t.Fatal("the original items or their native turn were repeated", items, attempts.Load())
+		}
+		return
 	}
 	var textCLI *ownerCLI
 	var textRun string

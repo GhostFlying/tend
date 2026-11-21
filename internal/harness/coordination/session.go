@@ -47,6 +47,12 @@ type Event struct {
 	ProcessText    []protocol.WorkerProcessText `json:"process_text,omitempty"`
 }
 
+// HistoricalCallbackProjection lets a ledger-backed transport leave original
+// callbacks with its receipt reconciler. No native RPC is issued for them.
+type HistoricalCallbackProjection interface {
+	ProjectsHistoricalCallback(context.Context, Event) bool
+}
+
 type RetainedToolResults interface {
 	ReplayToolResult(context.Context, Event) (harness.ToolResult, error)
 }
@@ -369,8 +375,16 @@ func coordinatorNativeEvent(e Event) *harness.Event {
 	return &copy
 }
 
+func (s *Session) projectsHistoricalCallback(e Event) bool {
+	if !e.Historical {
+		return false
+	}
+	projector, ok := s.transport.(HistoricalCallbackProjection)
+	return ok && projector.ProjectsHistoricalCallback(s.ctx, e)
+}
+
 func (s *Session) deliver(t *thread, e Event) bool {
-	if e.Call != nil {
+	if e.Call != nil && !s.projectsHistoricalCallback(e) {
 		s.mu.Lock()
 		if s.ctx.Err() != nil {
 			s.mu.Unlock()

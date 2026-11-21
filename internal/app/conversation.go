@@ -1115,6 +1115,8 @@ func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 		// A late start does not take back a finished use; a result that
 		// arrives after the use was settled as interrupted still counts.
 		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
+	case u.Status == string(p.Status) && u.Tool == p.Tool && u.Input == p.Input && u.Output == p.Output:
+		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
 	default:
 		if seq, err = store.GetConversationSeq(ctx, tx.Q(), u.MessageID); err != nil {
 			return Outcome{}, err
