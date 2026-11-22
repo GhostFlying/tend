@@ -400,6 +400,9 @@ func settleExternalWaitStopped(ctx context.Context, x *Exec, tx *store.Tx, r sto
 		if err := tx.PutExternalWait(ctx, *v, x.Now.UnixMilli()); err != nil {
 			return Outcome{}, err
 		}
+		if _, err := recordChecksWaitInInbox(ctx, x, tx, v, false); err != nil {
+			return Outcome{}, err
+		}
 	}
 	if r.Role == protocol.RoleIssueManager {
 		if err := recordManagerPhysicalStop(ctx, x, tx, r.RunID); err != nil {
@@ -536,7 +539,7 @@ func refreshExternalWaitsChanged(ctx context.Context, x *Exec, tx *store.Tx, end
 			}
 		}
 		if !ready {
-			created, err := recordChecksWaitInInbox(ctx, x, tx, v)
+			created, err := recordChecksWaitInInbox(ctx, x, tx, v, true)
 			if err != nil {
 				return false, err
 			}

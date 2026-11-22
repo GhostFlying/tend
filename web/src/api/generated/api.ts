@@ -1237,6 +1237,7 @@ export interface DeliveryCheck {
   conclusion?: string;
   id?: string;
   name: string;
+  required?: boolean;
   source?: string;
   state: string;
   url?: string;

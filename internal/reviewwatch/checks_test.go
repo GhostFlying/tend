@@ -19,7 +19,7 @@ func TestGitHubChecksAreBoundToHeadAndKeepSkippedDistinct(t *testing.T) {
 	}{{"exact", "head", 2, true, "success"}, {"different candidate", "older", 2, false, ""}, {"truncated", "head", 101, true, "unknown"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := New(Config{IncludeChecks: true, Exec: func(context.Context, string, []string) ([]byte, error) {
-				return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"number": 7, "state": "OPEN", "headRefOid": "head", "mergeable": "MERGEABLE", "commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": tc.commit, "statusCheckRollup": map[string]any{"state": "SUCCESS", "contexts": map[string]any{"totalCount": tc.total, "nodes": []any{map[string]any{"name": "required", "status": "COMPLETED", "conclusion": "SUCCESS"}, map[string]any{"name": "conditional", "status": "COMPLETED", "conclusion": "SKIPPED"}}}}}}}}}}}})
+				return json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"number": 7, "state": "OPEN", "headRefOid": "head", "mergeable": "MERGEABLE", "commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"oid": tc.commit, "statusCheckRollup": map[string]any{"state": "SUCCESS", "contexts": map[string]any{"totalCount": tc.total, "nodes": []any{map[string]any{"name": "required", "isRequired": true, "status": "COMPLETED", "conclusion": "SUCCESS"}, map[string]any{"name": "conditional", "isRequired": false, "status": "COMPLETED", "conclusion": "SKIPPED"}}}}}}}}}}}})
 			}})
 			got, err := client.Observe(t.Context(), Ref{Provider: GitHub, Repository: "example/project", Number: 7})
 			if err != nil {
@@ -30,6 +30,12 @@ func TestGitHubChecksAreBoundToHeadAndKeepSkippedDistinct(t *testing.T) {
 			}
 			if got.CI != nil && (got.CI.State != tc.state || got.CI.HeadSHA != "head" || got.CI.Checks[1].Conclusion != "skipped") {
 				t.Fatal(got.CI)
+			}
+			if got.CI != nil {
+				required, optional := got.CI.Checks[0].Required, got.CI.Checks[1].Required
+				if required == nil || !*required || optional == nil || *optional {
+					t.Fatal("missing provider classification", got.CI.Checks)
+				}
 			}
 		})
 	}

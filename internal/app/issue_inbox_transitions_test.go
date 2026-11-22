@@ -44,7 +44,7 @@ func TestIssueInboxChecksWaitUsesStoppedCurrentCandidate(t *testing.T) {
 		t.Helper()
 		if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
 			_, err := tx.PutDeliveryObservationFact(t.Context(), ref, protocol.DeliveryObservation{
-				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: head, CI: &protocol.DeliveryCI{HeadSHA: head, State: state}},
+				DeliverySnapshot: protocol.DeliverySnapshot{State: "open", HeadSHA: head, CI: inboxCheckState(head, state)},
 				CheckedAt:        h.clock.Now().UnixMilli(),
 			})
 			return err
@@ -125,8 +125,15 @@ func TestIssueInboxChecksWaitUsesStoppedCurrentCandidate(t *testing.T) {
 	if op := h.runAs(worker, protocol.OpRunsYieldExternalWait, protocol.YieldExternalWaitPayload{WaitID: secondWait.WaitID}, YieldExternalWait{}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	sweep()
 	assertItems(secondWait)
+	// The worker already published the notice before the next regular sweep
+	// visited the manager. Resuming it first must leave the manager linked.
+	op := h.exec(owner, h.env(protocol.OpTasksResumeWait, taskTarget(worker.TaskID), protocol.ResumeExternalWaitPayload{
+		WaitID: secondWait.WaitID, Reason: "Inspect CI",
+	}, rev(h.task(worker.TaskID).ControlRevision)), ResumeExternalWait{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
 	sweep()
 	assertItems(secondWait)
 
@@ -148,6 +155,23 @@ func TestIssueInboxChecksWaitUsesStoppedCurrentCandidate(t *testing.T) {
 	if count := h.count("conversation_bindings WHERE object_type='attention'"); count != 0 {
 		t.Fatalf("Inbox transitions created Chat messages: %d", count)
 	}
+}
+
+func inboxCheckState(head, state string) *protocol.DeliveryCI {
+	ci := &protocol.DeliveryCI{HeadSHA: head, State: state}
+	switch state {
+	case "pending":
+		ci.Checks = []protocol.DeliveryCheck{{Name: "check", State: "in_progress", Required: new(true)}}
+	case "success":
+		ci.Checks = []protocol.DeliveryCheck{{Name: "check", State: "completed", Conclusion: "success", Required: new(true)}}
+	case "optional":
+		ci.State = "pending"
+		ci.Checks = []protocol.DeliveryCheck{
+			{Name: "check", State: "completed", Conclusion: "success", Required: new(true)},
+			{Name: "optional", State: "in_progress", Required: new(false)},
+		}
+	}
+	return ci
 }
 
 func refreshInboxDelivery(t *testing.T, h *harness, issue protocol.Issue, ref protocol.IssueDelivery) {
@@ -173,7 +197,7 @@ func claimInboxDelivery(t *testing.T, h *harness, issue protocol.Issue, ref prot
 func recordInboxDelivery(t *testing.T, h *harness, query, head, ci string) {
 	t.Helper()
 	if err := h.app.RecordServerDelivery(t.Context(), query, &protocol.DeliverySnapshot{
-		State: "open", HeadSHA: head, CI: &protocol.DeliveryCI{HeadSHA: head, State: ci},
+		State: "open", HeadSHA: head, CI: inboxCheckState(head, ci),
 	}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +222,8 @@ func TestIssueInboxDoesNotReviveEndedChecksWait(t *testing.T) {
 		refreshAgain, wantNotice            bool
 	}{
 		{name: "terminal at registration", initial: "success"},
+		{name: "only optional check running at registration", initial: "optional"},
+		{name: "required check ended while optional was still running", initial: "pending", middleHead: "head-a", middleCI: "optional"},
 		{name: "same head rerun", initial: "pending", middleHead: "head-a", middleCI: "success"},
 		{name: "head round trip", initial: "pending", middleHead: "head-b", middleCI: "pending"},
 		{name: "terminal behind refresh fence", initial: "pending", middleHead: "head-a", middleCI: "success", refreshAgain: true, wantNotice: true},
@@ -266,5 +292,43 @@ func TestIssueInboxReviewWaitDoesNotNotifyImplementingIssue(t *testing.T) {
 	waits, err := h.app.ExternalWaits(t.Context(), task.TaskID)
 	if err != nil || len(waits) != 1 || waits[0].Status != "continued" || waits[0].WakeReason != "checks_success" {
 		t.Fatal("review Run could no longer observe and resume", waits, err)
+	}
+}
+
+func TestIssueInboxExactPRWaitRequiresSelectedCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		required  *bool
+		wantCount int
+	}{
+		{name: "provider requires the selected check", required: new(true), wantCount: 1},
+		{name: "selected check is optional", required: new(false)},
+		{name: "selected check has unknown requirements"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPRWaitTest(t, true)
+			o := prWaitSnapshot()
+			o.CI.Checks[0].Required = tc.required
+			o.CI.Checks = append(o.CI.Checks, protocol.DeliveryCheck{
+				ID: "other-check", Name: "another-required-check", Source: "github_check_run",
+				App: "github-actions", State: "queued", Required: new(true),
+			})
+			f.record(t, &o, "")
+			wait := f.request(t, "inbox-pr-check", protocol.PRWaitCondition{
+				Kind: protocol.PRWaitCheckCompleted, HeadSHA: o.HeadSHA, Name: prWaitCheck,
+			})
+			f.record(t, &o, "")
+			stopOwnerClaim(t, f.h, f.run)
+			items := readIssueInbox(t, f.h, f.issue.IssueID, false)
+			if len(items) != tc.wantCount {
+				t.Fatalf("Inbox has %d entries, want %d: %+v", len(items), tc.wantCount, items)
+			}
+			if len(items) == 1 && (items[0].IssueTransition == nil || items[0].IssueTransition.WaitID != wait.WaitID) {
+				t.Fatal("notification lost original wait identity", items)
+			}
+			if current := f.readWait(t); current.Status != "waiting" || current.WaitID != wait.WaitID {
+				t.Fatal("notification eligibility changed the wait", current)
+			}
+		})
 	}
 }

@@ -190,32 +190,7 @@ func pinPRWaitEvidence(v *protocol.ExternalWait, o protocol.DeliveryObservation,
 }
 
 func matchedPRCheck(c *protocol.PRWaitCondition, o protocol.DeliveryObservation) (*protocol.DeliveryCheck, string) {
-	if o.CI == nil || o.CI.HeadSHA != c.HeadSHA {
-		return nil, "unknown"
-	}
-	checks := o.CI.Checks
-	if c.Attempt > 0 {
-		checks = o.CI.AttemptChecks
-	} else if o.CI.ErrorKind != "" || o.CI.Truncated {
-		return nil, "unknown"
-	}
-	var match *protocol.DeliveryCheck
-	for _, check := range checks {
-		if check.Name != c.Name ||
-			c.Source != "" && check.Source != "" && check.Source != c.Source ||
-			c.App != "" && check.App != "" && check.App != c.App ||
-			c.WorkflowRunID != 0 && check.WorkflowRunID != 0 && check.WorkflowRunID != c.WorkflowRunID ||
-			c.Attempt != 0 && check.Attempt != 0 && check.Attempt != c.Attempt {
-			continue
-		}
-		if match != nil || check.Source == "" ||
-			c.Source != "" && c.Source != check.Source || c.App != "" && c.App != check.App ||
-			c.WorkflowRunID != 0 && c.WorkflowRunID != check.WorkflowRunID ||
-			c.Attempt != 0 && c.Attempt != check.Attempt {
-			return nil, "unknown"
-		}
-		match = &check
-	}
+	match := selectPRCheck(c, o)
 	if match == nil {
 		return nil, "unknown"
 	}
@@ -242,6 +217,36 @@ func matchedPRCheck(c *protocol.PRWaitCondition, o protocol.DeliveryObservation)
 	default:
 		return nil, "unknown"
 	}
+}
+
+func selectPRCheck(c *protocol.PRWaitCondition, o protocol.DeliveryObservation) *protocol.DeliveryCheck {
+	if o.CI == nil || o.CI.HeadSHA != c.HeadSHA {
+		return nil
+	}
+	checks := o.CI.Checks
+	if c.Attempt > 0 {
+		checks = o.CI.AttemptChecks
+	} else if o.CI.ErrorKind != "" || o.CI.Truncated {
+		return nil
+	}
+	var match *protocol.DeliveryCheck
+	for _, check := range checks {
+		if check.Name != c.Name ||
+			c.Source != "" && check.Source != "" && check.Source != c.Source ||
+			c.App != "" && check.App != "" && check.App != c.App ||
+			c.WorkflowRunID != 0 && check.WorkflowRunID != 0 && check.WorkflowRunID != c.WorkflowRunID ||
+			c.Attempt != 0 && check.Attempt != 0 && check.Attempt != c.Attempt {
+			continue
+		}
+		if match != nil || check.Source == "" ||
+			c.Source != "" && c.Source != check.Source || c.App != "" && c.App != check.App ||
+			c.WorkflowRunID != 0 && c.WorkflowRunID != check.WorkflowRunID ||
+			c.Attempt != 0 && c.Attempt != check.Attempt {
+			return nil
+		}
+		match = &check
+	}
+	return match
 }
 
 func activePRWaitIDs(ctx context.Context, q store.Querier, ref protocol.IssueDelivery) ([]string, error) {

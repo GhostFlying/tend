@@ -13,6 +13,7 @@ import (
 
 type githubCheckContext struct {
 	ID, Name, Status, Conclusion, DetailsURL, Context, State, TargetURL string
+	IsRequired                                                          *bool
 	CheckSuite                                                          *struct {
 		App         *struct{ Slug string }
 		WorkflowRun *struct{ URL string }
@@ -21,10 +22,10 @@ type githubCheckContext struct {
 
 func (check githubCheckContext) normalize(repo, prURL string) protocol.DeliveryCheck {
 	if check.Name == "" {
-		return protocol.DeliveryCheck{ID: check.ID, Source: "github_status_context",
+		return protocol.DeliveryCheck{ID: check.ID, Required: check.IsRequired, Source: "github_status_context",
 			Name: check.Context, State: strings.ToLower(check.State), URL: check.TargetURL}
 	}
-	out := protocol.DeliveryCheck{ID: check.ID, Source: "github_check_run",
+	out := protocol.DeliveryCheck{ID: check.ID, Required: check.IsRequired, Source: "github_check_run",
 		Name: check.Name, State: strings.ToLower(check.Status), Conclusion: strings.ToLower(check.Conclusion), URL: check.DetailsURL}
 	if suite := check.CheckSuite; suite != nil {
 		if suite.App != nil {

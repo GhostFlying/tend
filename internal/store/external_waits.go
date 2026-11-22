@@ -40,7 +40,15 @@ func (t *Tx) PutExternalWait(ctx context.Context, v protocol.ExternalWait, next 
 	}{ExternalWait: v}
 	if v.Kind == "checks" && v.Status == "stopping" {
 		stored.BoardChecks = &checksWaitBoardEvidence{Head: v.ObservedHead}
-		if v.ObservedState == "closed" || v.ObservedState == "merged" || checksTerminal(v.ObservedState) {
+		settled := v.ObservedState == "closed" || v.ObservedState == "merged" || checksTerminal(v.ObservedState)
+		if !settled && v.ObservedHead != "" {
+			row, err := GetDeliveryObservation(ctx, t.Q(), v.IssueID, v.TargetID)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			settled = inboxRequiredChecksSettled(row.Observation)
+		}
+		if settled {
 			// An already ended condition could not become a physically stopped wait.
 			stored.BoardChecks.InvalidatedAt = new(int64)
 			stored.BoardChecks.FactRevision = v.ObservedRevision
@@ -92,12 +100,37 @@ UPDATE run_external_waits AS w SET body_json=json_set(w.body_json,'$.board_check
   'fact_revision',CASE WHEN u.invalidated THEN :fact_revision END))
 FROM updates u WHERE w.run_id=u.run_id`,
 		sql.Named("provider", ref.Provider), sql.Named("repository", ref.Repository), sql.Named("number", ref.Number),
-		sql.Named("head", observation.HeadSHA), sql.Named("terminal", reason != ""), sql.Named("observed_at", observedAt),
+		sql.Named("head", observation.HeadSHA), sql.Named("terminal", reason != "" || inboxRequiredChecksSettled(observation)), sql.Named("observed_at", observedAt),
 		sql.Named("fact_revision", fact.FactRevision))
 	if err != nil {
 		return fmt.Errorf("store: record checks wait board evidence: %w", err)
 	}
 	return nil
+}
+
+// Optional checks can keep the commit rollup pending after the required checks
+// settle. Preserve that first end of the Inbox evidence without waking the wait.
+func inboxRequiredChecksSettled(o protocol.DeliveryObservation) bool {
+	if o.RefreshPending || o.ErrorKind != "" || o.CI == nil || o.CI.HeadSHA != o.HeadSHA ||
+		o.CI.Truncated || o.CI.ErrorKind != "" {
+		return false
+	}
+	var observed bool
+	for _, check := range o.CI.Checks {
+		if check.Required == nil {
+			return false
+		}
+		if !*check.Required {
+			continue
+		}
+		switch check.State {
+		case "completed", "success", "failure", "error":
+			observed = true
+		default:
+			return false
+		}
+	}
+	return observed
 }
 
 func TaskExternalWaits(ctx context.Context, q Querier, task, runID, status string) ([]protocol.ExternalWait, error) {

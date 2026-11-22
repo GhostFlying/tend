@@ -5711,6 +5711,9 @@
         "name": {
           "type": "string"
         },
+        "required": {
+          "type": "boolean"
+        },
         "source": {
           "type": "string"
         },

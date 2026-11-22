@@ -51,6 +51,9 @@ type DeliveryCI struct {
 }
 
 type DeliveryCheck struct {
+	// Required is set only when the provider reports the check's status in
+	// the observed PR's merge requirements.
+	Required      *bool  `json:"required,omitempty"`
 	ID            string `json:"id,omitempty"`
 	Source        string `json:"source,omitempty"`
 	App           string `json:"app,omitempty"`
@@ -60,6 +63,19 @@ type DeliveryCheck struct {
 	State         string `json:"state"`
 	Conclusion    string `json:"conclusion,omitempty"`
 	URL           string `json:"url,omitempty"`
+}
+
+// RequiredAndPending reports positive evidence for a required check still in flight.
+func (c DeliveryCheck) RequiredAndPending() bool {
+	if c.Required == nil || !*c.Required {
+		return false
+	}
+	switch c.State {
+	case "expected", "pending", "queued", "in_progress", "waiting", "requested", "running":
+		return true
+	default:
+		return false
+	}
 }
 
 // DeliveryConflict is the first observation of a conflict for this candidate
