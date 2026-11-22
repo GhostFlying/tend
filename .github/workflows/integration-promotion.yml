@@ -1,0 +1,48 @@
+name: prepare integration promotion
+
+on:
+  schedule:
+    - cron: '2-57/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-integration-promotion
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require repository promotion credentials
+        env:
+          GH_TOKEN: ${{ secrets.TEND_INTEGRATION_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::error::Set the TEND_INTEGRATION_PAT repository secret.'
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.TEND_INTEGRATION_PAT }}
+      - name: Prepare the next integration batch
+        env:
+          GH_TOKEN: ${{ secrets.TEND_INTEGRATION_PAT }}
+        shell: bash
+        run: |
+          # Use the maintainer identity on the last accepted promotion receipt.
+          author_name=$(git log -1 --format=%an -- .github/integration-batch.json)
+          author_email=$(git log -1 --format=%ae -- .github/integration-batch.json)
+          if [ -z "$author_name" ] || [ -z "$author_email" ]; then
+            echo '::error::The main promotion receipt must have a maintainer author.'
+            exit 1
+          fi
+          export GIT_AUTHOR_NAME="$author_name" GIT_COMMITTER_NAME="$author_name"
+          export GIT_AUTHOR_EMAIL="$author_email" GIT_COMMITTER_EMAIL="$author_email"
+          python3 .github/scripts/promote-integration.py prepare
