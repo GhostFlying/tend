@@ -470,7 +470,8 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		}
 	}
 	attachmentInterrupted := scenario == "interrupted-before-close"
-	if !attachmentInterrupted {
+	laterInterrupted := scenario == "later-already-interrupted"
+	if !attachmentInterrupted && !laterInterrupted {
 		putUnrelated()
 	}
 	facts := []string{
@@ -493,7 +494,7 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 			t.Fatal(op)
 		}
 	}
-	laterApplied := scenario == "later-already-applied" || scenario == "later-already-interrupted"
+	laterApplied := scenario == "later-already-applied" || laterInterrupted
 	if laterApplied {
 		agent := mainAgent
 		agent.Thread = thread
@@ -511,13 +512,16 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 			t.Fatal(err)
 		}
 		assertManagerProjectionWatermarks(t, h, as.RunID, last, 0)
-		if scenario == "later-already-interrupted" {
+		if laterInterrupted {
 			if err := h.app.SettleOpenTurns(ctx, thread); err != nil {
 				t.Fatal(err)
 			}
-			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background' AND status='interrupted'`) != 1 {
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background' AND status='interrupted' AND output='original aggregated output'`) != 1 {
 				t.Fatal("fixture did not preserve the later observation in its interrupted state")
 			}
+			// Seed the control after the attachment's thread-wide
+			// settlement, to isolate the Run-scoped recovery below.
+			putUnrelated()
 		}
 	}
 	stopFirst := scenario == "stop-before-projection" || laterApplied
