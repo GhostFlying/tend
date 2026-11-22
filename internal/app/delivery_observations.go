@@ -161,6 +161,19 @@ func (PollDeliveries) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 			return Outcome{}, err
 		}
 	}
+	if prWaitEvidence && selectedDelivery.Provider == "github" && slices.Contains(rt.Capabilities, protocol.CapabilityDeliveryRequiredChecks) {
+		assignment.RequiredChecks = true
+		if !assignment.PRChecks {
+			if err := tx.Q().QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM run_external_waits w JOIN server_delivery_references r
+ ON r.issue_id=json_extract(w.body_json,'$.issue_id') AND r.delivery_id=json_extract(w.body_json,'$.target_id')
+ WHERE w.status IN ('stopping','waiting') AND json_extract(w.body_json,'$.kind')='checks'
+ AND r.provider=? AND r.repository=? AND r.number=?)`,
+				selectedDelivery.Provider, selectedDelivery.Repository, selectedDelivery.Number).Scan(&assignment.PRChecks); err != nil {
+				return Outcome{}, err
+			}
+		}
+	}
 	result.Assignments = append(result.Assignments, assignment)
 	event := deliveryChanged(selectedItem, selected.Observation)
 	event.Kind = "work_item.delivery_query_started"
@@ -407,6 +420,9 @@ func (ReportDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 		return Outcome{}, err
 	}
 	events = append(events, sharedEvents...)
+	if err := tx.RecordChecksWaitBoardEvidence(ctx, delivery); err != nil {
+		return Outcome{}, err
+	}
 	if err := capturePRWaits(ctx, x, tx, delivery); err != nil {
 		return Outcome{}, err
 	}

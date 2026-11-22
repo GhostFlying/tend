@@ -277,7 +277,7 @@ func legacyBindings() []CapabilityBinding {
 		binding("GET /api/v1/runs/{id}/messages", "run messages", "sample"),
 		binding("GET /api/v1/runs/{id}/native-entry", "run native-entry", "sample"),
 		binding("GET /api/v1/attentions", "attention list"),
-		binding("GET /api/v1/inbox", "inbox list"),
+		binding("GET /api/v1/inbox", "inbox list", "--kind", "information"),
 		binding("GET /api/v1/attentions/{id}", "attention show", "sample"),
 		binding("GET /api/v1/next-actions", "next-action list", "--owner-only"),
 		binding("GET /api/v1/planner-entries/{id}", "next-action show", "sample"),

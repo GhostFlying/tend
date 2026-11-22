@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/GhostFlying/tend/internal/protocol"
@@ -65,7 +66,7 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 			report.Snapshot = &protocol.DeliverySnapshot{Draft: observed.Draft, State: observed.State, HeadSHA: observed.HeadSHA, MergeSHA: observed.MergeSHA, URL: observed.URL, ProviderUpdatedAt: observed.UpdatedAt, MergedAt: observed.MergedAt, ClosedAt: observed.ClosedAt, MergedBy: deliveryActor(observed.MergedBy), ClosedBy: deliveryActor(observed.ClosedBy)}
 			if assignment.PRWaitEvidence {
 				report.Snapshot.TargetRef = observed.TargetRef
-				report.Snapshot.CI = observed.CI
+				report.Snapshot.CI = deliveryReportChecks(observed.CI, assignment.RequiredChecks)
 				report.Snapshot.LineageErrorKind = observed.LineageErrorKind
 			}
 			if assignment.TargetLineage {
@@ -97,6 +98,25 @@ func (r *Runner) observeDelivery(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Old servers strictly decode reports. Keep the provider data intact for the
+// new contract, and omit the new field unless the assignment requested it.
+func deliveryReportChecks(ci *protocol.DeliveryCI, requiredChecks bool) *protocol.DeliveryCI {
+	if ci == nil || requiredChecks {
+		return ci
+	}
+	legacy := *ci
+	legacy.Checks = slices.Clone(ci.Checks)
+	legacy.AttemptChecks = slices.Clone(ci.AttemptChecks)
+	for i := range legacy.Checks {
+		legacy.Checks[i].Required = nil
+	}
+	for i := range legacy.AttemptChecks {
+		legacy.AttemptChecks[i].Required = nil
+	}
+	return &legacy
+}
+
 func deliveryActor(a *reviewwatch.Actor) *protocol.DeliveryActor {
 	if a == nil {
 		return nil

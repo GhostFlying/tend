@@ -427,6 +427,11 @@ func saveCanonicalOwnerDefinition(ctx context.Context, x *Exec, tx *store.Tx, ne
 	if err := tx.EnsureCompletionReviews(ctx, next.IssueID); err != nil {
 		return Outcome{}, err
 	}
+	if expected > 0 && previous.State != next.State {
+		if err := recordIssueEndpointInInbox(ctx, x, tx, next); err != nil {
+			return Outcome{}, err
+		}
+	}
 	if expected > 0 && previous.BoardStatus() != next.BoardStatus() {
 		if err := recordIssueStatusChange(ctx, x, tx, previous, next); err != nil {
 			return Outcome{}, err

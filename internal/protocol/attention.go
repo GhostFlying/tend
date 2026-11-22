@@ -11,6 +11,7 @@ type Attention struct {
 	ActionClass            string                   `json:"action_class,omitempty"`
 	WithdrawalMode         string                   `json:"withdrawal_mode,omitempty"`
 	WithdrawnAt            int64                    `json:"withdrawn_at,omitempty"`
+	IssueTransition        *IssueInboxTransition    `json:"issue_transition,omitempty"`
 	ResolutionOwnerSubject string                   `json:"resolution_owner_subject,omitempty"`
 	ResolutionActor        *Principal               `json:"resolution_actor,omitempty"`
 	Responsibility         *AttentionResponsibility `json:"responsibility,omitempty"`
@@ -56,6 +57,17 @@ const (
 	ReportMoveToBacklog          = "暂放 Backlog"
 	ReportCloseOnly              = "仅报告结案"
 )
+
+// IssueInboxTransition is an immutable receipt of a business transition in Inbox.
+type IssueInboxTransition struct {
+	State         string         `json:"state"`
+	ClosureKind   string         `json:"closure_kind,omitempty"`
+	IssueRevision int64          `json:"issue_revision,omitempty"`
+	WaitID        string         `json:"wait_id,omitempty"`
+	RunID         string         `json:"run_id,omitempty"`
+	HeadSHA       string         `json:"head_sha,omitempty"`
+	Delivery      *IssueDelivery `json:"delivery,omitempty"`
+}
 
 // AttentionResponsibility identifies who must handle an original question.
 // It never changes the Issue assignee or grants general access to child tasks.
