@@ -1032,7 +1032,10 @@ async function verifyShortNumbers() {
         await detail.locator('[data-selected="true"]').and(suggestion).waitFor();
         await composer.press("Enter");
         assert.equal(await composer.inputValue(), "参见 T123 ");
+        // Let the previous suggestion restore the caret before replacing the draft.
+        await page.evaluate(() => new Promise(requestAnimationFrame));
         await composer.fill("T:发布流程");
+        assert.equal(await composer.inputValue(), "T:发布流程");
         await suggestion.click();
         assert.equal(await composer.inputValue(), "T123 ");
         await page.goto(`${base}/issues`);
