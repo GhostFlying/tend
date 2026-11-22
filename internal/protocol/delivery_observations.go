@@ -6,6 +6,7 @@ const (
 	OpRefreshDelivery                   = "work_items.refresh_delivery"
 	CapabilityDeliveryTargetLineage     = "delivery-target-lineage-v1"
 	CapabilityDeliveryPRWaitEvidence    = "delivery-pr-wait-evidence-v1"
+	CapabilityDeliveryRequiredChecks    = "delivery-required-checks-v1"
 	CapabilityDeliveryCandidateIdentity = "delivery-candidate-identity-v1"
 	CapabilityDeliveryGitHub            = "delivery-observer-github-v1"
 	CapabilityDeliveryCodebase          = "delivery-observer-codebase-v1"
@@ -128,6 +129,7 @@ type DeliveryPollPayload struct {
 type DeliveryAssignment struct {
 	PRWaitEvidence    bool             `json:"pr_wait_evidence,omitempty"`
 	PRChecks          bool             `json:"pr_checks,omitempty"`
+	RequiredChecks    bool             `json:"required_checks,omitempty"`
 	CheckAttempts     []PRCheckAttempt `json:"check_attempts,omitempty"`
 	TargetLineage     bool             `json:"target_lineage,omitempty"`
 	CandidateIdentity bool             `json:"candidate_identity,omitempty"`

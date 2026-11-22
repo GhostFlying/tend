@@ -332,3 +332,26 @@ func TestIssueInboxExactPRWaitRequiresSelectedCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueInboxNegotiatesRequiredChecksForAggregateWait(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(map[bool]string{true: "capable runner", false: "legacy runner"}[supported], func(t *testing.T) {
+			f := newPRWaitTest(t, false)
+			if supported {
+				f.rt.Capabilities = append(f.rt.Capabilities, protocol.CapabilityDeliveryRequiredChecks)
+				f.rt.Sequence++
+				if op := f.h.versionedHello("linux-1", f.rt); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			o := prWaitSnapshot()
+			f.record(t, &o, "")
+			registerInboxChecksWait(t, f.h, f.run, f.issue, f.ref)
+			refreshInboxDelivery(t, f.h, f.issue, f.ref)
+			as := pollDelivery(t, f.h, "linux-1", f.rt.InstanceID)
+			if len(as) != 1 || as[0].PRChecks != supported || as[0].RequiredChecks != supported {
+				t.Fatal("aggregate wait did not use the negotiated report format", as)
+			}
+		})
+	}
+}

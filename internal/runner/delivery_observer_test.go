@@ -146,9 +146,14 @@ func TestDeliveryObserverCancellationDoesNotReportFalseFailure(t *testing.T) {
 
 func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
 	for _, mode := range []struct {
-		name         string
-		base, target bool
-	}{{"old-server", false, false}, {"base-only-server", true, false}, {"target-aware-server", true, true}} {
+		name                   string
+		base, target, required bool
+	}{
+		{"old-server", false, false, false},
+		{"base-only-server", true, false, false},
+		{"target-aware-server", true, true, false},
+		{"required-check-aware-server", true, true, true},
+	} {
 		requested, targetRequested := mode.base, mode.target
 		t.Run(mode.name, func(t *testing.T) {
 			r := controlRunner(t)
@@ -157,7 +162,9 @@ func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
 			r.c.log = r.cfg.Log
 			r.cfg.DeliveryProviders = []string{"github"}
 			r.cfg.DeliveryObserver = observationFunc(func(context.Context, reviewwatch.Ref) (reviewwatch.Observation, error) {
-				return reviewwatch.Observation{State: "open", HeadSHA: "head", BaseSHA: "base", TargetSHA: "tip", TargetContainsMerge: true}, nil
+				checks := []protocol.DeliveryCheck{{Name: "check", Required: new(true)}, {Name: "optional", Required: new(false)}}
+				return reviewwatch.Observation{State: "open", HeadSHA: "head", BaseSHA: "base", TargetSHA: "tip", TargetContainsMerge: true,
+					CI: &protocol.DeliveryCI{HeadSHA: "head", State: "pending", Checks: checks, AttemptChecks: checks}}, nil
 			})
 			reported := false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -168,7 +175,7 @@ func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
 				}
 				var result any
 				if env.Operation == protocol.OpDeliveriesPoll {
-					result = protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{TargetLineage: targetRequested, CandidateIdentity: requested, WorkItemID: "issue", Delivery: protocol.IssueDelivery{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 1}, Generation: 1, Nonce: "query"}}}
+					result = protocol.DeliveryPollResult{Assignments: []protocol.DeliveryAssignment{{TargetLineage: targetRequested, CandidateIdentity: requested, PRWaitEvidence: true, RequiredChecks: mode.required, WorkItemID: "issue", Delivery: protocol.IssueDelivery{DeliveryID: "pr", Provider: "github", Repository: "example/repo", Number: 1}, Generation: 1, Nonce: "query"}}}
 				} else {
 					reported = true
 					var report protocol.DeliveryReportPayload
@@ -180,6 +187,12 @@ func TestDeliveryObserverSendsCandidateBaseOnlyWhenRequested(t *testing.T) {
 					}
 					if !requested && strings.Contains(string(env.Payload), "base_sha") || (!targetRequested && strings.Contains(string(env.Payload), "target_sha")) {
 						t.Error("new field sent to older server")
+					}
+					if got := strings.Contains(string(env.Payload), `"required":`); got != mode.required {
+						t.Error("check requirements capability was not honored", string(env.Payload))
+					}
+					if ci := report.Snapshot.CI; ci == nil || len(ci.Checks) != 2 || len(ci.AttemptChecks) != 2 {
+						t.Error("check observations were lost during negotiation", string(env.Payload))
 					}
 					result = protocol.DeliveryReportResult{Accepted: true}
 				}
