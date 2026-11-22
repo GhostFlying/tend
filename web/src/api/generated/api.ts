@@ -2293,6 +2293,7 @@ export interface RunnerRuntime {
   instance_id: string;
   journal_id?: string;
   journal_version?: number;
+  maintenance_coverage?: RunnerMaintenanceCoverage;
   mode: string;
   pending_claims: number;
   pending_operations: number;
@@ -2381,6 +2382,16 @@ export interface ExtensionSkillExclusionStatus {
   last_error?: string;
   next_refresh_at?: string;
   refreshed_at?: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "RunnerMaintenanceCoverage".
+ */
+export interface RunnerMaintenanceCoverage {
+  observed_at_ms?: number;
+  run_deadlines: {
+    [k: string]: number | undefined;
+  } | null;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema

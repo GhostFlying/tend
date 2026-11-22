@@ -47,8 +47,13 @@ func seed(path string, count int) error {
 
 func main() {
 	count := 2
-	if len(os.Args) == 3 && os.Args[2] == "rolling" {
-		count = 5
+	if len(os.Args) == 3 {
+		switch os.Args[2] {
+		case "rolling":
+			count = 5
+		case "restart-history":
+			count = 3
+		}
 	}
 	if err := seed(os.Args[1], count); err != nil {
 		fmt.Fprintln(os.Stderr, err)

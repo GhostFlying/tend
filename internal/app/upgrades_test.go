@@ -237,14 +237,14 @@ func TestUpgradeSingleUnfinishedAndFixedServerGrant(t *testing.T) {
 		t.Fatal("overlapping batch", op)
 	}
 	upgradeTick(h, ServerObservation{MainDrained: true})
-	initial := upgradeCtl(h, "linux-1").Authorization
-	if initial == nil {
-		t.Fatal("missing maintenance coverage")
+	initial := upgradeCtl(h, "linux-1")
+	if initial.Mode != protocol.RunnerMaintenance || initial.Authorization != nil {
+		t.Fatal("idle runner should acknowledge only the admission fence", initial)
 	}
 	h.clock.Advance(time.Second)
 	upgradeTick(h, ServerObservation{MainDrained: true})
-	if got := upgradeCtl(h, "linux-1").Authorization; got.ID != initial.ID || got.DeadlineMillis != initial.DeadlineMillis {
-		t.Fatal("tick renewed fixed coverage", got)
+	if got := upgradeCtl(h, "linux-1"); got.Revision != initial.Revision || got.Authorization != nil {
+		t.Fatal("tick changed the admission fence", got)
 	}
 	for _, host := range []string{"linux-1", "linux-2"} {
 		upgradeAck(h, host, protocol.RunnerMaintenance)
@@ -500,8 +500,14 @@ func TestUpgradeActiveRunCoverageIsFixedAcrossHeartbeats(t *testing.T) {
 	h, c := upgradeHarness(t)
 	h.createTask(owner, createTaskPayload{Title: "work continues across server restart", Spec: testSpec})
 	rt := testRuntime("old-linux-1")
-	rt.Generation = 1
+	rt.Generation, rt.JournalVersion = 1, 9
+	rt.Protocol, rt.ProtocolMax = protocol.MinimumRunnerProtocol, protocol.MinimumRunnerProtocol
 	rt.Capabilities = append(rt.Capabilities, capabilityUpdater)
+	rt.Sequence++
+	if op := h.versionedHello("linux-1", rt); op.Error != nil {
+		t.Fatal(op)
+	}
+	rt.Sequence++
 	a, ok := h.claimWith("linux-1", h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: h.worker("linux-1"), WorkspaceProtocol: 1, Runtime: rt}, nil))
 	if !ok {
 		t.Fatal("missing run")

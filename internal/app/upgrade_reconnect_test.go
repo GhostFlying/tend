@@ -66,7 +66,7 @@ func upgradeServerWithSilentRunners(t *testing.T, handoff, sweep, fullSet bool) 
 		t.Fatal(v)
 	}
 	// Readiness alone must leave maintenance in place.
-	if ctl := upgradeCtl(h, "linux-1"); ctl.Mode != protocol.RunnerMaintenance || ctl.Authorization == nil {
+	if ctl := upgradeCtl(h, "linux-1"); ctl.Mode != protocol.RunnerMaintenance || ctl.UpgradeID != b.UpgradeID {
 		t.Fatal("uncommitted server released maintenance", ctl)
 	}
 	o.UpdaterReceipt = committedServerForTest(b)

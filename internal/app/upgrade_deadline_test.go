@@ -68,8 +68,8 @@ func TestFault_UpgradeRestartCoverageCannotOutliveBatch(t *testing.T) {
 	}
 	for _, host := range []string{"linux-1", "linux-2"} {
 		ctl := upgradeCtl(h, host)
-		if ctl.Authorization == nil || ctl.Authorization.DeadlineMillis != r.View.OverallDeadlineMillis {
-			t.Fatal("restart coverage exceeds batch", ctl)
+		if ctl.Mode != protocol.RunnerMaintenance || ctl.Authorization != nil {
+			t.Fatal("idle runner should acknowledge only the admission fence", ctl)
 		}
 		upgradeAck(h, host, protocol.RunnerMaintenance)
 	}

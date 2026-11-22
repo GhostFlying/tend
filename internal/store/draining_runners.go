@@ -65,6 +65,13 @@ func RunJournal(ctx context.Context, q Querier, run string) (string, error) {
 	return journal, err
 }
 
+// JournalRetirementConfirmed uses the original supervisor's confirmed exit.
+func JournalRetirementConfirmed(ctx context.Context, q Querier, host, journal string) (bool, error) {
+	var confirmed bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_retirements WHERE host_id=? AND journal_id=? AND confirmed_at IS NOT NULL)`, host, journal).Scan(&confirmed)
+	return confirmed, err
+}
+
 func CountJournalRuns(ctx context.Context, q Querier, host, journal string) (int64, error) {
 	var count int64
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs r WHERE r.host_id=? AND r.observed_state IN `+openRunStates+

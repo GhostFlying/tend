@@ -160,6 +160,8 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// Claim omits heartbeat-only maintenance observations stamped by the server.
+		runtime.Runtime.MaintenanceCoverage = nil
 		op := s.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: &runtime.Runtime}, app.Claim{})
 		var result struct {
 			Assignment *protocol.Assignment `json:"assignment"`
@@ -434,6 +436,7 @@ func testNamedExecutionReloadRestart(t *testing.T, reviewKind agentconfig.Runtim
 	}); err != nil {
 		t.Fatal(err)
 	}
+	runtime.Runtime.MaintenanceCoverage = nil
 	claim := s.exec(protocol.Principal{Kind: protocol.PrincipalRunner, Subject: "linux-1"}, protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Worker: protocol.WorkerAppServer, WorkspaceProtocol: 1, Runtime: &runtime.Runtime}, app.Claim{})
 	var result struct {
 		Assignment *protocol.Assignment `json:"assignment"`
