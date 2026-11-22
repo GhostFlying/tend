@@ -42,16 +42,16 @@ func (a *App) RecordRolloutEvent(ctx context.Context, id, thread, turn, item, ki
 		return err
 	}
 	return a.write(staged, func(tx *store.Tx) error {
-		return recordRolloutEvent(staged, tx, id, thread, turn, item, kind, data, a.now().UnixMilli())
+		return recordRolloutEvent(staged, tx, id, thread, turn, item, kind, data, a.now().UnixMilli(), nil)
 	})
 }
 
-func recordRolloutEvent(ctx context.Context, tx *store.Tx, id, thread, turn, item, kind string, data json.RawMessage, when int64) error {
+func recordRolloutEvent(ctx context.Context, tx *store.Tx, id, thread, turn, item, kind string, data json.RawMessage, when int64, appliedCommandResult json.RawMessage) error {
 	if len(data) == 0 {
 		data = json.RawMessage(`{}`)
 	}
 	if stableRolloutEvent(thread, turn, item, kind) {
-		recorded, err := rolloutAlreadyRecorded(ctx, tx.Q(), id, thread, turn, item, kind, data)
+		recorded, err := rolloutAlreadyRecorded(ctx, tx.Q(), id, thread, turn, item, kind, data, appliedCommandResult)
 		if err != nil || recorded {
 			return err
 		}

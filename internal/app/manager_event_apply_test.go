@@ -427,7 +427,11 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 }
 
 func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing.T) {
-	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection", "interrupted-before-close", "later-already-applied", "later-already-interrupted"} {
+	for _, scenario := range []string{
+		"stop-before-projection", "stopped-after-projection", "close-reply-after-projection",
+		"interrupted-before-close", "later-already-applied", "later-already-interrupted",
+		"later-terminal-applied", "terminal-rollout-conflicts-with-original",
+	} {
 		t.Run(scenario, func(t *testing.T) {
 			testManagerProjectionInterruptedTool(t, scenario)
 		})
@@ -471,16 +475,23 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 	}
 	attachmentInterrupted := scenario == "interrupted-before-close"
 	laterInterrupted := scenario == "later-already-interrupted"
+	conflictingTerminal := scenario == "terminal-rollout-conflicts-with-original"
+	laterTerminal := scenario == "later-terminal-applied" || conflictingTerminal
 	if !attachmentInterrupted && !laterInterrupted {
 		putUnrelated()
 	}
 	facts := []string{
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"unfinished","ItemType":"commandExecution","Tool":{"Name":"shell","Input":"retained command","Status":"running"},"Raw":{"status":"inProgress"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"running"},"Raw":{"status":"inProgress"}}}`,
-		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original aggregated output","Status":"running"},"Raw":{"status":"backgrounded","aggregatedOutput":"original aggregated output"}}}`,
+		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original aggregated output","Status":"running"},"Raw":{"id":"background","type":"commandExecution","command":"make check","processId":"process","status":"backgrounded","aggregatedOutput":"original aggregated output"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background-observation","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"output from retained observation","Status":"running"},"Raw":{"status":"backgrounded","aggregatedOutput":"output from retained observation"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_started","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"running"}}}`,
 		`{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"with-result","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original failure","Status":"failed"}}}`,
+	}
+	var terminalBody json.RawMessage
+	if laterTerminal {
+		terminalBody = json.RawMessage(`{"id":"background","type":"commandExecution","command":"make check","processId":"process","status":"completed","aggregatedOutput":"original terminal output"}`)
+		facts = append(facts, `{"thread_id":"native-thread","native":{"Kind":"item_completed","TurnID":"direct-owner-turn","ItemID":"background","ItemType":"commandExecution","Tool":{"Name":"shell","Output":"original terminal output","Status":"completed"},"Raw":`+string(terminalBody)+`}}`)
 	}
 	for i, raw := range facts {
 		p := protocol.ManagerNativeEvent{Sequence: int64(i + 1), Body: json.RawMessage(raw)}
@@ -494,21 +505,32 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 			t.Fatal(op)
 		}
 	}
-	laterApplied := scenario == "later-already-applied" || laterInterrupted
+	laterApplied := scenario == "later-already-applied" || laterInterrupted || laterTerminal
 	if laterApplied {
 		agent := mainAgent
 		agent.Thread = thread
+		var background managerProjectionEvent
+		if err := json.Unmarshal([]byte(facts[2]), &background); err != nil {
+			t.Fatal(err)
+		}
+		rollout, sequence := background.Native.Raw, int64(3)
 		observed := recordToolUsePayload{TurnID: turn, ItemID: "background", ReplyTo: source, Tool: "shell",
 			Output: "original aggregated output", Status: protocol.ToolRunning}
+		if laterTerminal {
+			rollout, sequence = terminalBody, last
+			observed.Output, observed.Status = "original terminal output", protocol.ToolCompleted
+		}
+		if conflictingTerminal {
+			rollout = json.RawMessage(`{"id":"background","type":"commandExecution","command":"make check","processId":"process","status":"completed","aggregatedOutput":"conflicting terminal output"}`)
+		}
 		command := RecordToolUse{DeliveryTurn: turn}
 		if op := h.exec(agent, h.env(command.Operation(), protocol.Target{Type: "conversation", ID: id}, observed, nil), command); op.Status != protocol.OpSucceeded {
 			t.Fatal(op)
 		}
-		if err := h.app.RecordRolloutEvent(ctx, id, thread, turn, "background", protocol.ManagerEventItemCompleted,
-			json.RawMessage(`{"status":"backgrounded","aggregatedOutput":"original aggregated output"}`)); err != nil {
+		if err := h.app.RecordRolloutEvent(ctx, id, thread, turn, "background", protocol.ManagerEventItemCompleted, rollout); err != nil {
 			t.Fatal(err)
 		}
-		if err := h.app.AcknowledgeManagerEvent(ctx, as.RunID, 3, thread, turn, "background", true); err != nil {
+		if err := h.app.AcknowledgeManagerEvent(ctx, as.RunID, sequence, thread, turn, "background", true); err != nil {
 			t.Fatal(err)
 		}
 		assertManagerProjectionWatermarks(t, h, as.RunID, last, 0)
@@ -540,7 +562,18 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		}
 	}
 	for seq := int64(1); seq <= last; seq++ {
-		if err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq); err != nil {
+		err := h.app.projectManagerNativeEvent(ctx, as.RunID, seq)
+		if conflictingTerminal && seq == 3 {
+			if protocol.CodeOf(err) != protocol.CodeConflictPayload {
+				t.Fatal("a conflicting terminal rollout must not prove the older stage", err)
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, last, 2)
+			if h.countWhere(`SELECT COUNT(*) FROM agent_rollout_events WHERE item_id='background' AND kind='item_completed'`) != 1 {
+				t.Fatal("a rejected projection changed the terminal rollout")
+			}
+			return
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		if attachmentInterrupted && seq == 2 {
@@ -580,12 +613,23 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
  WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='unfinished' AND u.input='retained command' AND u.status='interrupted'`, thread, turn, source) != 1 {
 		t.Fatal("original tool without a result did not retain its source and interrupted state")
 	}
+	wantStatus, wantOutput := protocol.ToolInterrupted, "original aggregated output"
+	if laterTerminal {
+		wantStatus, wantOutput = protocol.ToolCompleted, "original terminal output"
+		if h.countWhere(`SELECT COUNT(*) FROM agent_rollout_events WHERE conversation_id=? AND thread_id=? AND turn_id=?
+ AND item_id='background' AND kind='item_completed' AND (
+ (json_extract(data_json,'$.status')='backgrounded' AND json_extract(data_json,'$.aggregatedOutput')='original aggregated output') OR
+ (json_extract(data_json,'$.status')='completed' AND json_extract(data_json,'$.aggregatedOutput')='original terminal output')
+ )`, id, thread, turn) != 2 {
+			t.Fatal("the rollout must keep both original command stages")
+		}
+	}
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
- WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.status='interrupted' AND (
-  (u.item_id='background' AND u.output='original aggregated output') OR
-  (u.item_id='background-observation' AND u.output='output from retained observation')
- )`, thread, turn, source) != 2 {
-		t.Fatal("interruption did not retain both original backgrounded outputs")
+ WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND (
+  (u.item_id='background' AND u.status=? AND u.output=?) OR
+  (u.item_id='background-observation' AND u.status='interrupted' AND u.output='output from retained observation')
+ )`, thread, turn, source, wantStatus, wantOutput) != 2 {
+		t.Fatal("command projection did not retain the expected status and output")
 	}
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
  WHERE u.thread_id=? AND u.turn_id=? AND m.reply_to=? AND u.item_id='with-result' AND u.status='failed' AND u.output='original failure'`, thread, turn, source) != 1 {

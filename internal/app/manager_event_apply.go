@@ -235,22 +235,31 @@ func (in managerProjectionInput) project(ctx context.Context, a *App, x *Exec, t
 			return Outcome{}, err
 		}
 	}
-	if err := recordRolloutEvent(ctx, tx, in.conversation, e.ThreadID, n.TurnID, n.ItemID, n.Kind, n.Raw, when); err != nil {
+	root := e.RootTurn
+	if root == "" {
+		root = n.TurnID
+	}
+	var laterSequence int64
+	var appliedCommandResult json.RawMessage
+	if n.Tool != nil && n.Tool.Status == protocol.ToolRunning {
+		var err error
+		laterSequence, appliedCommandResult, err = in.newerAppliedToolObservation(ctx, tx.Q(), root)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	if err := recordRolloutEvent(ctx, tx, in.conversation, e.ThreadID, n.TurnID, n.ItemID, n.Kind, n.Raw, when, appliedCommandResult); err != nil {
 		return Outcome{}, err
 	}
 	if n.Kind == protocol.ManagerEventItemCompleted && n.ItemType == "userMessage" {
 		// This records only an exact matching steer receipt. The original
 		// ordinary delivery remains governed by its admitted turn receipt.
-		turn := n.TurnID
-		if e.RootTurn != "" {
-			turn = e.RootTurn
-		}
-		return Outcome{}, a.consumeIssueOwnerSteer(ctx, tx, in.conversation, e.ThreadID, turn, n.Text, n.ItemID, x.Now.UnixMilli())
+		return Outcome{}, a.consumeIssueOwnerSteer(ctx, tx, in.conversation, e.ThreadID, root, n.Text, n.ItemID, x.Now.UnixMilli())
 	}
 	if n.Tool == nil && (n.Kind != protocol.ManagerEventItemCompleted || n.ItemType != protocol.ManagerItemAgentMessage || n.Text == "") {
 		return Outcome{}, nil
 	}
-	return in.projectMessage(ctx, x, tx)
+	return in.projectMessage(ctx, x, tx, root, laterSequence)
 }
 
 func (in managerProjectionInput) projectContextUsage(ctx context.Context, tx *store.Tx, usage protocol.AgentContextUsage) error {
@@ -304,12 +313,8 @@ func equivalentManagerRollout(ctx context.Context, q store.Querier, in managerPr
 	return false, rows.Err()
 }
 
-func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
+func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx *store.Tx, root string, laterSequence int64) (Outcome, error) {
 	e, n := in.event, in.event.Native
-	root := n.TurnID
-	if e.RootTurn != "" {
-		root = e.RootTurn
-	}
 	source, repair, err := in.originalSource(ctx, tx.Q(), root)
 	if err != nil || repair {
 		return Outcome{}, err
@@ -321,14 +326,10 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 		command := RecordToolUse{DeliveryTurn: root}
 		stillRunning := p.Status == protocol.ToolRunning
 		if stillRunning {
-			newer, err := in.newerAppliedToolObservation(ctx, tx.Q(), root)
-			if err != nil {
-				return Outcome{}, err
-			}
-			if newer != 0 {
+			if laterSequence != 0 {
 				// The old observation still enters the rollout. Its later
 				// applied observation owns the current tool fields.
-				if err := in.rememberRunningTool(ctx, tx, newer); err != nil {
+				if err := in.rememberRunningTool(ctx, tx, laterSequence); err != nil {
 					return Outcome{}, err
 				}
 				return Outcome{}, settleManagerProjectedTools(ctx, x, tx, in.run)
@@ -357,7 +358,7 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 	return applyManagerProjectionMessage(ctx, &projection, tx, p, RecordAgentMessage{DeliveryTurn: root, Reconciled: true})
 }
 
-func (in managerProjectionInput) newerAppliedToolObservation(ctx context.Context, q store.Querier, root string) (int64, error) {
+func (in managerProjectionInput) newerAppliedToolObservation(ctx context.Context, q store.Querier, root string) (int64, json.RawMessage, error) {
 	e, n := in.event, in.event.Native
 	rows, err := q.QueryContext(ctx, `SELECT seq,body_json FROM manager_native_events
  WHERE run_id=? AND seq>? AND applied=1 AND json_extract(body_json,'$.thread_id')=?
@@ -365,18 +366,18 @@ func (in managerProjectionInput) newerAppliedToolObservation(ctx context.Context
  AND json_extract(body_json,'$.native.Kind')='item_completed' ORDER BY seq DESC`,
 		in.run, in.sequence, e.ThreadID, n.TurnID, n.ItemID)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var seq int64
 		var raw string
 		if err := rows.Scan(&seq, &raw); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		var later managerProjectionEvent
 		if err := store.DecodeJSON(ctx, q, raw, &later); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if later.Native == nil || later.Native.Tool == nil || later.Native.Tool.Name == "" {
 			continue
@@ -386,10 +387,15 @@ func (in managerProjectionInput) newerAppliedToolObservation(ctx context.Context
 			laterRoot = later.Native.TurnID
 		}
 		if laterRoot == root {
-			return seq, nil
+			var appliedCommandResult json.RawMessage
+			if n.Kind == protocol.ManagerEventItemCompleted && n.ItemType == "commandExecution" &&
+				later.Native.ItemType == n.ItemType && (later.Native.Tool.Status == protocol.ToolCompleted || later.Native.Tool.Status == protocol.ToolFailed) {
+				appliedCommandResult = later.Native.Raw
+			}
+			return seq, appliedCommandResult, nil
 		}
 	}
-	return 0, rows.Err()
+	return 0, nil, rows.Err()
 }
 
 func (in managerProjectionInput) rememberRunningTool(ctx context.Context, tx *store.Tx, sequence int64) error {
