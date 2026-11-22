@@ -56,10 +56,27 @@ func HeadOutbox(ctx context.Context, q Querier, destination string) (OutboxMessa
 const outboxPriorityOrder = ` ORDER BY CASE WHEN status = 'sending' THEN 0 ELSE 1 END,
         CASE WHEN operation='conversation.compact' THEN -1 WHEN operation='conversation.repair_turn' THEN 2 WHEN operation = ? THEN 1 ELSE 0 END, seq`
 
-// PendingOutboxServiceable excludes a redundant native start. Existing start
-// records and sending rows still follow their original reconciliation path.
+// PendingOutboxServiceable excludes redundant starts and recovery wakes whose
+// original authority or sole successor is gone. In-flight rows still reconcile.
 const PendingOutboxServiceable = `(NOT ` + IssueOwnerConsumptionMatchesOutbox + ` OR EXISTS(
- SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected'))`
+ SELECT 1 FROM main_turns t WHERE t.request_id=o.request_id AND t.status<>'rejected'))
+ AND NOT EXISTS(
+ SELECT 1 FROM manager_transport_recoveries c
+ WHERE c.wake_request_id=o.request_id AND NOT EXISTS(
+  SELECT 1 FROM plan_actions p JOIN tasks t ON t.task_id=p.task_id
+  JOIN issue_manager_tasks m ON m.task_id=p.task_id
+  JOIN issue_controls i ON i.issue_id=m.issue_id JOIN work_items w ON w.work_item_id=i.issue_id
+  JOIN main_turns mt ON mt.request_id=c.original_execution_id
+  LEFT JOIN conversation_message_controls mc ON mc.message_id=mt.message_id
+  LEFT JOIN logical_turn_executions le ON le.request_id=mt.request_id
+  LEFT JOIN logical_turns lt ON lt.logical_turn_id=le.logical_turn_id
+  WHERE p.task_id=c.task_id AND p.generation=c.successor_generation AND p.status IN ('pending','dispatched')
+  AND t.control_revision=c.task_revision AND w.revision=c.issue_revision
+  AND i.assignment_epoch=c.assignment_epoch AND i.assignment_state='active'
+  AND i.state='active' AND i.work_status<>'backlog' AND COALESCE(mc.withdrawn_at,0)=0
+  AND (lt.logical_turn_id IS NULL OR (lt.resumed_by IS NULL AND lt.status NOT IN ('stopped','awaiting_clarification','unknown')))
+  AND NOT EXISTS(SELECT 1 FROM manager_native_requests n WHERE n.run_id=c.original_run_id
+   AND n.status IN ('pending','started','unknown') AND n.method NOT IN ('models','find','usage'))))`
 
 // HeadOutboxPrioritized keeps in-flight work first, then foreground work,
 // then backgroundOperation. Each group retains commit order. An empty
