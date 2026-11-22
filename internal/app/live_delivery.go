@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/GhostFlying/tend/internal/protocol"
 	"github.com/GhostFlying/tend/internal/store"
@@ -105,12 +104,4 @@ func bindLiveDeliveryTask(ctx context.Context, tx *store.Tx, issue protocol.Issu
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO issue_delivery_executions(task_id,issue_id,source_task_id,duty_revision,candidate_json) VALUES(?,?,?,?,?)`, p.ExecutionTaskID, issue.IssueID, d.TaskID, d.Revision+1, string(raw))
 	return err
-}
-
-func loadOrPrepareLiveDeliveryDuty(ctx context.Context, tx *store.Tx, issue protocol.Issue, p protocol.UpdateIssueDeliveryPayload) (protocol.IssueDeliveryDuty, error) {
-	d, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, p.TaskID)
-	if errors.Is(err, store.ErrNotFound) {
-		return prepareLiveDeliveryDuty(ctx, tx, issue, p)
-	}
-	return d, err
 }

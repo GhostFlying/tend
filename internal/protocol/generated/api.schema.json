@@ -5780,6 +5780,9 @@
         "current_duty_revision": {
           "type": "integer"
         },
+        "duty": {
+          "$ref": "#/definitions/IssueDeliveryDuty"
+        },
         "duty_revision": {
           "type": "integer"
         },
@@ -5824,6 +5827,9 @@
         },
         "run_id": {
           "type": "string"
+        },
+        "settled_execution": {
+          "$ref": "#/definitions/DeliveryExecutionSelector"
         },
         "settlement": {
           "$ref": "#/definitions/DeliverySettlementAuthority"
@@ -5894,6 +5900,23 @@
         "duty_revision"
       ],
       "title": "DeliveryExecutionReference",
+      "type": "object"
+    },
+    "DeliveryExecutionSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "duty_revision": {
+          "type": "integer"
+        },
+        "execution_run_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_run_id",
+        "duty_revision"
+      ],
+      "title": "DeliveryExecutionSelector",
       "type": "object"
     },
     "DeliveryObservation": {
@@ -9829,6 +9852,9 @@
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
         },
+        "delivery_instance_id": {
+          "type": "string"
+        },
         "event_id": {
           "type": "string"
         },
@@ -9843,6 +9869,9 @@
         },
         "policy_attention_id": {
           "type": "string"
+        },
+        "previous_execution": {
+          "$ref": "#/definitions/DeliveryExecutionSelector"
         },
         "reason": {
           "type": "string"
@@ -21149,6 +21178,20 @@
           }
         },
         {
+          "if": {
+            "required": [
+              "previous_execution"
+            ]
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "const": "start_next"
+              }
+            }
+          }
+        },
+        {
           "properties": {
             "reason": {
               "minLength": 1,
@@ -21255,6 +21298,22 @@
         {
           "properties": {
             "action": {
+              "const": "start_next",
+              "description": "Uses task_id, candidate, previous_execution, expected_task_control_revision, run_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task_id",
+            "candidate",
+            "previous_execution",
+            "expected_task_control_revision"
+          ]
+        },
+        {
+          "properties": {
+            "action": {
               "const": "resume",
               "description": "Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.",
               "type": "string"
@@ -21344,6 +21403,9 @@
         "candidate": {
           "$ref": "#/definitions/IssueDeliveryCandidate"
         },
+        "delivery_instance_id": {
+          "type": "string"
+        },
         "execution_duty_revision": {
           "type": "integer"
         },
@@ -21367,6 +21429,9 @@
         },
         "pr_url": {
           "type": "string"
+        },
+        "previous_execution": {
+          "$ref": "#/definitions/DeliveryExecutionSelector"
         },
         "proposed_implementation_scope": {
           "type": "string"

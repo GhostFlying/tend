@@ -53,6 +53,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	upgradeID := fs.String("upgrade-id", "", "stable upgrade batch ID")
 	requestID := fs.String("request-id", "", "reuse this ID only when retrying the identical request")
 	deliveryTask := fs.String("delivery-task", "", "approved delivery execution task; binds candidate, target and source")
+	deliveryRevision := fs.Int64("delivery-duty-revision", 0, "bound delivery revision from delivery_authorization, required for start_next deliveries")
 	revision := fs.Int64("revision", 0, "current upgrade control revision")
 	socket := fs.String("socket", e.Getenv("TEND_UPGRADE_SOCKET"), "server local upgrade control socket")
 	asJSON := fs.Bool("json", false, "print the release state as JSON")
@@ -79,6 +80,9 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 	}
 	if (*configPlan != "" || *deliveryTask != "" || *park || *commit != "") && action != "start" {
 		return usagef("runner-configurations and delivery-task are only valid for start")
+	}
+	if *deliveryRevision < 0 || *deliveryRevision > 0 && (action != "start" || *deliveryTask == "") {
+		return usagef("upgrade --delivery-duty-revision requires start with --delivery-task")
 	}
 	if len(positional) > 0 {
 		return usagef("upgrade takes no positional arguments")
@@ -134,7 +138,7 @@ func runUpgrade(ctx context.Context, e *Env, args []string) error {
 				return usagef("configuration metadata must select exactly one host")
 			}
 		}
-		input = protocol.UpgradeStartRequest{ForceMaintenance: *forceMaintenance, ServerOnly: *serverOnly, ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, RequestID: *requestID, UpgradeID: *upgradeID, Release: selected, RunnerConfigurations: configurations}
+		input = protocol.UpgradeStartRequest{ForceMaintenance: *forceMaintenance, ServerOnly: *serverOnly, ParkIdleManagers: *park, DeliveryTaskID: *deliveryTask, DeliveryDutyRevision: *deliveryRevision, RequestID: *requestID, UpgradeID: *upgradeID, Release: selected, RunnerConfigurations: configurations}
 	case "status":
 		if *bundle != "" || *upgradeID != "" || *requestID != "" || *revision != 0 {
 			return usagef("upgrade status takes no release, ID or revision")

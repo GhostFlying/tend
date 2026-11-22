@@ -2797,3 +2797,9 @@ Runner 将原生终态错误和原执行身份保存在 journal 相关记录中�
 下一步。每次明确授权在同一事务记录原失败与后继 action。连续技术失败的同一义务
 最多追加三次执行，用完时提交一次包含原 Run 证据的用户通知。Provider 策略拒绝保留
 其类型，适用处置路径。参见 [实施计划](plans/failed-worker-review-recovery.md)。
+
+## D268：同一 Task 的独立后续交付
+
+仍有效的同一 Task 可以在自执行交付真实结清后通过 `start_next` 准备另一份已登记的 provider 交付。负责人提供原结算的 execution Run 和 duty revision，以及当前 Issue 版本、分派代次和 Task control revision。入口复用已有的 execution history 和候选准备事务。历史结算保持原候选、决策引用、授权、产物和外部回执。当前责任使用新的 `delivery_instance_id` 和单调递增的 duty revision。
+
+`prepare` 继续维护未结责任及既有的同一合入后部署路径。后续交付带自己的实例身份沿原审阅、检查、授权、绑定和结算入口推进。已归档执行仅提供历史事实。受控安装用绑定的 duty revision 限定执行，即使候选产物来自同一提交也需要该修订。原请求按原 envelope 对账。Refs: [同一 Task 的独立后续交付](plans/independent-task-delivery.md)。

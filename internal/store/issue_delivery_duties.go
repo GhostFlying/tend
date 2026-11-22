@@ -28,6 +28,7 @@ func GetIssueDeliveryDuty(ctx context.Context, q Querier, issue, task string) (p
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return d, err
 	}
+	d.InstanceID, d.PreviousExecution = body.InstanceID, body.PreviousExecution
 	d.Authorization = body.Authorization
 	d.PolicyAttentionID = body.PolicyAttentionID
 	d.Candidate, d.AttentionID, d.ExecutionTaskID, d.Reason, d.Evidence, d.AssignmentEpoch = body.Candidate, body.AttentionID, body.ExecutionTaskID, body.Reason, body.Evidence, body.AssignmentEpoch
@@ -76,4 +77,34 @@ func HasRecordedDeliveryAnswer(ctx context.Context, q Querier, decisionID string
  SELECT 1 FROM issue_delivery_answers WHERE decision_id=?
  )`, decisionID).Scan(&found)
 	return found, err
+}
+
+// SettledSelfDeliveryExecution identifies the predecessor using the artifact
+// named in the settlement, independently of the Task's mutable result pointer.
+func SettledSelfDeliveryExecution(ctx context.Context, q Querier, issue string, d protocol.IssueDeliveryDuty) (*protocol.DeliveryExecutionSelector, string, error) {
+	if d.Status != "complete" || d.ExecutionTaskID != d.TaskID || d.Candidate == nil {
+		return nil, "", nil
+	}
+	for _, evidence := range d.Evidence {
+		var ref protocol.DeliveryExecutionSelector
+		var artifact string
+		var err error
+		switch evidence.Kind {
+		case protocol.WorkItemEvidenceResult:
+			err = q.QueryRowContext(ctx, `SELECT a.run_id,e.duty_revision,a.artifact_id FROM artifacts a JOIN issue_delivery_executions e USING(task_id)
+ WHERE e.issue_id=? AND e.source_task_id=a.task_id AND a.task_id=? AND a.artifact_id=?`,
+				issue, d.TaskID, evidence.Reference).Scan(&ref.ExecutionRunID, &ref.DutyRevision, &artifact)
+		case protocol.WorkItemEvidenceAcceptance:
+			err = q.QueryRowContext(ctx, `SELECT a.run_id,e.duty_revision,a.artifact_id FROM acceptances v JOIN artifacts a USING(artifact_id) JOIN issue_delivery_executions e ON e.task_id=a.task_id
+ WHERE e.issue_id=? AND e.source_task_id=a.task_id AND a.task_id=? AND v.acceptance_id=? AND v.verdict='passed'`,
+				issue, d.TaskID, evidence.Reference).Scan(&ref.ExecutionRunID, &ref.DutyRevision, &artifact)
+		default:
+			continue
+		}
+		if err == sql.ErrNoRows {
+			return nil, "", nil
+		}
+		return &ref, artifact, err
+	}
+	return nil, "", nil
 }

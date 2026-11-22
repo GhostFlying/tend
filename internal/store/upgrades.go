@@ -33,6 +33,7 @@ type UpgradeRow struct {
 	StartRequestID              string                   `json:"start_request_id,omitempty"`
 	ParkIdleManagers            bool                     `json:"park_idle_managers,omitempty"`
 	ManagerParks                []UpgradeManagerPark     `json:"manager_parks,omitempty"`
+	DeliveryDutyRevision        int64                    `json:"delivery_duty_revision,omitempty"`
 	DeliveryTaskID              string                   `json:"delivery_task_id,omitempty"`
 	View                        protocol.UpgradeView     `json:"view"`
 	Manifest                    release.Manifest         `json:"manifest"`

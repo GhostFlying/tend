@@ -93,9 +93,16 @@ func historicalDeliveryExecutionAuthority(ctx context.Context, q store.Querier, 
 	if err := json.Unmarshal([]byte(raw), &duty); err != nil {
 		return nil, err
 	}
+	v.Duty = &duty
+	if duty.Status == "complete" && v.RunID != "" {
+		v.SettledExecution = &protocol.DeliveryExecutionSelector{ExecutionRunID: v.RunID, DutyRevision: v.DutyRevision}
+	}
 	v.Candidate, v.Grant, v.AssignmentEpoch, v.DutyStatus = frozen.IssueDeliveryCandidate, frozen.Authorization, frozen.AssignmentEpoch, duty.Status
 	v.Settlement = &protocol.DeliverySettlementAuthority{Eligible: duty.Status == "complete", ArtifactID: artifact, AcceptanceID: duty.AcceptanceID, UpgradeID: v.UpgradeID, DutyRevision: v.DutyRevision, CurrentDutyRevision: duty.Revision}
 	for _, e := range duty.Evidence {
+		if e.Kind == protocol.WorkItemEvidenceAcceptance {
+			v.Settlement.AcceptanceID = e.Reference
+		}
 		if e.Upgrade != nil {
 			v.Settlement.Upgrade = e.Upgrade
 			v.Settlement.TargetSHA = e.Upgrade.SourceCommit

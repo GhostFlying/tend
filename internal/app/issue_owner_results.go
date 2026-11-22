@@ -42,6 +42,16 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if err != nil {
 		return Outcome{}, err
 	}
+	duty, dutyErr := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
+	if dutyErr != nil && !errors.Is(dutyErr, store.ErrNotFound) {
+		return Outcome{}, dutyErr
+	}
+	if err := requireDeliveryInstance(duty, p.InstanceID); err != nil {
+		return Outcome{}, err
+	}
+	if duty.InstanceID != "" && (duty.Status == "complete" || duty.Status == "report" || duty.Status == "ended") {
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "the identified delivery has settled; use start_next for another independent delivery")
+	}
 	raw, err := json.Marshal(p.Result)
 	if err != nil {
 		return Outcome{}, err
@@ -82,11 +92,8 @@ func submitIssueOwnerResult(ctx context.Context, x *Exec, tx *store.Tx, issue pr
 	if err := checkResultDeliverables(ctx, tx.Q(), domain.Spec{Deliverables: []string{domain.DeliveryReport}, Workspace: workspace}, runID, *p.Result); err != nil {
 		return Outcome{}, err
 	}
-	duty, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, task.TaskID)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(dutyErr, store.ErrNotFound) {
 		duty = protocol.IssueDeliveryDuty{TaskID: task.TaskID, Revision: 1, Status: "preparing", AssignmentEpoch: issue.AssignmentEpoch}
-	} else if err != nil {
-		return Outcome{}, err
 	} else if duty.Status == "complete" || duty.Status == "report" || duty.Status == "ended" {
 		if duty.ExecutionTaskID != "" {
 			execution, err := store.GetTask(ctx, tx.Q(), duty.ExecutionTaskID)

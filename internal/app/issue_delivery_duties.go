@@ -71,15 +71,24 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
-	if issue.Revision != expected {
-		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue changed")
-	}
 	var p protocol.UpdateIssueDeliveryPayload
 	if err := decodePayload(x.Env, &p); err != nil {
 		return Outcome{}, err
 	}
 	if err := p.ValidateInput(); err != nil {
 		return Outcome{}, err
+	}
+	if p.Action == "start_next" {
+		receipt, err := readNextDeliveryReceipt(ctx, tx.Q(), x)
+		if err != nil {
+			return Outcome{}, err
+		}
+		if receipt != nil {
+			return Outcome{Result: receipt.Duty, NoEffect: true}, nil
+		}
+	}
+	if issue.Revision != expected {
+		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue changed")
 	}
 	if p.ExecutionDutyRevision < 0 || p.ExecutionDutyRevision > 0 && (p.Action != "complete" || p.ExecutionRunID == "" || p.ExecutionTaskID == "") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "execution_duty_revision requires complete with the original execution_task_id and execution_run_id")
@@ -90,7 +99,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 	if issue.AssignmentEpoch != p.ExpectedAssignmentEpoch || issue.AssignmentState != "active" {
 		return Outcome{}, protocol.Errorf(protocol.CodeStaleRevision, "Issue assignment changed")
 	}
-	if issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused && !(issue.State == protocol.IssueCancelling && p.Action != "prepare" && p.Action != "resume" && p.Action != "bind" && p.Action != "register_pr") {
+	if issue.State != protocol.IssueActive && issue.State != protocol.IssuePaused && !(issue.State == protocol.IssueCancelling && p.Action != "prepare" && p.Action != "start_next" && p.Action != "resume" && p.Action != "bind" && p.Action != "register_pr") {
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "reopen responsibility before updating delivery")
 	}
 	if strings.TrimSpace(p.Reason) == "" {
@@ -112,7 +121,25 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 	}
-	d, err := loadOrPrepareLiveDeliveryDuty(ctx, tx, issue, p)
+	d, err := store.GetIssueDeliveryDuty(ctx, tx.Q(), issue.IssueID, p.TaskID)
+	switch {
+	case err != nil && !errors.Is(err, store.ErrNotFound):
+		return Outcome{}, err
+	case p.Action == "start_next":
+		d, err = startNextDelivery(ctx, x, tx, issue, p, d)
+	default:
+		if err := requireDeliveryInstance(d, p.InstanceID); err != nil {
+			return Outcome{}, err
+		}
+		if p.Action == "prepare" || p.Action == "resume" {
+			if err := validateDeliveryPreparationInstance(ctx, tx.Q(), issue.IssueID, d, p); err != nil {
+				return Outcome{}, err
+			}
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			d, err = prepareLiveDeliveryDuty(ctx, tx, issue, p)
+		}
+	}
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -137,7 +164,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			return Outcome{}, err
 		}
 		d.ExecutionTaskID, d.Status = p.ExecutionTaskID, "executing"
-	case "prepare", "resume":
+	case "prepare", "start_next", "resume":
 		// Deferral is an owner disposition independent of candidate freshness.
 		// Preparing or observing a different candidate cannot reopen confirmation.
 		if p.Action == "prepare" && d.Status == "deferred" {
@@ -298,7 +325,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			d.AttentionID = ""
 			d.Reason = p.Reason
 			d.Revision++
-			if err := tx.PutIssueDeliveryDuty(ctx, issue.IssueID, d); err != nil {
+			if err := persistDeliveryDuty(ctx, x, tx, issue.IssueID, p.Action, d); err != nil {
 				return Outcome{}, err
 			}
 			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
@@ -331,7 +358,7 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 			}
 			d.Revision++
 			d.Reason = p.Reason
-			if err := tx.PutIssueDeliveryDuty(ctx, issue.IssueID, d); err != nil {
+			if err := persistDeliveryDuty(ctx, x, tx, issue.IssueID, p.Action, d); err != nil {
 				return Outcome{}, err
 			}
 			out, err := saveCanonicalOwnerDefinition(ctx, x, tx, issueWithNextRevision(issue, x.Now.UnixMilli()), issue.Revision, canonicalOwnerIssueSource(p.IssueSourceReference), p, "issue.delivery_updated")
@@ -442,6 +469,15 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		if d.ExecutionTaskID == "" || d.Candidate == nil {
 			return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "accepted delivery execution is required")
 		}
+		if d.InstanceID != "" && d.ExecutionTaskID == d.TaskID {
+			task, err := store.GetTask(ctx, tx.Q(), d.TaskID)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if task.Kind == protocol.TaskKindIssueManager && (d.ArtifactID == "" || d.ArtifactID != task.CurrentArtifactID) {
+				return Outcome{}, protocol.Errorf(protocol.CodeInvalidTransition, "settlement requires this delivery's own recorded owner result")
+			}
+		}
 		if d.Candidate.Deploy {
 			settlement, err := store.DeliveryDeploymentSettlement(ctx, tx.Q(), d.ExecutionTaskID, x.Now.UnixMilli())
 			if err != nil {
@@ -533,11 +569,11 @@ func (UpdateIssueDelivery) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Ou
 		}
 		d.Status = "complete"
 	default:
-		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "delivery action must be submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
+		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unsupported delivery action")
 	}
 	d.Revision++
 	d.Reason, d.Evidence = p.Reason, evidence
-	if err := tx.PutIssueDeliveryDuty(ctx, issue.IssueID, d); err != nil {
+	if err := persistDeliveryDuty(ctx, x, tx, issue.IssueID, p.Action, d); err != nil {
 		return Outcome{}, err
 	}
 	issue.Revision++

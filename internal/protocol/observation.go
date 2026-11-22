@@ -27,6 +27,8 @@ type RunObservation struct {
 // approval or a record of provider mutations. Its candidate remains frozen even
 // when current policy, owner sources or provider facts invalidate execution.
 type DeliveryExecutionAuthority struct {
+	Duty                   *IssueDeliveryDuty           `json:"duty,omitempty"`
+	SettledExecution       *DeliveryExecutionSelector   `json:"settled_execution,omitempty"`
 	Historical             bool                         `json:"historical,omitempty"`
 	History                []DeliveryExecutionReference `json:"history,omitempty"`
 	HistoryMore            bool                         `json:"history_more,omitempty"`

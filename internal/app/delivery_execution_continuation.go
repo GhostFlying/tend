@@ -63,16 +63,22 @@ func archiveTaskDeliveryForContinuation(ctx context.Context, x *Exec, tx *store.
 			return failure
 		}
 	}
+	artifact := task.CurrentArtifactID
+	if ref, settledArtifact, err := store.SettledSelfDeliveryExecution(ctx, tx.Q(), issue, duty); err != nil {
+		return err
+	} else if ref != nil {
+		artifact = settledArtifact
+	}
 	var run string
 	var generation int64
-	if err := tx.Q().QueryRowContext(ctx, `SELECT r.run_id,r.generation FROM artifacts a JOIN runs r USING(run_id) WHERE a.artifact_id=? AND a.task_id=?`, task.CurrentArtifactID, task.TaskID).Scan(&run, &generation); err != nil {
+	if err := tx.Q().QueryRowContext(ctx, `SELECT r.run_id,r.generation FROM artifacts a JOIN runs r USING(run_id) WHERE a.artifact_id=? AND a.task_id=?`, artifact, task.TaskID).Scan(&run, &generation); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(duty)
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_execution_history(task_id,generation,duty_revision,run_id,issue_id,source_task_id,candidate_json,duty_json,artifact_id,upgrade_id,request_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, task.TaskID, generation, revision, run, issue, source, candidate, string(raw), task.CurrentArtifactID, upgrade, x.Env.RequestID, x.Now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO issue_delivery_execution_history(task_id,generation,duty_revision,run_id,issue_id,source_task_id,candidate_json,duty_json,artifact_id,upgrade_id,request_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, task.TaskID, generation, revision, run, issue, source, candidate, string(raw), artifact, upgrade, x.Env.RequestID, x.Now.UnixMilli()); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM issue_delivery_executions WHERE task_id=?`, task.TaskID); err != nil {

@@ -123,38 +123,11 @@ func TestIssueOwnerResultUsesOneActualIndependentReviewerReport(t *testing.T) {
 	}
 	original := h.task(producer.TaskID).CurrentArtifactID
 	enableOwnerResultReviewer(t, h, runtime)
-	issue = canonicalTaskIssue(t, h, issue.IssueID)
-	spec := testSpec
-	spec.ReviewArtifactID = original
-	spec.Delivery, spec.Deliverables, spec.Workspace = "", []string{domain.DeliveryReport}, domain.Workspace{Mode: domain.WorkspaceTemporary}
-	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/beta"}}
-	p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Independently inspect the original owner findings", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "This independent review reports its actual verdict once"}}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var reviewTask taskResult
-	if err := json.Unmarshal(op.Result, &reviewTask); err != nil {
-		t.Fatal(err)
-	}
-	reviewer, ok := h.claimInputRun(runtime)
-	if !ok || reviewer.TaskID != reviewTask.TaskID || reviewer.Execution == nil || reviewer.Execution.Identity == producer.Execution.Identity {
-		t.Fatal("no independent real reviewer was selected", reviewer)
-	}
-	if op := h.runAs(reviewer, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if op := h.runAs(reviewer, protocol.OpRunsReportWorkspace, protocol.WorkspaceReport{BackendID: reviewer.Workspace.BackendID, Path: t.TempDir(), Baseline: json.RawMessage(`{"files":[]}`)}, ReportWorkspace{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	if op := h.runAs(reviewer, protocol.OpRunsSubmitArtifact, protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Inspected original background, findings and the retained evidence; the requested outcome is satisfied.", ReviewedArtifactID: original, Verdict: protocol.VerdictPassed}}, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	reviewArtifact := h.task(reviewTask.TaskID).CurrentArtifactID
+	reviewTaskID, reviewArtifact := reviewOwnerArtifactForTest(t, h, runtime, issue.IssueID, producer, original)
 	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "report", ReviewerArtifactID: reviewArtifact, IssueControlPayload: protocol.IssueControlPayload{Reason: "Use the actual independent report to settle this result"}}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	if h.count("acceptances") != 0 || h.count("tasks") != 2 || h.task(reviewTask.TaskID).Lifecycle != protocol.TaskCompleted {
+	if h.count("acceptances") != 0 || h.count("tasks") != 2 || h.task(reviewTaskID).Lifecycle != protocol.TaskCompleted {
 		t.Fatal("a report review created another review or a synthetic verdict")
 	}
 	if err := h.store.Read(t.Context(), func(tx *store.ReadTx) error {
@@ -185,7 +158,44 @@ func TestIssueOwnerResultUsesOneActualIndependentReviewerReport(t *testing.T) {
 	}
 }
 
+func reviewOwnerArtifactForTest(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issueID string, producer protocol.Assignment, original string) (string, string) {
+	t.Helper()
+	issue := canonicalTaskIssue(t, h, issueID)
+	spec := testSpec
+	spec.ReviewArtifactID = original
+	spec.Delivery, spec.Deliverables, spec.Workspace = "", []string{domain.DeliveryReport}, domain.Workspace{Mode: domain.WorkspaceTemporary}
+	spec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/beta"}}
+	p := canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Independently inspect the original owner findings", Spec: spec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "This independent review reports its actual verdict once"}}
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, p, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var reviewTask taskResult
+	if err := json.Unmarshal(op.Result, &reviewTask); err != nil {
+		t.Fatal(err)
+	}
+	reviewer, ok := h.claimInputRun(runtime)
+	if !ok || reviewer.TaskID != reviewTask.TaskID || reviewer.Execution == nil || reviewer.Execution.Identity == producer.Execution.Identity {
+		t.Fatal("no independent real reviewer was selected", reviewer)
+	}
+	if op := h.runAs(reviewer, protocol.OpRunsReportStarted, nil, ReportRunStarted{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := h.runAs(reviewer, protocol.OpRunsReportWorkspace, protocol.WorkspaceReport{BackendID: reviewer.Workspace.BackendID, Path: t.TempDir(), Baseline: json.RawMessage(`{"files":[]}`)}, ReportWorkspace{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	if op := h.runAs(reviewer, protocol.OpRunsSubmitArtifact, protocol.ArtifactPayload{Report: &protocol.ResultReport{Body: "Inspected original background, findings and the retained evidence; the requested outcome is satisfied.", ReviewedArtifactID: original, Verdict: protocol.VerdictPassed}}, SubmitArtifact{}); op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	return reviewTask.TaskID, h.task(reviewTask.TaskID).CurrentArtifactID
+}
+
 func ownerBoundDeliveryFixture(t *testing.T, deploy bool) (*harness, protocol.Issue, protocol.Assignment, protocol.IssueDeliveryCandidate, func(string)) {
+	h, _, issue, producer, candidate, register := ownerBoundDeliveryFixtureWithRuntime(t, deploy)
+	return h, issue, producer, candidate, register
+}
+
+func ownerBoundDeliveryFixtureWithRuntime(t *testing.T, deploy bool) (*harness, *protocol.RunnerRuntime, protocol.Issue, protocol.Assignment, protocol.IssueDeliveryCandidate, func(string)) {
 	t.Helper()
 	h, runtime, issue, producer, _ := reviewManagerAssignment(t)
 	enableOwnerResultReviewer(t, h, runtime)
@@ -206,33 +216,8 @@ func ownerBoundDeliveryFixture(t *testing.T, deploy bool) (*harness, protocol.Is
 		candidate.Deployment = &protocol.IssueDeliveryDeployment{ServerInstance: "server", HostIDs: []string{}}
 	}
 	observeDeliveryForTest(t, h, issue.IssueID, candidate, "open", "")
-	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
-		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issue.IssueID, "pr")
-		if err != nil {
-			return err
-		}
-		observation.Observation.CI = &protocol.DeliveryCI{HeadSHA: candidate.HeadSHA, State: "success", Checks: []protocol.DeliveryCheck{{Name: "required", State: "completed", Conclusion: "success"}}}
-		return putDeliveryObservationForTest(tx, t.Context(), observation)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: "pr", TaskID: producer.TaskID}))
-	issue = canonicalTaskIssue(t, h, issue.IssueID)
-	reviewSpec := testSpec
-	reviewSpec.ReviewDeliveryID = "pr"
-	reviewSpec.Delivery, reviewSpec.Deliverables, reviewSpec.Workspace = "", []string{domain.DeliveryReport}, domain.Workspace{Mode: domain.WorkspaceTemporary}
-	reviewSpec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/beta"}}
-	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issue.IssueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Independently review the complete PR", Spec: reviewSpec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "The independent formal review reports once"}}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
-	if op.Status != protocol.OpSucceeded {
-		t.Fatal(op)
-	}
-	var reviewed taskResult
-	if err := json.Unmarshal(op.Result, &reviewed); err != nil {
-		t.Fatal(err)
-	}
-	review := sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: "pr", ReviewerTaskID: reviewed.TaskID}))
-	executeSharedReviewForTest(t, h, runtime, review, reviewed.TaskID, "passed")
-	sharedReviewResult(t, sharedReviewAction(t, h, issue.IssueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: "pr"}))
+	recordOwnerPRChecksForTest(t, h, issue.IssueID, candidate)
+	reviewOwnerPRForTest(t, h, runtime, issue.IssueID, producer.TaskID, candidate.DeliveryID)
 	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "prepare", Candidate: &candidate, ExpectedTaskControlRevision: rev(h.task(producer.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "Present the actual owner's merge candidate"}}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
@@ -241,7 +226,42 @@ func ownerBoundDeliveryFixture(t *testing.T, deploy bool) (*harness, protocol.Is
 	if op := updateDeliveryForTest(t, h, issue.IssueID, protocol.UpdateIssueDeliveryPayload{TaskID: producer.TaskID, Action: "bind", ExecutionTaskID: producer.TaskID, ExpectedTaskControlRevision: rev(h.task(producer.TaskID).ControlRevision), IssueControlPayload: protocol.IssueControlPayload{Reason: "The actual current owner performs this authorized delivery itself"}}); op.Status != protocol.OpSucceeded {
 		t.Fatal(op)
 	}
-	return h, issue, producer, candidate, register
+	return h, runtime, issue, producer, candidate, register
+}
+
+func recordOwnerPRChecksForTest(t *testing.T, h *harness, issueID string, candidate protocol.IssueDeliveryCandidate) {
+	t.Helper()
+	if err := h.store.Write(t.Context(), func(tx *store.Tx) error {
+		observation, err := store.GetDeliveryObservation(t.Context(), tx.Q(), issueID, candidate.DeliveryID)
+		if err != nil {
+			return err
+		}
+		observation.Observation.CI = &protocol.DeliveryCI{HeadSHA: candidate.HeadSHA, State: "success", Checks: []protocol.DeliveryCheck{{Name: "required", State: "completed", Conclusion: "success"}}}
+		return putDeliveryObservationForTest(tx, t.Context(), observation)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func reviewOwnerPRForTest(t *testing.T, h *harness, runtime *protocol.RunnerRuntime, issueID, taskID, deliveryID string) {
+	t.Helper()
+	sharedReviewResult(t, sharedReviewAction(t, h, issueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "link", DeliveryID: deliveryID, TaskID: taskID}))
+	issue := canonicalTaskIssue(t, h, issueID)
+	reviewSpec := testSpec
+	reviewSpec.ReviewDeliveryID = deliveryID
+	reviewSpec.Delivery, reviewSpec.Deliverables, reviewSpec.Workspace = "", []string{domain.DeliveryReport}, domain.Workspace{Mode: domain.WorkspaceTemporary}
+	reviewSpec.AgentSelection = &protocol.TaskAgentSelection{Implementation: protocol.AgentRequirement{CategoryID: "implementer", AgentID: "linux-1/beta"}}
+	op := h.exec(owner, h.env("issues.create_task", protocol.Target{Type: "issue", ID: issueID}, canonicalOwnerTaskPayload{ExpectedAssignmentEpoch: issue.AssignmentEpoch, Title: "Independently review the complete PR", Spec: reviewSpec, IndependentAcceptance: &protocol.IndependentAcceptanceRequest{Required: false, Reason: "The independent formal review reports once"}}, rev(issue.Revision)), CanonicalOwnerTaskCreate{})
+	if op.Status != protocol.OpSucceeded {
+		t.Fatal(op)
+	}
+	var reviewed taskResult
+	if err := json.Unmarshal(op.Result, &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	review := sharedReviewResult(t, sharedReviewAction(t, h, issueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "start", DeliveryID: deliveryID, ReviewerTaskID: reviewed.TaskID}))
+	executeSharedReviewForTest(t, h, runtime, review, reviewed.TaskID, "passed")
+	sharedReviewResult(t, sharedReviewAction(t, h, issueID, protocol.UpdateSharedDeliveryReviewPayload{Action: "record", DeliveryID: deliveryID}))
 }
 
 func TestIssueOwnerBoundDeliveryResultKeepsFrozenExecution(t *testing.T) {

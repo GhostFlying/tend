@@ -24,7 +24,7 @@ func (a *App) CheckUpgradeStart(ctx context.Context, env *protocol.Envelope, c S
 	err := a.store.Read(ctx, func(tx *store.ReadTx) error {
 		r, err := store.GetUpgrade(ctx, tx.Q(), env.Target.ID)
 		if err == nil {
-			if r.StartRequestID != env.RequestID || r.ManifestSHA256 != c.ManifestSHA256 || r.ServerHash != c.ServerHash || r.ReleaseSetSHA256 != c.ReleaseSetSHA256 || r.DeliveryTaskID != c.DeliveryTaskID || r.View.ServerOnly != c.ServerOnly || r.View.ForceMaintenance != c.ForceMaintenance {
+			if r.StartRequestID != env.RequestID || r.ManifestSHA256 != c.ManifestSHA256 || r.ServerHash != c.ServerHash || r.ReleaseSetSHA256 != c.ReleaseSetSHA256 || r.DeliveryTaskID != c.DeliveryTaskID || r.DeliveryDutyRevision != c.DeliveryDutyRevision || r.View.ServerOnly != c.ServerOnly || r.View.ForceMaintenance != c.ForceMaintenance {
 				return protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
 			}
 			raw, err := json.Marshal(r.View)
