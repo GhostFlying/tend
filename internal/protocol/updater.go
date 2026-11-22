@@ -72,6 +72,7 @@ type UpgradeStartRequest struct {
 	// ExecutionRequestID is supplied only by the admitted in-process main tool.
 	ExecutionRequestID   string                         `json:"-"`
 	ParkIdleManagers     bool                           `json:"park_idle_managers,omitempty"`
+	DeliveryDutyRevision int64                          `json:"delivery_duty_revision,omitempty"`
 	DeliveryTaskID       string                         `json:"delivery_task_id,omitempty"`
 	RunnerConfigurations map[string]RunnerConfiguration `json:"runner_configurations,omitempty"`
 	RequestID            string                         `json:"request_id"`

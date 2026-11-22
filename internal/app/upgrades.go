@@ -29,6 +29,7 @@ type StartUpgrade struct {
 	ParkIdleManagers       bool
 	ServerCapabilities     []string
 	DeliveryTaskID         string
+	DeliveryDutyRevision   int64
 	ArtifactSources        map[string]release.SourceIdentity
 	RunnerConfigurations   map[string]protocol.RunnerConfiguration
 	CurrentServerHash      string
@@ -48,7 +49,7 @@ func (StartUpgrade) Authorize(_ context.Context, x *Exec, _ store.Querier) error
 }
 func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome, error) {
 	if prior, err := store.GetUpgrade(ctx, tx.Q(), x.Env.Target.ID); err == nil {
-		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID || prior.View.ServerOnly != c.ServerOnly || prior.View.ForceMaintenance != c.ForceMaintenance {
+		if prior.StartRequestID != x.Env.RequestID || prior.ManifestSHA256 != c.ManifestSHA256 || prior.ServerHash != c.ServerHash || prior.ReleaseSetSHA256 != c.ReleaseSetSHA256 || prior.DeliveryTaskID != c.DeliveryTaskID || prior.DeliveryDutyRevision != c.DeliveryDutyRevision || prior.View.ServerOnly != c.ServerOnly || prior.View.ForceMaintenance != c.ForceMaintenance {
 			return Outcome{}, protocol.Errorf(protocol.CodeConflictPayload, "upgrade identity belongs to another admitted installation")
 		}
 		return Outcome{NoEffect: true, Result: prior.View}, nil
@@ -165,7 +166,7 @@ func (c StartUpgrade) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcome
 	if source, ok := c.ArtifactSources[c.ServerHash]; ok && !source.Modified && validDeliverySHA(source.Commit) {
 		sourceCommit = source.Commit
 	}
-	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{ForceMaintenance: c.ForceMaintenance, ServerOnly: c.ServerOnly, SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
+	r := store.UpgradeRow{InitiatingExecutionID: c.ExecutionRequestID, StartRequestID: x.Env.RequestID, View: protocol.UpgradeView{ForceMaintenance: c.ForceMaintenance, ServerOnly: c.ServerOnly, SourceCommit: sourceCommit, UpgradeID: x.Env.Target.ID, ReleaseID: c.Manifest.ReleaseID, Revision: 1, Status: "running", Phase: "server_draining", CreatedAt: x.Now, UpdatedAt: x.Now, OverallDeadlineMillis: x.Now.Add(20 * time.Minute).UnixMilli(), Hosts: []protocol.UpgradeHostView{}}, DeliveryTaskID: c.DeliveryTaskID, DeliveryDutyRevision: c.DeliveryDutyRevision, Manifest: c.Manifest, ManifestSHA256: c.ManifestSHA256, ManifestSize: c.ManifestSize, ServerHash: c.ServerHash, ServerInstance: c.ServerInstance, DrainMillis: c.DrainMillis, RestartMillis: c.RestartMillis, GrantMillis: c.GrantMillis, Deadline: x.Now.UnixMilli() + c.DrainMillis}
 	r.Deadline = capUpgradeDeadline(&r, r.Deadline)
 	r.ReleaseSet, r.ReleaseSetSHA256, r.ReleaseSetSize = c.ReleaseSet, c.ReleaseSetSHA256, c.ReleaseSetSize
 	if needsSelfUpdate(r) {

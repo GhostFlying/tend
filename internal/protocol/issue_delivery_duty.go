@@ -31,22 +31,31 @@ type IssueDeliveryCandidate struct {
 	Deployment      *IssueDeliveryDeployment     `json:"deployment,omitempty"`
 }
 
+// DeliveryExecutionSelector identifies an original execution even when the
+// same Task or Run has delivered more than once.
+type DeliveryExecutionSelector struct {
+	ExecutionRunID string `json:"execution_run_id"`
+	DutyRevision   int64  `json:"duty_revision"`
+}
+
 // IssueDeliveryDuty survives plan edits, notification review and task completion.
 type IssueDeliveryDuty struct {
-	PolicyAttentionID string                  `json:"policy_attention_id,omitempty"`
-	Authorization     *IssueDeliveryGrant     `json:"authorization,omitempty"`
-	AssignmentEpoch   int64                   `json:"assignment_epoch,omitempty"`
-	TaskID            string                  `json:"task_id"`
-	EventID           string                  `json:"event_id"`
-	AcceptanceID      string                  `json:"acceptance_id,omitempty"`
-	ArtifactID        string                  `json:"artifact_id,omitempty"`
-	Revision          int64                   `json:"revision"`
-	Status            string                  `json:"status"`
-	Candidate         *IssueDeliveryCandidate `json:"candidate,omitempty"`
-	AttentionID       string                  `json:"attention_id,omitempty"`
-	ExecutionTaskID   string                  `json:"execution_task_id,omitempty"`
-	Reason            string                  `json:"reason,omitempty"`
-	Evidence          []IssueEvidence         `json:"evidence,omitempty"`
+	InstanceID        string                     `json:"delivery_instance_id,omitempty"`
+	PreviousExecution *DeliveryExecutionSelector `json:"previous_execution,omitempty"`
+	PolicyAttentionID string                     `json:"policy_attention_id,omitempty"`
+	Authorization     *IssueDeliveryGrant        `json:"authorization,omitempty"`
+	AssignmentEpoch   int64                      `json:"assignment_epoch,omitempty"`
+	TaskID            string                     `json:"task_id"`
+	EventID           string                     `json:"event_id"`
+	AcceptanceID      string                     `json:"acceptance_id,omitempty"`
+	ArtifactID        string                     `json:"artifact_id,omitempty"`
+	Revision          int64                      `json:"revision"`
+	Status            string                     `json:"status"`
+	Candidate         *IssueDeliveryCandidate    `json:"candidate,omitempty"`
+	AttentionID       string                     `json:"attention_id,omitempty"`
+	ExecutionTaskID   string                     `json:"execution_task_id,omitempty"`
+	Reason            string                     `json:"reason,omitempty"`
+	Evidence          []IssueEvidence            `json:"evidence,omitempty"`
 }
 
 type UpdateIssueDeliveryPayload struct {
@@ -66,7 +75,11 @@ type UpdateIssueDeliveryPayload struct {
 	ExecutionRunID              string `json:"execution_run_id,omitempty"`
 	ExecutionDutyRevision       int64  `json:"execution_duty_revision,omitempty"`
 	ExpectedTaskControlRevision *int64 `json:"expected_task_control_revision,omitempty"`
-	// register_pr, submit_result, prepare, resume, recover_preparation, bind, report, end, complete.
+	// start_next uses the exact predecessor. Subsequent commands for the
+	// new duty must carry its returned InstanceID.
+	PreviousExecution *DeliveryExecutionSelector `json:"previous_execution,omitempty"`
+	InstanceID        string                     `json:"delivery_instance_id,omitempty"`
+	// register_pr, submit_result, prepare, start_next, resume, recover_preparation, bind, report, end, complete.
 	PRURL     string                  `json:"pr_url,omitempty"`
 	Action    string                  `json:"action"`
 	Candidate *IssueDeliveryCandidate `json:"candidate,omitempty"`

@@ -98,6 +98,9 @@ func deliveryObservationBaseline(ctx context.Context, q store.Querier, issue str
 // It does not trust the worker's prose or treat a resolved technical question as
 // user permission. The slot, owner epoch, exact answer and source are rechecked.
 func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c StartUpgrade) (*protocol.IssueDeliveryCandidate, error) {
+	if c.DeliveryDutyRevision < 0 || c.DeliveryTaskID == "" && c.DeliveryDutyRevision != 0 {
+		return nil, protocol.Errorf(protocol.CodeInvalidRequest, "delivery_duty_revision requires a delivery Task")
+	}
 	if c.DeliveryTaskID == "" {
 		return nil, nil
 	}
@@ -142,6 +145,9 @@ func checkDeliveryUpgradeStart(ctx context.Context, x *Exec, q store.Querier, c 
 	d, err := store.GetIssueDeliveryDuty(ctx, q, issue, source)
 	if err != nil {
 		return nil, err
+	}
+	if (d.InstanceID != "" || c.DeliveryDutyRevision != 0) && c.DeliveryDutyRevision != revision {
+		return nil, protocol.Errorf(protocol.CodeStaleRevision, "installation requires the currently bound delivery_duty_revision")
 	}
 	if d.ExecutionTaskID != c.DeliveryTaskID || d.Revision != revision || d.Status != "executing" {
 		return nil, protocol.Errorf(protocol.CodeStaleRevision, "delivery execution was superseded")

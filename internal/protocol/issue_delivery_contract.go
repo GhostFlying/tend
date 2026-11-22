@@ -14,6 +14,7 @@ func deliveryActions() []deliveryActionFields {
 		{"register_pr", []string{"pr_url"}, nil},
 		{"submit_result", []string{"result"}, []string{"run_id", "independent_acceptance"}},
 		{"prepare", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
+		{"start_next", []string{"task_id", "candidate", "previous_execution", "expected_task_control_revision"}, []string{"run_id"}},
 		{"resume", []string{"task_id"}, []string{"candidate", "expected_task_control_revision", "acceptance_id", "reviewer_artifact_id"}},
 		{"recover_preparation", []string{"task_id", "expected_task_control_revision"}, nil},
 		{"bind", []string{"task_id", "execution_task_id", "expected_task_control_revision"}, []string{"acceptance_id", "reviewer_artifact_id"}},
@@ -26,7 +27,13 @@ func deliveryActions() []deliveryActionFields {
 // ValidateInput is shared by App and the native CLI; generated schemas derive
 // their action alternatives from exactly the same field groups below.
 func (p UpdateIssueDeliveryPayload) ValidateInput() error {
-	present := map[string]bool{"pr_url": p.PRURL != "", "task_id": p.TaskID != "", "result": p.Result != nil, "run_id": p.RunID != "", "independent_acceptance": p.IndependentAcceptance != nil, "candidate": p.Candidate != nil, "expected_task_control_revision": p.ExpectedTaskControlRevision != nil, "execution_task_id": p.ExecutionTaskID != "", "execution_run_id": p.ExecutionRunID != "", "execution_duty_revision": p.ExecutionDutyRevision != 0, "upgrade_id": p.UpgradeID != "", "acceptance_id": p.AcceptanceID != "", "reviewer_artifact_id": p.ReviewerArtifactID != ""}
+	present := map[string]bool{"previous_execution": p.PreviousExecution != nil, "pr_url": p.PRURL != "", "task_id": p.TaskID != "", "result": p.Result != nil, "run_id": p.RunID != "", "independent_acceptance": p.IndependentAcceptance != nil, "candidate": p.Candidate != nil, "expected_task_control_revision": p.ExpectedTaskControlRevision != nil, "execution_task_id": p.ExecutionTaskID != "", "execution_run_id": p.ExecutionRunID != "", "execution_duty_revision": p.ExecutionDutyRevision != 0, "upgrade_id": p.UpgradeID != "", "acceptance_id": p.AcceptanceID != "", "reviewer_artifact_id": p.ReviewerArtifactID != ""}
+	if p.PreviousExecution != nil && (p.Action != "start_next" || p.PreviousExecution.DutyRevision <= 0 || p.PreviousExecution.ExecutionRunID == "") {
+		return Errorf(CodeInvalidRequest, "previous_execution requires start_next and its original execution_run_id and positive duty_revision")
+	}
+	if p.Action == "start_next" && (p.InstanceID != "" || p.AcceptanceID != "" || p.ReviewerArtifactID != "" || p.ExecutionTaskID != "" || p.ExecutionRunID != "" || p.UpgradeID != "") {
+		return Errorf(CodeInvalidRequest, "start_next requires a new candidate and cannot inherit execution, acceptance or upgrade references")
+	}
 	if p.PRURL != "" && p.Action != "register_pr" {
 		return Errorf(CodeInvalidRequest, "pr_url requires register_pr")
 	}
@@ -60,7 +67,7 @@ func (p UpdateIssueDeliveryPayload) ValidateInput() error {
 		}
 		return nil
 	}
-	return Errorf(CodeInvalidRequest, "action must be register_pr, submit_result, prepare, resume, recover_preparation, bind, report, end or complete")
+	return Errorf(CodeInvalidRequest, "action must be register_pr, submit_result, prepare, start_next, resume, recover_preparation, bind, report, end or complete")
 }
 
 func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {
@@ -73,6 +80,10 @@ func (UpdateIssueDeliveryPayload) JSONSchemaConstraints() map[string]any {
 		map[string]any{
 			"if":   map[string]any{"required": []string{"pr_url"}},
 			"then": map[string]any{"properties": map[string]any{"action": map[string]any{"const": "register_pr"}}},
+		},
+		map[string]any{
+			"if":   map[string]any{"required": []string{"previous_execution"}},
+			"then": map[string]any{"properties": map[string]any{"action": map[string]any{"const": "start_next"}}},
 		},
 		map[string]any{"properties": map[string]any{"reason": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"reason"}},
 		map[string]any{"if": map[string]any{"required": []string{"action", "execution_run_id"}, "properties": map[string]any{"action": map[string]any{"type": "string", "const": "complete"}}}, "then": map[string]any{"required": []string{"execution_task_id"}}},

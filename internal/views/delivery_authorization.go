@@ -26,6 +26,16 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 		Scan(&v.IssueID, &v.SourceTaskID, &v.DutyRevision, &raw, &v.UpgradeID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if len(v.History) > 0 {
+			issueID, err := store.GetTaskIssueOwner(ctx, q, task)
+			if err != nil {
+				return nil, err
+			}
+			duty, err := store.GetIssueDeliveryDuty(ctx, q, issueID, task)
+			if err == nil {
+				v.Duty = &duty
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return nil, err
+			}
 			v.InvalidReason = "no_current_delivery_execution; select the Task or original Run and duty_revision to read historical facts"
 			return v, nil
 		}
@@ -68,6 +78,11 @@ func DeliveryExecutionAuthority(ctx context.Context, q store.Querier, task strin
 		return nil, err
 	}
 	v.CurrentDutyRevision, v.DutyStatus = duty.Revision, duty.Status
+	v.Duty = &duty
+	v.SettledExecution, _, err = store.SettledSelfDeliveryExecution(ctx, q, v.IssueID, duty)
+	if err != nil {
+		return nil, err
+	}
 	v.Settlement, err = store.DeliveryDeploymentSettlement(ctx, q, task, 0)
 	if err != nil && protocol.CodeOf(err) == protocol.CodeInternal {
 		return nil, err

@@ -157,6 +157,9 @@ func DeliveryDeploymentSettlement(ctx context.Context, q Querier, taskID string,
 	if batch.DeliveryTaskID != "" && batch.DeliveryTaskID != taskID && frozen.Reconciliation == nil {
 		return fail("original_upgrade_changed", protocol.CodeStaleRevision, "the controlled upgrade belongs to another delivery execution")
 	}
+	if batch.DeliveryDutyRevision != 0 && frozen.Reconciliation == nil && batch.DeliveryDutyRevision != revision {
+		return fail("original_upgrade_changed", protocol.CodeStaleRevision, "the controlled upgrade belongs to another delivery revision")
+	}
 	if v.TargetSHA == "" && frozen.ProviderState == "open" && batch.DeliveryTaskID == taskID {
 		// Typed upgrade admission already verified the original merge against
 		// this execution before freezing its installed source. Do not require

@@ -184,21 +184,22 @@ func (c *Controller) Start(ctx context.Context, r protocol.UpgradeStartRequest) 
 		}
 	}
 	payload, err := json.Marshal(struct {
-		ReleaseSetSHA256 string                                  `json:"release_set_sha256,omitempty"`
-		DeliveryTaskID   string                                  `json:"delivery_task_id,omitempty"`
-		ReleaseID        string                                  `json:"release_id"`
-		ManifestSHA256   string                                  `json:"manifest_sha256"`
-		Configurations   map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
-		ForceMaintenance bool                                    `json:"force_maintenance,omitempty"`
-		ServerOnly       bool                                    `json:"server_only,omitempty"`
-		ParkIdleManagers bool                                    `json:"park_idle_managers,omitempty"`
-	}{bundle.SetSHA256, r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations, r.ForceMaintenance, r.ServerOnly, r.ParkIdleManagers})
+		ReleaseSetSHA256     string                                  `json:"release_set_sha256,omitempty"`
+		DeliveryDutyRevision int64                                   `json:"delivery_duty_revision,omitempty"`
+		DeliveryTaskID       string                                  `json:"delivery_task_id,omitempty"`
+		ReleaseID            string                                  `json:"release_id"`
+		ManifestSHA256       string                                  `json:"manifest_sha256"`
+		Configurations       map[string]protocol.RunnerConfiguration `json:"configurations,omitempty"`
+		ForceMaintenance     bool                                    `json:"force_maintenance,omitempty"`
+		ServerOnly           bool                                    `json:"server_only,omitempty"`
+		ParkIdleManagers     bool                                    `json:"park_idle_managers,omitempty"`
+	}{bundle.SetSHA256, r.DeliveryDutyRevision, r.DeliveryTaskID, bundle.Manifest.ReleaseID, bundle.ManifestSHA256, r.RunnerConfigurations, r.ForceMaintenance, r.ServerOnly, r.ParkIdleManagers})
 	if err != nil {
 		return protocol.UpgradeView{}, err
 	}
 	zero := int64(0)
 	env := &protocol.Envelope{RequestID: r.RequestID, Operation: "upgrades.start", Target: protocol.Target{Type: "upgrade", ID: r.UpgradeID}, ExpectedControlRevision: &zero, Payload: payload, Reason: "Start the verified immutable local release through the service updater."}
-	command := app.StartUpgrade{ForceMaintenance: r.ForceMaintenance, ServerOnly: r.ServerOnly, ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
+	command := app.StartUpgrade{ForceMaintenance: r.ForceMaintenance, ServerOnly: r.ServerOnly, ExecutionRequestID: r.ExecutionRequestID, ParkIdleManagers: r.ParkIdleManagers, DeliveryTaskID: r.DeliveryTaskID, DeliveryDutyRevision: r.DeliveryDutyRevision, ArtifactSources: sources, RunnerConfigurations: r.RunnerConfigurations, CurrentServerHash: c.cfg.BinarySHA256, Manifest: bundle.Manifest, ManifestSHA256: bundle.ManifestSHA256, ManifestSize: int64(len(bundle.ManifestBytes)), ServerHash: server.SHA256, ServerInstance: c.cfg.Instance, DrainMillis: c.cfg.DrainMillis, RestartMillis: c.cfg.RestartMillis, GrantMillis: c.cfg.GrantMillis}
 	command.ReleaseSet, command.ReleaseSetSHA256, command.ReleaseSetSize = bundle.Set, bundle.SetSHA256, int64(len(bundle.SetBytes))
 	step = "preflight"
 	recorded, err := c.app.CheckUpgradeStart(ctx, env, command)

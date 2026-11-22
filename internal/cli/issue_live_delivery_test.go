@@ -187,3 +187,28 @@ func TestIssueContributionDeliverySettlementCLIPreservesOriginalRequest(t *testi
 		t.Fatal("settlement replay performed implicit lookup or binding", code, e.errOut.String())
 	}
 }
+
+func TestIssueIndependentDeliveryCLIExportsOriginalPredecessorAndControls(t *testing.T) {
+	f := newFakeServer(t)
+	e := newTestEnv(t, f.srv.URL)
+	taskRevision := int64(11)
+	want := protocol.UpdateIssueDeliveryPayload{
+		Action: "start_next", TaskID: "same-task", RunID: "current-owner-run", ExpectedTaskControlRevision: &taskRevision,
+		PreviousExecution:   &protocol.DeliveryExecutionSelector{ExecutionRunID: "original-owner-run", DutyRevision: 8},
+		Candidate:           &protocol.IssueDeliveryCandidate{DeliveryID: "independent-pr", URL: "https://github.com/example/repo/pull/2"},
+		IssueControlPayload: protocol.IssueControlPayload{ExpectedAssignmentEpoch: 3, Reason: "Open this independently reviewed delivery"},
+	}
+	input, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := e.main("issue", "update-delivery", "original-issue", "--revision", "7", "--epoch", "3", "--data", string(input), "--dry-run"); code != exitOK {
+		t.Fatal(code, e.errOut.String())
+	}
+	var saved protocol.Envelope
+	var got protocol.UpdateIssueDeliveryPayload
+	if json.Unmarshal(e.out.Bytes(), &saved) != nil || json.Unmarshal(saved.Payload, &got) != nil || !reflect.DeepEqual(got, want) ||
+		saved.Operation != "issues.update_delivery" || saved.Target.ID != "original-issue" || saved.ExpectedControlRevision == nil || *saved.ExpectedControlRevision != 7 || len(f.requests) != 0 {
+		t.Fatal("dry-run lost the original predecessor or current controls", saved, got)
+	}
+}

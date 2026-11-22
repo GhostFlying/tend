@@ -241,3 +241,20 @@ func TestForceMaintenanceIsExplicitOnStart(t *testing.T) {
 		}
 	}
 }
+
+func TestUpgradeCLIUsesTheExactIndependentDeliveryRevision(t *testing.T) {
+	e := newTestEnv(t, "")
+	if code := e.main("upgrade", "start", "--dry-run", "--delivery-task", "continuing-task", "--delivery-duty-revision", "17"); code != exitOK {
+		t.Fatal(code, e.errOut)
+	}
+	var output struct {
+		Request protocol.UpgradeStartRequest `json:"request"`
+	}
+	if err := json.Unmarshal(e.out.Bytes(), &output); err != nil || output.Request.DeliveryTaskID != "continuing-task" || output.Request.DeliveryDutyRevision != 17 {
+		t.Fatal(output, err)
+	}
+	e = newTestEnv(t, "")
+	if code := e.main("upgrade", "start", "--dry-run", "--delivery-duty-revision", "17"); code != exitUsage {
+		t.Fatal("accepted an unbound revision", code, e.errOut)
+	}
+}

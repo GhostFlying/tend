@@ -301,6 +301,12 @@ export type UpdateIssueDeliveryPayload1 =
     }
   | {
       /**
+       * Uses task_id, candidate, previous_execution, expected_task_control_revision, run_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
+       */
+      action: "start_next";
+    }
+  | {
+      /**
        * Uses task_id, candidate, expected_task_control_revision, acceptance_id, reviewer_artifact_id. Existing common validation still applies; current duty state determines conditional candidate and Task requirements.
        */
       action: "resume";
@@ -1336,10 +1342,12 @@ export interface IssueDeliveryDuty {
   attention_id?: string;
   authorization?: IssueDeliveryGrant;
   candidate?: IssueDeliveryCandidate;
+  delivery_instance_id?: string;
   event_id: string;
   evidence?: IssueEvidence[];
   execution_task_id?: string;
   policy_attention_id?: string;
+  previous_execution?: DeliveryExecutionSelector;
   reason?: string;
   revision: number;
   status: string;
@@ -1393,6 +1401,14 @@ export interface IssueDeliveryReconciliation {
   evidence_task_id: string;
   source_commit?: string;
   upgrade_id: string;
+}
+/**
+ * This interface was referenced by `TendAPI`'s JSON-Schema
+ * via the `definition` "DeliveryExecutionSelector".
+ */
+export interface DeliveryExecutionSelector {
+  duty_revision: number;
+  execution_run_id: string;
 }
 /**
  * This interface was referenced by `TendAPI`'s JSON-Schema
@@ -5260,6 +5276,7 @@ export interface DeliveryExecutionAuthority {
   control_revision: number;
   current_assignment_epoch: number;
   current_duty_revision: number;
+  duty?: IssueDeliveryDuty;
   duty_revision: number;
   duty_status: string;
   grant?: IssueDeliveryGrant;
@@ -5274,6 +5291,7 @@ export interface DeliveryExecutionAuthority {
   provider?: ObservedDeliveryProvider;
   role?: RunRole;
   run_id?: string;
+  settled_execution?: DeliveryExecutionSelector;
   settlement?: DeliverySettlementAuthority;
   shared_review?: ObservedDeliveryReview;
   source: string;
@@ -7889,6 +7907,7 @@ export interface UpdateIssueDeliveryPayload2 {
   acceptance_id?: string;
   action: string;
   candidate?: IssueDeliveryCandidate;
+  delivery_instance_id?: string;
   execution_duty_revision?: number;
   execution_run_id?: string;
   execution_task_id?: string;
@@ -7897,6 +7916,7 @@ export interface UpdateIssueDeliveryPayload2 {
   expected_task_control_revision?: number;
   independent_acceptance?: IndependentAcceptanceRequest;
   pr_url?: string;
+  previous_execution?: DeliveryExecutionSelector;
   proposed_implementation_scope?: string;
   reason?: string;
   result?: ArtifactPayload;
