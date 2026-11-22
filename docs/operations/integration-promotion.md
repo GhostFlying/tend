@@ -17,6 +17,17 @@ strict `check`。开启 intake 前用试点 PR 确认规则与实际检查一致
 如果已有 PR 缺少该状态，维护者可从 `main` 运行 `main-route.yml` 并传入当前
 PR head 的完整 SHA。
 
+## 定时发起提升
+
+`integration-promotion.yml` 在 `main` 上每 5 分钟检查一轮，也可从 Actions 手动运行。
+有 3 个待提升 PR 或首个等待满 15 分钟时，工作流发起一条提升 PR。
+已有开放批次时保留原 PR。GitHub 可能延迟定时运行。
+
+仓库 Actions secret `TEND_INTEGRATION_PAT` 使用只覆盖本仓库的细粒度 PAT，
+需要 Contents、Pull requests 和 Workflows 的读写权限，以便创建 PR 并重放
+工作流文件改动。该身份发起的 PR 走现有的 `main-route` 和全量 `check`。
+维护者继续完成独立审阅并在获得授权后合入。轮换 PAT 时更新同名 secret。
+
 ## 维护者操作
 
 从可信的仓库 checkout 执行，`origin` 指向 GitHub，Git 使用维护者现有身份。
