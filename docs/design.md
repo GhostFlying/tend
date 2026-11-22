@@ -2757,6 +2757,7 @@ Web 账本流沿原事件序号重放，并用 cursor 帧跨过被省略的事�
 连续一段已合入的 PR 组成固定的提升候选，从当前 `main` 重放并运行完整 CI。
 `main` 保留 strict 和线性历史，发布以实际落地提交为准。批次收据记录来源范围，
 GitHub 合入回执及 tree 核对后，下批从已验证截止点开始。
+GitHub Actions 定时发起提升 PR，批次保持独立审阅和授权合入。
 
 `main-route` 独立检查目标为 main 的 PR。普通直达 PR 需要用户授权并使用
 `skip_integration`，仓库的批次提升由原收据检查证明。门禁发布在当前 PR head，
