@@ -427,7 +427,7 @@ func TestFault_ManagerProjectionCannotCrossGapOrUnknownCallback(t *testing.T) {
 }
 
 func TestFault_ManagerProjectionInterruptedToolFromDirectIssueMessage(t *testing.T) {
-	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection", "interrupted-before-close"} {
+	for _, scenario := range []string{"stop-before-projection", "stopped-after-projection", "close-reply-after-projection", "interrupted-before-close", "later-already-applied", "later-already-interrupted"} {
 		t.Run(scenario, func(t *testing.T) {
 			testManagerProjectionInterruptedTool(t, scenario)
 		})
@@ -493,8 +493,36 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 			t.Fatal(op)
 		}
 	}
+	laterApplied := scenario == "later-already-applied" || scenario == "later-already-interrupted"
+	if laterApplied {
+		agent := mainAgent
+		agent.Thread = thread
+		observed := recordToolUsePayload{TurnID: turn, ItemID: "background", ReplyTo: source, Tool: "shell",
+			Output: "original aggregated output", Status: protocol.ToolRunning}
+		command := RecordToolUse{DeliveryTurn: turn}
+		if op := h.exec(agent, h.env(command.Operation(), protocol.Target{Type: "conversation", ID: id}, observed, nil), command); op.Status != protocol.OpSucceeded {
+			t.Fatal(op)
+		}
+		if err := h.app.RecordRolloutEvent(ctx, id, thread, turn, "background", protocol.ManagerEventItemCompleted,
+			json.RawMessage(`{"status":"backgrounded","aggregatedOutput":"original aggregated output"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.app.AcknowledgeManagerEvent(ctx, as.RunID, 3, thread, turn, "background", true); err != nil {
+			t.Fatal(err)
+		}
+		assertManagerProjectionWatermarks(t, h, as.RunID, last, 0)
+		if scenario == "later-already-interrupted" {
+			if err := h.app.SettleOpenTurns(ctx, thread); err != nil {
+				t.Fatal(err)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='background' AND status='interrupted'`) != 1 {
+				t.Fatal("fixture did not preserve the later observation in its interrupted state")
+			}
+		}
+	}
+	stopFirst := scenario == "stop-before-projection" || laterApplied
 	var closeID string
-	if scenario == "stop-before-projection" {
+	if stopFirst {
 		stop()
 	} else {
 		closeID, err = h.app.QueueManagerNative(ctx, as.RunID, "close", json.RawMessage(`{}`))
@@ -524,7 +552,7 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 		}
 	}
 	assertManagerProjectionWatermarks(t, h, as.RunID, last, last)
-	if scenario != "stop-before-projection" {
+	if !stopFirst {
 		if !attachmentInterrupted && h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unfinished' AND status='running'`) != 1 {
 			t.Fatal("the restored start should still be running while the original close is unresolved")
 		}
@@ -570,6 +598,128 @@ func testManagerProjectionInterruptedTool(t *testing.T, scenario string) {
 	if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses WHERE item_id='unrelated' AND status='running'`) != 1 ||
 		h.countWhere(`SELECT COUNT(*) FROM manager_projected_running_tools WHERE run_id=?`, as.RunID) != 0 {
 		t.Fatal("stop changed an unrelated tool or left settled projection tracking")
+	}
+}
+
+func TestFault_ManagerProjectionWaitsForMatchingOriginalTurn(t *testing.T) {
+	for _, arrival := range []string{"native-start", "turn-receipt"} {
+		t.Run(arrival, func(t *testing.T) {
+			h, _, issue, as, _ := reviewManagerAssignment(t)
+			ctx := t.Context()
+			id := as.Manager.ConversationID
+			selection, named, _, err := h.app.HostedRuntimeStartupSelection(ctx, id)
+			if err != nil || !named {
+				t.Fatal(selection, named, err)
+			}
+			const thread, root = "original-thread", "original-root"
+			now := h.clock.Now().UnixMilli()
+			source, request := h.ids.New(protocol.PrefixMessage), h.ids.New(protocol.PrefixRequest)
+			original := store.MainTurn{RequestID: request, MessageID: source, ThreadID: thread, Status: store.TurnStarting}
+			if err := h.store.Write(ctx, func(tx *store.Tx) error {
+				if _, err := tx.InsertMessage(ctx, store.MessageRow{MessageID: source, ConversationID: id,
+					Author: "owner", Body: "Original input", CreatedAt: now}); err != nil {
+					return err
+				}
+				if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: request, ConversationID: id,
+					IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, Selection: selection, CreatedAt: now}); err != nil {
+					return err
+				}
+				return tx.PutMainTurn(ctx, original, now)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			facts := []string{
+				`{"thread_id":"original-thread","root_turn_id":"original-root","native":{"Kind":"item_completed","TurnID":"continued-turn","ItemID":"late-source","ItemType":"commandExecution","Tool":{"Name":"shell","Status":"failed","Output":"retained failure"}}}`,
+				`{"thread_id":"original-thread","native":{"Kind":"item_completed","TurnID":"continued-turn","ItemID":"after-source","ItemType":"reasoning"}}`,
+			}
+			for index, raw := range facts {
+				p := protocol.ManagerNativeEvent{Sequence: int64(index + 1), Body: json.RawMessage(raw)}
+				if op := h.runAs(as, protocol.OpManagerNativeEvent, p, ManagerNativeCommand{OperationName: protocol.OpManagerNativeEvent}); op.Status != protocol.OpSucceeded {
+					t.Fatal(op)
+				}
+			}
+			if op := h.runAs(as, protocol.OpManagerNativeStopped, protocol.ManagerStoppedPayload{Reason: "Original process exited", LastSequence: 2},
+				ManagerNativeCommand{OperationName: protocol.OpManagerNativeStopped}); op.Status != protocol.OpSucceeded {
+				t.Fatal(op)
+			}
+			head := managerProjectionHead{run: as.RunID, sequence: 1}
+			failure := h.app.projectManagerNativeEvent(ctx, head.run, head.sequence)
+			if !errors.Is(failure, errManagerProjectionSourceRequired) {
+				t.Fatal("missing original source did not park the projection", failure)
+			}
+			if err := h.app.recordManagerProjectionFailure(ctx, head, failure); err != nil {
+				t.Fatal(err)
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM manager_event_apply_failures WHERE run_id=? AND seq=1 AND retry_at=0 AND failure_code=?`,
+				as.RunID, managerProjectionSourceRequired) != 1 {
+				t.Fatal("missing source was not stored as a dependency")
+			}
+			// Matching turn text alone is insufficient. Another Run's admitted
+			// source and this Run's different root both leave the head parked.
+			if err := h.store.Write(ctx, func(tx *store.Tx) error {
+				for _, candidate := range []struct {
+					run, turn string
+				}{{"different-run", root}, {as.RunID, "different-root"}} {
+					otherRequest := h.ids.New(protocol.PrefixRequest)
+					other := selection
+					other.RunnerRunID = candidate.run
+					if err := tx.InsertHostedExecution(ctx, store.HostedExecution{ID: otherRequest, ConversationID: id,
+						IssueID: issue.IssueID, AssignmentEpoch: issue.AssignmentEpoch, Selection: other, CreatedAt: now}); err != nil {
+						return err
+					}
+					if err := tx.PutMainTurn(ctx, store.MainTurn{RequestID: otherRequest, MessageID: source, ThreadID: thread,
+						TurnID: candidate.turn, Status: store.TurnInterrupted}, now); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if heads, delay, err := h.app.managerProjectionHeads(ctx); err != nil || len(heads) != 0 || delay != 0 {
+				t.Fatal("an unrelated binding or timer selected the original dependency", heads, delay, err)
+			}
+			assertManagerProjectionWatermarks(t, h, as.RunID, 2, 0)
+
+			recoverCtx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				h.app.RunManagerEventRecovery(recoverCtx, slog.New(slog.DiscardHandler))
+			}()
+			defer func() { cancel(); <-done }()
+			if arrival == "native-start" {
+				err = h.app.ObserveNativeStart(ctx, request, thread, root)
+			} else {
+				original.TurnID, original.Status = root, store.TurnInterrupted
+				err = h.app.PutMainTurn(ctx, original)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitCtx, stopWaiting := context.WithTimeout(ctx, 10*time.Second)
+			defer stopWaiting()
+			for {
+				wake := h.app.Changes().Wait()
+				cursor, err := h.app.ManagerAppliedCursor(waitCtx, as.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cursor == 2 {
+					break
+				}
+				select {
+				case <-wake:
+				case <-waitCtx.Done():
+					t.Fatal("late original binding did not unblock the durable head", cursor)
+				}
+			}
+			if h.countWhere(`SELECT COUNT(*) FROM conversation_tool_uses u JOIN conversation_messages m USING(message_id)
+ WHERE u.item_id='late-source' AND u.output='retained failure' AND m.reply_to=?`, source) != 1 ||
+				h.countWhere(`SELECT COUNT(*) FROM manager_event_apply_failures WHERE run_id=?`, as.RunID) != 0 {
+				t.Fatal("late receipt changed the original attribution, output or dependency")
+			}
+		})
 	}
 }
 

@@ -38,6 +38,7 @@ const (
 )
 
 var errManagerProjectionUnsupported = errors.New("native event needs its original receipt or live consumer")
+var errManagerProjectionSourceRequired = errors.New("native item original message source is unavailable")
 
 func (a *App) projectManagerNativeEvent(ctx context.Context, run string, seq int64) error {
 	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, run, seq), managerProjectionOperation)
@@ -320,6 +321,18 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 		command := RecordToolUse{DeliveryTurn: root}
 		stillRunning := p.Status == protocol.ToolRunning
 		if stillRunning {
+			newer, err := in.newerAppliedToolObservation(ctx, tx.Q(), root)
+			if err != nil {
+				return Outcome{}, err
+			}
+			if newer != 0 {
+				// The old observation still enters the rollout. Its later
+				// applied observation owns the current tool fields.
+				if err := in.rememberRunningTool(ctx, tx, newer); err != nil {
+					return Outcome{}, err
+				}
+				return Outcome{}, settleManagerProjectedTools(ctx, x, tx, in.run)
+			}
 			// A native item_completed can still describe a backgrounded
 			// command. Retain its observed output under the same stop proof.
 			_, stoppedThrough, stopped, err := store.ManagerNativeClose(ctx, tx.Q(), in.run)
@@ -338,14 +351,54 @@ func (in managerProjectionInput) projectMessage(ctx context.Context, x *Exec, tx
 		// Background tool records settle as interrupted when published.
 		// Remember any already visible, running tool in the same transaction
 		// that applies the original running observation.
-		_, err = tx.Exec(ctx, `INSERT INTO manager_projected_running_tools(run_id,seq,message_id)
- SELECT ?,?,message_id FROM conversation_tool_uses
- WHERE thread_id=? AND turn_id=? AND item_id=? AND status='running'`,
-			in.run, in.sequence, e.ThreadID, n.TurnID, n.ItemID)
-		return out, err
+		return out, in.rememberRunningTool(ctx, tx, in.sequence)
 	}
 	p := recordAgentMessagePayload{TurnID: n.TurnID, ItemID: n.ItemID, ReplyTo: source, Body: n.Text, Status: protocol.AssistantCompleted}
 	return applyManagerProjectionMessage(ctx, &projection, tx, p, RecordAgentMessage{DeliveryTurn: root, Reconciled: true})
+}
+
+func (in managerProjectionInput) newerAppliedToolObservation(ctx context.Context, q store.Querier, root string) (int64, error) {
+	e, n := in.event, in.event.Native
+	rows, err := q.QueryContext(ctx, `SELECT seq,body_json FROM manager_native_events
+ WHERE run_id=? AND seq>? AND applied=1 AND json_extract(body_json,'$.thread_id')=?
+ AND json_extract(body_json,'$.native.TurnID')=? AND json_extract(body_json,'$.native.ItemID')=?
+ AND json_extract(body_json,'$.native.Kind')='item_completed' ORDER BY seq DESC`,
+		in.run, in.sequence, e.ThreadID, n.TurnID, n.ItemID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq int64
+		var raw string
+		if err := rows.Scan(&seq, &raw); err != nil {
+			return 0, err
+		}
+		var later managerProjectionEvent
+		if err := store.DecodeJSON(ctx, q, raw, &later); err != nil {
+			return 0, err
+		}
+		if later.Native == nil || later.Native.Tool == nil || later.Native.Tool.Name == "" {
+			continue
+		}
+		laterRoot := later.RootTurn
+		if laterRoot == "" {
+			laterRoot = later.Native.TurnID
+		}
+		if laterRoot == root {
+			return seq, nil
+		}
+	}
+	return 0, rows.Err()
+}
+
+func (in managerProjectionInput) rememberRunningTool(ctx context.Context, tx *store.Tx, sequence int64) error {
+	e, n := in.event, in.event.Native
+	_, err := tx.Exec(ctx, `INSERT INTO manager_projected_running_tools(run_id,seq,message_id)
+ SELECT ?,?,message_id FROM conversation_tool_uses
+ WHERE thread_id=? AND turn_id=? AND item_id=? AND status='running'
+ ON CONFLICT(run_id,seq) DO NOTHING`, in.run, sequence, e.ThreadID, n.TurnID, n.ItemID)
+	return err
 }
 
 func applyManagerProjectionMessage(ctx context.Context, x *Exec, tx *store.Tx, payload any, command Command) (Outcome, error) {
@@ -394,7 +447,7 @@ func (in managerProjectionInput) originalSource(ctx context.Context, q store.Que
 		return "", false, err
 	}
 	if source == "" {
-		return "", false, protocol.Errorf(protocol.CodeUnknownOutcome, "native item original message source is unavailable")
+		return "", false, errManagerProjectionSourceRequired
 	}
 	// A recorded source can be an owner message shared from Main. The
 	// original delivery or stable native item binding proves attribution.

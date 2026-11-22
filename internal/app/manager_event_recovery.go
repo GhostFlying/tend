@@ -16,6 +16,17 @@ type managerProjectionHead struct {
 	sequence int64
 }
 
+const managerProjectionSourceRequired = "original_source_required"
+
+// A parked source dependency becomes runnable only when its original delivery
+// is unambiguous. Recheck it during selection so a concurrent source write
+// cannot get lost between a failed projection and recording its dependency.
+const managerProjectionSourceAvailable = `(SELECT COUNT(*)=1 AND MIN(t.message_id)<>''
+ FROM main_turns t JOIN hosted_executions h ON h.execution_id=t.request_id
+ WHERE t.thread_id=json_extract(e.body_json,'$.thread_id')
+ AND t.turn_id=COALESCE(NULLIF(json_extract(e.body_json,'$.root_turn_id'),''),json_extract(e.body_json,'$.native.TurnID'))
+ AND h.conversation_id=m.conversation_id AND json_extract(h.private_snapshot,'$.runner_run_id')=e.run_id)`
+
 func (a *App) managerProjectionHeads(ctx context.Context) (heads []managerProjectionHead, delay time.Duration, err error) {
 	now := a.now().UnixMilli()
 	err = a.store.Read(ctx, func(tx *store.ReadTx) error {
@@ -24,7 +35,8 @@ func (a *App) managerProjectionHeads(ctx context.Context) (heads []managerProjec
  LEFT JOIN manager_event_apply_failures f ON f.run_id=e.run_id AND f.seq=e.seq
  WHERE e.applied=0 AND `+managerProjectionRecoveryRun+`
  AND NOT EXISTS(SELECT 1 FROM manager_native_events p WHERE p.run_id=e.run_id AND p.seq<e.seq AND p.applied=0)
- AND (f.run_id IS NULL OR f.retry_at>0 AND f.retry_at<=?)
+ AND (f.run_id IS NULL OR f.retry_at>0 AND f.retry_at<=?
+      OR f.failure_code='`+managerProjectionSourceRequired+`' AND `+managerProjectionSourceAvailable+`)
  ORDER BY e.rowid LIMIT 16`, now)
 		if err != nil {
 			return err
@@ -57,17 +69,20 @@ func (a *App) managerProjectionHeads(ctx context.Context) (heads []managerProjec
 func (a *App) recordManagerProjectionFailure(ctx context.Context, h managerProjectionHead, failure error) error {
 	ctx = store.WithWriteOperation(store.WithWriteEvent(ctx, h.run, h.sequence), "manager.event.recovery_failure")
 	code := string(protocol.CodeOf(failure))
-	if errors.Is(failure, errManagerProjectionUnsupported) {
+	retryAt := a.now().Add(time.Second).UnixMilli()
+	switch {
+	case errors.Is(failure, errManagerProjectionUnsupported):
 		code = "original_receipt_required"
+	case errors.Is(failure, errManagerProjectionSourceRequired):
+		code, retryAt = managerProjectionSourceRequired, 0
 	}
-	now := a.now().UnixMilli()
 	return a.write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO manager_event_apply_failures(run_id,seq,attempts,retry_at,failure_code)
  SELECT run_id,seq,1,?,? FROM manager_native_events WHERE run_id=? AND seq=? AND applied=0
  ON CONFLICT(run_id) DO UPDATE SET seq=excluded.seq,
- attempts=CASE WHEN seq=excluded.seq THEN attempts+1 ELSE 1 END,
- retry_at=CASE WHEN seq=excluded.seq AND attempts>=3 THEN 0 ELSE excluded.retry_at END,
- failure_code=excluded.failure_code`, now+1000, code, h.run, h.sequence)
+ attempts=CASE WHEN seq=excluded.seq AND failure_code<>'`+managerProjectionSourceRequired+`' THEN attempts+1 ELSE 1 END,
+ retry_at=CASE WHEN seq=excluded.seq AND failure_code<>'`+managerProjectionSourceRequired+`' AND attempts>=3 THEN 0 ELSE excluded.retry_at END,
+ failure_code=excluded.failure_code`, retryAt, code, h.run, h.sequence)
 		return err
 	})
 }
