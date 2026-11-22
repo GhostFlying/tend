@@ -254,6 +254,8 @@ func runRunnerManager(t *testing.T, delivery, recoverRate, loseStart bool, archi
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if externalWait || projectionFault {
 		wg.Go(func() { s.app.RunManagerEventRecovery(ctx, quiet()) })
 	}
 	category := protocol.DefaultIssueManagerCategory

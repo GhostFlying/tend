@@ -77,6 +77,12 @@ func TestFault_ManagerProjectionRecoversOriginalTail(t *testing.T) {
 	if got := h.run(as.RunID).ObservedState; got != protocol.RunFailed {
 		t.Fatalf("original failure disappeared: %v", got)
 	}
+	runtime.Sequence++
+	premature := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil), Claim{})
+	var beforeRecovery claimResult
+	if err := json.Unmarshal(premature.Result, &beforeRecovery); err != nil || beforeRecovery.Assignment.RunID != "" {
+		t.Fatal("a successor claimed with unapplied events after physical stop", premature, err)
+	}
 
 	if err := h.store.Write(ctx, func(tx *store.Tx) error {
 		_, err := tx.Exec(ctx, `CREATE TRIGGER test_projection_failure BEFORE UPDATE OF applied ON manager_native_events
@@ -200,19 +206,20 @@ func TestFault_ManagerProjectionRecoversOriginalTail(t *testing.T) {
 		t.Fatal("database application issued a native command")
 	}
 	runtime.Sequence++
-	premature := h.exec(runner("linux-1"), h.env(protocol.OpRunnerClaim, protocol.Target{Type: "host", ID: "linux-1"}, protocol.ClaimPayload{Runtime: runtime, WorkspaceProtocol: 1}, nil), Claim{})
-	var beforeClose claimResult
-	if err := json.Unmarshal(premature.Result, &beforeClose); err != nil || beforeClose.Assignment.RunID != "" {
-		t.Fatal("a successor claimed before the original close settled", premature, err)
+	successor := reviewClaimManager(t, h, runtime)
+	if successor.TaskID != as.TaskID || successor.RunID == as.RunID || successor.Generation <= as.Generation {
+		t.Fatal("actual runner did not claim a successor on the original task after independent stop and recovery", successor)
+	}
+	if h.countWhere(`SELECT COUNT(*) FROM manager_native_requests WHERE request_id=? AND status='unknown'`, originalClose) != 1 {
+		t.Fatal("admission altered the original unknown outcome")
 	}
 	close := h.runAs(as, protocol.OpManagerNativeReply, closeReply, ManagerNativeCommand{OperationName: protocol.OpManagerNativeReply})
 	if close.Status != protocol.OpSucceeded {
-		t.Fatal("original close did not settle after recovery", close)
+		t.Fatal("the late close receipt did not settle under its original identity", close)
 	}
-	runtime.Sequence++
-	successor := reviewClaimManager(t, h, runtime)
-	if successor.TaskID != as.TaskID || successor.RunID == as.RunID || successor.Generation <= as.Generation {
-		t.Fatal("actual runner did not claim a successor on the original task", successor)
+	if h.countWhere(`SELECT COUNT(*) FROM runs WHERE task_id=?`, as.TaskID) != 2 ||
+		h.countWhere(`SELECT COUNT(*) FROM leases WHERE run_id=? AND status='active'`, successor.RunID) != 1 {
+		t.Fatal("the original close changed the successor")
 	}
 	if got := h.run(as.RunID).ObservedState; got != protocol.RunFailed {
 		t.Fatalf("projection changed original outcome: %v", got)

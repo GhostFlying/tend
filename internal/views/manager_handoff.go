@@ -78,6 +78,19 @@ UNION ALL SELECT n.issue_id,3,'old_manager_events',r.run_id FROM needed n
  WHERE EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
 ORDER BY 1,2,4`
 
+// A different, current stop fact covers a close RPC for admission after the
+// original lease is released and the physical receipt covers the complete
+// event extent. The original RPC outcome and its later receipt remain intact.
+const managerCloseCoveredByStop = `n.method='close'
+ AND n.status IN ('unknown','completed')
+ AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+ AND r.native_close_id<>'' AND r.native_close_id<>n.request_id
+ AND EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status='released')
+ AND (SELECT COUNT(*)=r.native_close_sequence
+      AND COALESCE(MAX(e.seq),0)=r.native_close_sequence
+      AND COALESCE(MIN(e.seq),1)=1
+      FROM manager_native_events e WHERE e.run_id=r.run_id)`
+
 // The original close and callback result have their own request receipts.
 // Turn start and delivery remain governed by the hosted turn history, which
 // can prove their outcome independently of an uncertain transport response.
@@ -87,6 +100,7 @@ const unresolvedManagerNativeForTask = `EXISTS(
  AND n.method IN ('close','tool_result')
  AND (n.status IN ('pending','started','unknown')
       OR (n.status='completed' AND n.completion_error<>'' AND n.completion_rejected=0))
+ AND NOT (` + managerCloseCoveredByStop + `)
 )`
 
 // ManagerReceiptPending keeps the original executor available for read-only
