@@ -10,13 +10,13 @@ import (
 
 // A backgrounded command can emit item/completed again when its process exits.
 // Both originals remain immutable; only the latter represents a terminal result.
-func rolloutAlreadyRecorded(ctx context.Context, q store.Querier, conversation, thread, turn, item, kind string, data json.RawMessage) (bool, error) {
+func rolloutAlreadyRecorded(ctx context.Context, q store.Querier, conversation, thread, turn, item, kind string, data, appliedCommandResult json.RawMessage) (bool, error) {
 	rows, err := q.QueryContext(ctx, `SELECT data_json FROM agent_rollout_events WHERE conversation_id=? AND thread_id=? AND COALESCE(turn_id,'')=? AND COALESCE(item_id,'')=? AND kind=? ORDER BY seq`, store.ConversationID(conversation), thread, turn, item, kind)
 	if err != nil {
 		return false, err
 	}
 	defer rows.Close()
-	duplicate, terminalAlreadyRecorded := false, false
+	duplicate, unprovenTerminal := false, false
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
@@ -32,8 +32,9 @@ func rolloutAlreadyRecorded(ctx context.Context, q store.Querier, conversation, 
 		case kind == "item_completed" && commandStageAdvance([]byte(before), data):
 			// Preserve the new terminal observation after the background stage.
 		case kind == "item_completed" && commandStageAdvance(data, []byte(before)):
-			// An exact older-stage retry is allowed only if already recorded.
-			terminalAlreadyRecorded = true
+			// An unrecorded older stage can only be recovered when the
+			// existing terminal row agrees with the later applied original.
+			unprovenTerminal = unprovenTerminal || !store.SemanticJSONEqual(before, string(appliedCommandResult))
 		default:
 			return false, protocol.Errorf(protocol.CodeConflictPayload, "native rollout identity has different content")
 		}
@@ -41,7 +42,7 @@ func rolloutAlreadyRecorded(ctx context.Context, q store.Querier, conversation, 
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
-	if terminalAlreadyRecorded && !duplicate {
+	if unprovenTerminal && !duplicate {
 		return false, protocol.Errorf(protocol.CodeConflictPayload, "native rollout identity has different content")
 	}
 	return duplicate, nil

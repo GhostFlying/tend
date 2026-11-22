@@ -639,7 +639,7 @@ func recordMessageState(ctx context.Context, tx *store.Tx, ids protocol.IDGen, m
 
 // insertToolUseEvent records that a tool use was settled outside a
 // request, as a request's record would.
-func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID string, status protocol.ToolStatus, now int64) error {
+func insertToolUseEvent(ctx context.Context, tx *store.Tx, ids protocol.IDGen, messageID string, status protocol.ToolStatus, now int64) error {
 	seq, err := store.GetConversationSeq(ctx, tx.Q(), messageID)
 	if err != nil {
 		return err
@@ -649,7 +649,7 @@ func (a *App) insertToolUseEvent(ctx context.Context, tx *store.Tx, messageID st
 		return fmt.Errorf("app: encode tool use event: %w", err)
 	}
 	_, err = tx.InsertEvent(ctx, store.EventRow{
-		EventID: a.ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
+		EventID: ids.New(protocol.PrefixEvent), Source: "mainthread", ObjectType: "message", ObjectID: messageID,
 		ObjectVersion: seq, Kind: "conversation.tool_use", BodyJSON: string(body), CreatedAt: now,
 	})
 	return err
@@ -976,7 +976,7 @@ func (a *App) SettleOpenTurns(ctx context.Context, threadID string) error {
 		}
 		defer endTools(len(uses))
 		for _, id := range uses {
-			if err := a.insertToolUseEvent(ctx, tx, id, protocol.ToolInterrupted, now); err != nil {
+			if err := insertToolUseEvent(ctx, tx, a.ids, id, protocol.ToolInterrupted, now); err != nil {
 				return err
 			}
 		}
@@ -1041,7 +1041,11 @@ func (a *App) Message(ctx context.Context, messageID string) (store.MessageView,
 // an item adds it to the conversation; later ones update it in place.
 // Its request ID is derived from the item and the phase, so a repeated
 // event records it once.
-type RecordToolUse struct{ DeliveryTurn string }
+type RecordToolUse struct {
+	DeliveryTurn        string
+	interruptRunning    bool
+	preserveInterrupted bool
+}
 
 type recordToolUsePayload struct {
 	TurnID  string              `json:"turn_id"`
@@ -1073,16 +1077,22 @@ func (c RecordToolUse) Apply(ctx context.Context, x *Exec, tx *store.Tx) (Outcom
 	case p.Status != protocol.ToolRunning && p.Status != protocol.ToolCompleted && p.Status != protocol.ToolFailed:
 		return Outcome{}, protocol.Errorf(protocol.CodeInvalidRequest, "unknown tool status %q", p.Status)
 	}
+	if c.interruptRunning && p.Status == protocol.ToolRunning {
+		p.Status = protocol.ToolInterrupted
+	}
 	p.Input = protocol.RedactOwnerToolInput(p.Tool, p.Input)
-	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn); handled || err != nil {
+	if handled, out, err := bufferBackgroundTool(ctx, x, tx, p, c.DeliveryTurn, c.preserveInterrupted); handled || err != nil {
 		return out, err
 	}
-	return recordVisibleToolUse(ctx, x, tx, p)
+	return recordVisibleToolUse(ctx, x, tx, p, c.preserveInterrupted)
 }
 
-func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload) (Outcome, error) {
+func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordToolUsePayload, preserveInterrupted bool) (Outcome, error) {
 	now := x.Now.UnixMilli()
 	u, err := store.GetToolUse(ctx, tx.Q(), p.TurnID, p.ItemID)
+	if preserveInterrupted && u.Status == string(protocol.ToolInterrupted) && p.Status == protocol.ToolRunning {
+		p.Status = protocol.ToolInterrupted
+	}
 	var seq int64
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -1114,6 +1124,8 @@ func recordVisibleToolUse(ctx context.Context, x *Exec, tx *store.Tx, p recordTo
 	case u.Status != string(protocol.ToolRunning) && (u.Status != string(protocol.ToolInterrupted) || p.Status == protocol.ToolRunning):
 		// A late start does not take back a finished use; a result that
 		// arrives after the use was settled as interrupted still counts.
+		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
+	case u.Status == string(p.Status) && u.Tool == p.Tool && u.Input == p.Input && u.Output == p.Output:
 		return Outcome{Result: map[string]any{"message_id": u.MessageID, "status": u.Status}}, nil
 	default:
 		if seq, err = store.GetConversationSeq(ctx, tx.Q(), u.MessageID); err != nil {

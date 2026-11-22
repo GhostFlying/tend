@@ -33,6 +33,12 @@ func TestFault_CommandBackgroundCompletionRetainsBothOriginals(t *testing.T) {
 			t.Fatal("real command identity or terminal conflict was accepted", err)
 		}
 	}
+	if err := h.app.RecordRolloutEvent(t.Context(), "main", "thread", "other-turn", "command", "item_completed", completed); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.RecordRolloutEvent(t.Context(), "main", "thread", "other-turn", "command", "item_completed", background); protocol.CodeOf(err) != protocol.CodeConflictPayload {
+		t.Fatal("ordinary recording accepted an unproven older stage", err)
+	}
 }
 
 func TestFault_ReceiptRecoveryExhaustionParksOriginalTransport(t *testing.T) {

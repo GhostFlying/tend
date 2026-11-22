@@ -338,6 +338,12 @@ func (t *runnerTransport) acknowledge(ctx context.Context, e coordination.Event,
 	return t.app.AcknowledgeManagerEvent(ctx, origin.run, origin.sequence, e.ThreadID, turn, item, flush)
 }
 
+func (t *runnerTransport) ProjectsHistoricalCallback(ctx context.Context, e coordination.Event) bool {
+	// A missing Run binding provides no authority to send tool_result.
+	projects, err := t.app.ManagerProjectsHistoricalCallbacks(ctx, e.SourceRunID)
+	return err != nil || projects
+}
+
 func (t *runnerTransport) ReplayToolResult(ctx context.Context, e coordination.Event) (harness.ToolResult, error) {
 	if e.Call == nil || !e.Historical {
 		return harness.ToolResult{}, errors.New("not a historical callback")

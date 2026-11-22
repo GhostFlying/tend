@@ -78,6 +78,31 @@ UNION ALL SELECT n.issue_id,3,'old_manager_events',r.run_id FROM needed n
  WHERE EXISTS(SELECT 1 FROM manager_native_events e WHERE e.run_id=r.run_id AND e.applied=0)
 ORDER BY 1,2,4`
 
+// A different, current stop fact covers a close RPC for admission after the
+// original lease is released and the physical receipt covers the complete
+// event extent. The original RPC outcome and its later receipt remain intact.
+const managerCloseCoveredByStop = `n.method='close'
+ AND n.status IN ('unknown','completed')
+ AND r.native_closed_at>0 AND r.native_close_activity=r.native_activity
+ AND r.native_close_id<>'' AND r.native_close_id<>n.request_id
+ AND EXISTS(SELECT 1 FROM leases l WHERE l.run_id=r.run_id AND l.status='released')
+ AND (SELECT COUNT(*)=r.native_close_sequence
+      AND COALESCE(MAX(e.seq),0)=r.native_close_sequence
+      AND COALESCE(MIN(e.seq),1)=1
+      FROM manager_native_events e WHERE e.run_id=r.run_id)`
+
+// The original close and callback result have their own request receipts.
+// Turn start and delivery remain governed by the hosted turn history, which
+// can prove their outcome independently of an uncertain transport response.
+const unresolvedManagerNativeForTask = `EXISTS(
+ SELECT 1 FROM runs r JOIN manager_native_requests n USING(run_id)
+ WHERE r.task_id=m.task_id AND r.observed_state IN ('failed','finished')
+ AND n.method IN ('close','tool_result')
+ AND (n.status IN ('pending','started','unknown')
+      OR (n.status='completed' AND n.completion_error<>'' AND n.completion_rejected=0))
+ AND NOT (` + managerCloseCoveredByStop + `)
+)`
+
 // ManagerReceiptPending keeps the original executor available for read-only
 // reconciliation after a fence. A successor's pending task never owns its history.
 func ManagerReceiptPending(ctx context.Context, q store.Querier, m store.IssueManagerTask) (bool, error) {
@@ -98,6 +123,7 @@ func managerReceiptsPending(ctx context.Context, q store.Querier, tasks []string
 	rows, err := q.QueryContext(ctx, `SELECT m.task_id,
  EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=m.issue_id AND e.assignment_epoch=COALESCE(m.assignment_epoch,0) AND (t.status IN ('starting','started','unknown') OR EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id)))
  OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=m.task_id AND r.observed_state IN ('failed','finished') AND e.applied=0)
+ OR `+unresolvedManagerNativeForTask+`
  FROM issue_manager_tasks m JOIN json_each(?) requested ON requested.value=m.task_id`, string(raw))
 	if err != nil {
 		return nil, err
@@ -122,7 +148,7 @@ func ManagerNativeReceiptPending(ctx context.Context, q store.Querier, m store.I
 
 func managerReceiptPending(ctx context.Context, q store.Querier, m store.IssueManagerTask, nativeOnly bool) (bool, error) {
 	var pending bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND (t.status IN ('starting','started','unknown') OR (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) AND (?=0 OR t.status NOT IN ('completed','interrupted','failed') OR NOT EXISTS(SELECT 1 FROM agent_rollout_events o WHERE o.conversation_id=e.conversation_id AND o.thread_id=t.thread_id AND o.turn_id=t.turn_id AND o.kind IN ('native_receipt','native_terminal')))))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0)`, m.IssueID, m.AssignmentEpoch, nativeOnly, m.TaskID).Scan(&pending)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosted_executions e JOIN main_turns t ON t.request_id=e.execution_id WHERE e.issue_id=? AND e.assignment_epoch=? AND (t.status IN ('starting','started','unknown') OR (EXISTS(SELECT 1 FROM native_turn_receipts_pending p WHERE p.request_id=t.request_id) AND (?=0 OR t.status NOT IN ('completed','interrupted','failed') OR NOT EXISTS(SELECT 1 FROM agent_rollout_events o WHERE o.conversation_id=e.conversation_id AND o.thread_id=t.thread_id AND o.turn_id=t.turn_id AND o.kind IN ('native_receipt','native_terminal')))))) OR EXISTS(SELECT 1 FROM manager_native_events e JOIN runs r USING(run_id) WHERE r.task_id=? AND r.observed_state IN ('failed','finished') AND e.applied=0) OR (SELECT `+unresolvedManagerNativeForTask+` FROM issue_manager_tasks m WHERE m.task_id=?)`, m.IssueID, m.AssignmentEpoch, nativeOnly, m.TaskID, m.TaskID).Scan(&pending)
 	return pending, err
 }
 

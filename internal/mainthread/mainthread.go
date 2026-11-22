@@ -440,11 +440,22 @@ func (m *Manager) serve(ctx context.Context) (startupErr error) {
 		}
 	}()
 	lastConcurrencyActivity := int64(0)
+	blockedEventRuns := make(map[string]bool)
 	processEvent := func(ctx context.Context, ev harness.Event) (eventErr error) {
+		// The transport's read cursor may already cover a batch. Once a
+		// durable Issue event fails, leave the unread application tail to
+		// original-sequence recovery, including during final drain.
+		orderedRecovery := remote && !streamText && ev.OriginRunID != "" && ev.OriginSequence > 0
+		if orderedRecovery && blockedEventRuns[ev.OriginRunID] {
+			return nil
+		}
 		ev.AttachmentRunID = diagnostics.runID
 		ctx = diagnostics.eventContext(ctx, ev)
 		defer func() {
 			if eventErr != nil {
+				if orderedRecovery {
+					blockedEventRuns[ev.OriginRunID] = true
+				}
 				diagnostics.eventError(ctx, ev, eventErr)
 			}
 		}()

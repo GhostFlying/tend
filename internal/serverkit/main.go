@@ -685,6 +685,7 @@ func Run(ctx context.Context, cfg Config, secret []byte, deps Dependencies, log 
 	wg.Go(func() { a.RunFollowups(runCtx, log) })
 	wg.Go(func() { a.RunConcurrency(runCtx, log) })
 	wg.Go(func() { a.RunIssueStatusNotifications(runCtx, log) })
+	wg.Go(func() { a.RunManagerEventRecovery(runCtx, log) })
 	if localSocket != "" {
 		wg.Go(func() {
 			var err error
